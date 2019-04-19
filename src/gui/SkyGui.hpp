@@ -17,12 +17,14 @@
  * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
  */
 
+
 #ifndef SKYGUI_HPP
 #define SKYGUI_HPP
 
 #include "StelStyle.hpp"
 #include "StelObject.hpp"
-#include "../StelDataSender.hpp" //datasender header
+
+#include "../aa.hpp"
 
 #include <QDebug>
 #include <QGraphicsWidget>
@@ -35,6 +37,7 @@ class StelButton;
 class BottomStelBar;
 class StelProgressController;
 
+
 //! The informations about the currently selected object
 class InfoPanel : public QGraphicsTextItem
 {
@@ -43,7 +46,6 @@ class InfoPanel : public QGraphicsTextItem
 		//! @todo Bad idea to read from the configuration file in a constructor? --BM
 		InfoPanel(QGraphicsItem* parent);
 		~InfoPanel();
-		StelDataSender stelDataSender();
 		void setInfoTextFilters(const StelObject::InfoStringGroup& aflags) {infoTextFilters=aflags;}
 		const StelObject::InfoStringGroup& getInfoTextFilters(void) const {return infoTextFilters;}
 		void setTextFromObjects(const QList<StelObjectP>&);

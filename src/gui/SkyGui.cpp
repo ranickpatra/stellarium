@@ -31,8 +31,9 @@
 #include <QSettings>
 #include <QTextDocument>
 
-#include <iostream>
-using namespace std;
+// #include <iostream>
+// using namespace std;
+
 
 InfoPanel::InfoPanel(QGraphicsItem* parent) : QGraphicsTextItem("", parent),
 	infoPixmap(Q_NULLPTR)
@@ -186,7 +187,6 @@ void InfoPanel::setTextFromObjects(const QList<StelObjectP>& selected)
 		
 		// to print data of any object selected
 		//cout << s.toLocal8Bit().constData() << endl;
-		stelDataSender.setData();
 		if (qApp->property("text_texture")==true) // CLI option -t given?
 		{
 			// Extract color from HTML.
