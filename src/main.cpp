@@ -55,6 +55,10 @@
 
 #include <clocale>
 
+
+#include <iostream>
+using namespace std;
+
 #ifdef Q_OS_WIN
 	#include <windows.h>
 	//we use WIN32_LEAN_AND_MEAN so this needs to be included

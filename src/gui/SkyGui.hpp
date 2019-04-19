@@ -22,6 +22,7 @@
 
 #include "StelStyle.hpp"
 #include "StelObject.hpp"
+#include "../StelDataSender.hpp" //datasender header
 
 #include <QDebug>
 #include <QGraphicsWidget>
@@ -42,6 +43,7 @@ class InfoPanel : public QGraphicsTextItem
 		//! @todo Bad idea to read from the configuration file in a constructor? --BM
 		InfoPanel(QGraphicsItem* parent);
 		~InfoPanel();
+		StelDataSender stelDataSender();
 		void setInfoTextFilters(const StelObject::InfoStringGroup& aflags) {infoTextFilters=aflags;}
 		const StelObject::InfoStringGroup& getInfoTextFilters(void) const {return infoTextFilters;}
 		void setTextFromObjects(const QList<StelObjectP>&);
