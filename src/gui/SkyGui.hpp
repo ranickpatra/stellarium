@@ -24,8 +24,6 @@
 #include "StelStyle.hpp"
 #include "StelObject.hpp"
 
-#include "../aa.hpp"
-
 #include <QDebug>
 #include <QGraphicsWidget>
 #include <QGraphicsPixmapItem>

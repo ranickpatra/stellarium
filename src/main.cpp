@@ -29,8 +29,6 @@
 #include "StelScriptOutput.hpp"
 #endif
 
-#include "aa.hpp"
-
 #include <QDebug>
 
 #ifndef USE_QUICKVIEW
@@ -161,10 +159,6 @@ int main(int argc, char **argv)
 {
     Q_INIT_RESOURCE(mainRes);
     Q_INIT_RESOURCE(guiRes);
-
-	CAR l;
-	l.gg();
-
 #ifdef Q_OS_WIN
 	// Fix for the speeding system clock bug on systems that use ACPI
 	// See http://support.microsoft.com/kb/821893
