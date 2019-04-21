@@ -185,8 +185,10 @@ void InfoPanel::setTextFromObjects(const QList<StelObjectP>& selected)
 		setFont(font);
 		setHtml(s);
 		
-		// to print data of any object selected
-		//cout << s.toLocal8Bit().constData() << endl;
+		// to extract data of any object selected
+		dataSender.setHTML_data(s.toLocal8Bit().constData());
+
+
 		if (qApp->property("text_texture")==true) // CLI option -t given?
 		{
 			// Extract color from HTML.

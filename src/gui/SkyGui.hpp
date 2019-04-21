@@ -24,6 +24,8 @@
 #include "StelStyle.hpp"
 #include "StelObject.hpp"
 
+#include "../SendData.hpp"		// added for sending data
+
 #include <QDebug>
 #include <QGraphicsWidget>
 #include <QGraphicsPixmapItem>
@@ -50,6 +52,7 @@ class InfoPanel : public QGraphicsTextItem
 		const QString getSelectedText(void) const;
 
 	private:
+		SendData dataSender;
 		StelObject::InfoStringGroup infoTextFilters;
 		QGraphicsPixmapItem *infoPixmap; // Used when text rendering is buggy. Used when CLI option -t given.
 };
