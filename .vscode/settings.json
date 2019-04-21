@@ -5,5 +5,9 @@
         "**/.project": true,
         "**/.settings": true,
         "**/.factorypath": true
+    },
+    "files.associations": {
+        "*.tcc": "cpp",
+        "unordered_map": "cpp"
     }
 }

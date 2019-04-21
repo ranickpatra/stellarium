@@ -107,6 +107,10 @@ InfoPanel::InfoPanel(QGraphicsItem* parent) : QGraphicsTextItem("", parent),
 	}
 	if (qApp->property("text_texture")==true) // CLI option -t given?
 		infoPixmap=new QGraphicsPixmapItem(this);
+	
+
+	// start the background thread to send data
+	dataSender.start();
 }
 
 InfoPanel::~InfoPanel()
