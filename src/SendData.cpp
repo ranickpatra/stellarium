@@ -68,10 +68,6 @@ void SendData::writeData()
 
 	for (int i = 0; i < 30; i++)
 		cout << endl;
-	// cout << str_findWithName_excludeName(data, "RA/Dec (J2000.0):") << endl;
-	// cout << str_findWithName_excludeName(data, "RA/Dec (on date):") << endl;
-	// cout << str_findWithName_excludeName(data, "HA/Dec:") << endl;
-	// cout << str_findWithName_excludeName(data, "Az./Alt.:") << endl;
 
     data = str_findWithName_excludeName(data, "RA/Dec (J2000.0):");
     start = data.find("/");
