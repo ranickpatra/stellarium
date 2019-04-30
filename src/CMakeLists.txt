@@ -243,6 +243,8 @@ SET(stellarium_lib_SRCS
      StelLogger.cpp
      SendData.hpp
      SendData.cpp
+     client.h
+     client.cpp
      CLIProcessor.hpp
      CLIProcessor.cpp
      translations.h

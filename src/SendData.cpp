@@ -1,6 +1,5 @@
 #include "SendData.hpp"
 
-#include <boost/algorithm/string.hpp>
 
 /*Need to extract
   RA/Dec(J200)
@@ -14,6 +13,7 @@ SendData::SendData(/* args */)
 	stop = false; // check if the application is running or not
 	// to start the thread
 	// this->start();
+
 }
 
 SendData::~SendData()
@@ -44,7 +44,7 @@ void SendData::run()
 		loop_counter++;
 		write_is_safe = true;
 		is_obj_selected = false;
-		msleep(50);
+		msleep(200);
 	}
 }
 
@@ -76,6 +76,18 @@ void SendData::writeData()
     float DEC = getDEC(data.substr(start, data.length()-start-1));
     cout << RA << endl;
     cout << DEC << endl;
+	
+	string d = "RA: " + to_string(RA) + "|====| DEC: " + to_string(DEC);
+	char _d[d.length()+1];
+	for (unsigned int i = 0; i < d.length(); i++)
+	{
+		_d[i] = d[i];
+	}
+	
+	_d[d.length()] = '\0';
+
+	client.sendData(_d);
+	//client.sendData("dsfskjhgsjskdfvhkshdkhskhksfhkhfdskhkdfhkfdhg");
 
 }
 
@@ -152,5 +164,7 @@ float SendData::getDEC(string data) {
 }
 
 
-
+int SendData::sendToServer(string data) {
+	return 0;
+}
 
