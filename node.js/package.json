@@ -1,0 +1,5 @@
+{
+    "devDependencies": {
+        "serialport": "^7.1.5"
+    }
+}

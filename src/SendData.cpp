@@ -1,6 +1,6 @@
 #include "SendData.hpp"
 
-#include <boost/algorithm/string.hpp>
+#include <bits/stdc++.h>
 
 /*Need to extract
   RA/Dec(J200)
@@ -11,14 +11,25 @@
 
 SendData::SendData(/* args */)
 {
+	// start the node.js server
+	system("node ../../node.js/server.js &");
+
 	stop = false; // check if the application is running or not
-	// to start the thread
-	// this->start();
+				  // to start the thread
+				  // this->start();
 }
 
 SendData::~SendData()
 {
 	stop = true;
+
+	// stop the thread
+	terminate();
+	qDebug() << "try to stop thread";
+	while (!isFinished())
+	{
+	}
+	if (!isRunning()) qDebug() << "thread is stopped";
 }
 
 void SendData::setHTML_data(string data)
@@ -34,17 +45,23 @@ void SendData::setHTML_data(string data)
 
 void SendData::run()
 {
-	unsigned int loop_counter = 0;
+	unsigned long int loop_counter = 0;
 	while (!stop)
 	{
 		if (is_obj_selected)
 		{
 			writeData();
 		}
+
+		if (loop_counter % 8 == 0)
+		{
+			client.sendData("pet");
+		}
+
 		loop_counter++;
 		write_is_safe = true;
 		is_obj_selected = false;
-		msleep(50);
+		msleep(200);
 	}
 }
 
@@ -66,17 +83,28 @@ void SendData::writeData()
 	data = str_replaceAll(data, "<b>", "");		   // remove <b>
 	data = str_replaceAll(data, "</b>", "");	   // remove </b>
 
-	for (int i = 0; i < 30; i++)
-		cout << endl;
+	data = str_findWithName_excludeName(data, "RA/Dec (J2000.0):");
+	start = data.find("/");
+	float RA = getRA(data.substr(0, start));
+	start++;
+	float DEC = getDEC(data.substr(start, data.length() - start - 1));
 
-    data = str_findWithName_excludeName(data, "RA/Dec (J2000.0):");
-    start = data.find("/");
-    float RA = getRA(data.substr(0, start));
-    start++;
-    float DEC = getDEC(data.substr(start, data.length()-start-1));
-    cout << RA << endl;
-    cout << DEC << endl;
+	string d = to_string(RA) + "_" + to_string(DEC);
+	char _d[d.length() + 1];
+	for (unsigned int i = 0; i < d.length(); i++)
+	{
+		_d[i] = d[i];
+	}
 
+	_d[d.length()] = '\0';
+
+	if (d.compare(prev_d) != 0)
+	{
+		cout << "sdjhfgjdsfjhgsdfskdjfhkdsjhf" << endl;
+		client.sendData(_d);
+	}
+
+	prev_d = d;
 }
 
 // to find position in a string
@@ -117,82 +145,40 @@ string SendData::str_findWithName_excludeName(string data, string str)
 	return data;
 }
 
-
 // get RA value
-float SendData::getRA(string data) {
+float SendData::getRA(string data)
+{
 
-    int flag = 1;
-    string str_h = data.substr(0, data.find("h"));  // get h
-    float h = stof(str_h);  // convert string to float
-    if (h < 0)
-        flag = -1;
-    h *= flag;
-    data = str_replaceAll(data, str_h+"h", ""); // remove hour
-    string str_m = data.substr(0, data.find("m"));  // get m
-    float m = stof(str_m);  // convert string to float
-    data = str_replaceAll(data, str_m+"m", ""); // remove min
-    float s = stof(data.substr(0, data.find("s"))); // get s
-    return (h + m/60 + s/3600) * flag;   // calculate and return
+	int flag = 1;
+	string str_h = data.substr(0, data.find("h")); // get h
+	float h = stof(str_h);						   // convert string to float
+	if (h < 0) flag = -1;
+	h *= flag;
+	data = str_replaceAll(data, str_h + "h", "");   // remove hour
+	string str_m = data.substr(0, data.find("m"));  // get m
+	float m = stof(str_m);							// convert string to float
+	data = str_replaceAll(data, str_m + "m", "");   // remove min
+	float s = stof(data.substr(0, data.find("s"))); // get s
+	return (h + m / 60 + s / 3600) * flag;			// calculate and return
 }
 
 // get dec value
-float SendData::getDEC(string data) {
-    int flag = 1;
-    string str_deg = data.substr(0, data.find("°"));  // get deg(°)
-    float deg = stof(str_deg);  // convert string to float
-    if (deg < 0)
-        flag = -1;
-    deg *= flag;
-    data = str_replaceAll(data, str_deg+"°", ""); // remove deg
-    string str_m = data.substr(0, data.find("'"));  // get min(')
-    float m = stof(str_m);  // convert string to float
-    data = str_replaceAll(data, str_m+"'", ""); // remove min(')
-    float s = stof(data.substr(0, data.find("\""))); // get sec(")
-    return (deg + m/60 + s/3600) * flag;   // calculate and return
+float SendData::getDEC(string data)
+{
+	int flag = 1;
+	string str_deg = data.substr(0, data.find("°")); // get deg(°)
+	float deg = stof(str_deg);						 // convert string to float
+	if (deg < 0) flag = -1;
+	deg *= flag;
+	data = str_replaceAll(data, str_deg + "°", "");  // remove deg
+	string str_m = data.substr(0, data.find("'"));   // get min(')
+	float m = stof(str_m);							 // convert string to float
+	data = str_replaceAll(data, str_m + "'", "");	// remove min(')
+	float s = stof(data.substr(0, data.find("\""))); // get sec(")
+	return (deg + m / 60 + s / 3600) * flag;		 // calculate and return
 }
 
-
-
-
-
-
-
-
-
-
-
-
-/************************************************************************/
-// int casualDEC;
-// int casualRA;
-// void setup()
-// {
-// 	Serial.begin(9600);
-// }
-// String stringOne = "";
-// void loop()
-// {
-
-// 	casualDEC = random(0, 90);
-// 	casualRA = random(0, 24);
-// 	String PROVA = (String)casualDEC;
-// 	String PROVARA = (String)casualRA;
-// 	if (Serial.available())
-// 	{
-// 		while (Serial.available() > 0)
-// 		{
-// 			char a = Serial.read(); // Stores current byte
-// 			stringOne += String(a); // Append current Byte to message String
-// 			delay(10);
-// 		}
-// 		if (stringOne == "#:GR#")
-// 		{ // if command received = get RA do...
-// 			Serial.print(PROVARA + ":00:00#");
-// 		}
-// 		if (stringOne == "#:GD#")
-// 		{ // if command received = get DEC do...
-// 			Serial.print("+" + PROVA + "*00#");
-// 		}
-// 		stringOne = "";
-// 	}
-// }
+int SendData::sendToServer(string data)
+{
+	return 0;
+}

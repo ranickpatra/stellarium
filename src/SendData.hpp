@@ -2,6 +2,8 @@
 #include <string>
 #include <QtCore>
 
+#include "client.h"
+
 using namespace std;
 
 
@@ -11,6 +13,8 @@ private:
     bool write_is_safe = true;
     bool is_obj_selected = false;
     string html_data = "";
+    string prev_d = "";
+    Client client;
 
     void writeData();
     int str_find(string str, string s);
@@ -19,6 +23,7 @@ private:
     string str_findWithName_excludeName(string data, string str);
     float getRA(string data);
     float getDEC(string data);
+    int sendToServer(string data);
 
 public:
     SendData(/* args */);

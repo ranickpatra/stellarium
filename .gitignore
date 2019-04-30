@@ -1,6 +1,7 @@
 builds
 build
 installers
+node.js/node_modules
 .vscode
 .DS_Store
 CMakeLists.txt.user
