@@ -1,6 +1,6 @@
 #include "client.h"
 
-#include <arpa/inet.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,10 +10,12 @@
 using namespace std;
 
 Client::Client() {
-    
+    //create();
 }
 
-Client::~Client() {}
+Client::~Client() {
+    soc_close();
+}
 
 // Create a Socket for server communication
 short Client::SocketCreate(void)
@@ -83,10 +85,9 @@ int Client::SocketReceive(int hSocket, char* Rsp, short RvcSize)
 	return shortRetval;
 }
 
-int Client::sendData(char* data)
-{
-    int hSocket, read_size;
-	struct sockaddr_in server;
+
+int Client::create(void) {
+    
 
 	// Create socket
 	hSocket = SocketCreate();
@@ -97,6 +98,20 @@ int Client::sendData(char* data)
 	}
 
 	printf("Socket is created\n");
+    return 0;
+}
+
+int Client::soc_close(void) {
+    close(hSocket);
+	shutdown(hSocket, 0);
+	shutdown(hSocket, 1);
+	shutdown(hSocket, 2);
+    return 0;
+}
+
+int Client::sendData(char* data)
+{
+    create();   // create a socket
 
 	// Connect to remote server
 	if (SocketConnect(hSocket) < 0)
@@ -114,9 +129,8 @@ int Client::sendData(char* data)
 	// read_size = SocketReceive(hSocket, server_reply, 200);
 	// printf("Server Response : %s\n\n", server_reply);
 
-	close(hSocket);
-	shutdown(hSocket, 0);
-	shutdown(hSocket, 1);
-	shutdown(hSocket, 2);
+    soc_close();        // close connecgtion
+	
 	return 0;
 }
+

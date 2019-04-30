@@ -13,6 +13,7 @@ private:
     bool write_is_safe = true;
     bool is_obj_selected = false;
     string html_data = "";
+    string prev_d = "";
     Client client;
 
     void writeData();

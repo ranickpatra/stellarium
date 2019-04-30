@@ -34,13 +34,20 @@ void SendData::setHTML_data(string data)
 
 void SendData::run()
 {
-	unsigned int loop_counter = 0;
+	unsigned long int loop_counter = 0;
 	while (!stop)
 	{
 		if (is_obj_selected)
 		{
 			writeData();
 		}
+
+		if (loop_counter % 8 == 0)
+		{
+			client.sendData("pet");
+		}
+		
+
 		loop_counter++;
 		write_is_safe = true;
 		is_obj_selected = false;
@@ -66,18 +73,13 @@ void SendData::writeData()
 	data = str_replaceAll(data, "<b>", "");		   // remove <b>
 	data = str_replaceAll(data, "</b>", "");	   // remove </b>
 
-	for (int i = 0; i < 30; i++)
-		cout << endl;
-
     data = str_findWithName_excludeName(data, "RA/Dec (J2000.0):");
     start = data.find("/");
     float RA = getRA(data.substr(0, start));
     start++;
     float DEC = getDEC(data.substr(start, data.length()-start-1));
-    cout << RA << endl;
-    cout << DEC << endl;
-	
-	string d = "RA: " + to_string(RA) + "|====| DEC: " + to_string(DEC);
+    	
+	string d = to_string(RA) + "_" + to_string(DEC);
 	char _d[d.length()+1];
 	for (unsigned int i = 0; i < d.length(); i++)
 	{
@@ -86,8 +88,13 @@ void SendData::writeData()
 	
 	_d[d.length()] = '\0';
 
-	client.sendData(_d);
-	//client.sendData("dsfskjhgsjskdfvhkshdkhskhksfhkhfdskhkdfhkfdhg");
+	if (d.compare(prev_d) != 0)
+	{
+		cout << "sdjhfgjdsfjhgsdfskdjfhkdsjhf" << endl;
+		client.sendData(_d);
+	}
+	
+	prev_d = d;
 
 }
 
