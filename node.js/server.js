@@ -45,8 +45,7 @@ function onClientConnected(sock) {
     } else if(mySerialPort.isOpen) {  // if port is open
         mySerialPort.flush();
         mySerialPort.write(data, (err, result) => {
-            console.log("err: "+err);
-            console.log("result: "+result);
+            // code
         });
     }
 
@@ -61,13 +60,13 @@ function onClientConnected(sock) {
 };
 
 // watch dog
-setInterval(function() {
+var inyterval = setInterval(function() {
 
     if (!pet && first_pet) {
         if(mySerialPort.isOpen)
             mySerialPort.close();   // close serial port
-        console.log("server closed................");
         server.close();     // close server
+        clearInterval(inyterval); // clear the interval
     }
     pet = false;
 }, 2500);   // interval 2000 ms

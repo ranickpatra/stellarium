@@ -1,7 +1,5 @@
 {
-    "name": "server serial",
-    "version": "1.0.0",
-    "devependencies": {
+    "devDependencies": {
         "serialport": "^7.1.5"
     }
 }

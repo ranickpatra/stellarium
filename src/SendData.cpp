@@ -1,5 +1,6 @@
 #include "SendData.hpp"
 
+#include <bits/stdc++.h>
 
 /*Need to extract
   RA/Dec(J200)
@@ -10,15 +11,25 @@
 
 SendData::SendData(/* args */)
 {
-	stop = false; // check if the application is running or not
-	// to start the thread
-	// this->start();
+	// start the node.js server
+	system("node ../../node.js/server.js &");
 
+	stop = false; // check if the application is running or not
+				  // to start the thread
+				  // this->start();
 }
 
 SendData::~SendData()
 {
 	stop = true;
+
+	// stop the thread
+	terminate();
+	qDebug() << "try to stop thread";
+	while (!isFinished())
+	{
+	}
+	if (!isRunning()) qDebug() << "thread is stopped";
 }
 
 void SendData::setHTML_data(string data)
@@ -46,7 +57,6 @@ void SendData::run()
 		{
 			client.sendData("pet");
 		}
-		
 
 		loop_counter++;
 		write_is_safe = true;
@@ -73,19 +83,19 @@ void SendData::writeData()
 	data = str_replaceAll(data, "<b>", "");		   // remove <b>
 	data = str_replaceAll(data, "</b>", "");	   // remove </b>
 
-    data = str_findWithName_excludeName(data, "RA/Dec (J2000.0):");
-    start = data.find("/");
-    float RA = getRA(data.substr(0, start));
-    start++;
-    float DEC = getDEC(data.substr(start, data.length()-start-1));
-    	
+	data = str_findWithName_excludeName(data, "RA/Dec (J2000.0):");
+	start = data.find("/");
+	float RA = getRA(data.substr(0, start));
+	start++;
+	float DEC = getDEC(data.substr(start, data.length() - start - 1));
+
 	string d = to_string(RA) + "_" + to_string(DEC);
-	char _d[d.length()+1];
+	char _d[d.length() + 1];
 	for (unsigned int i = 0; i < d.length(); i++)
 	{
 		_d[i] = d[i];
 	}
-	
+
 	_d[d.length()] = '\0';
 
 	if (d.compare(prev_d) != 0)
@@ -93,9 +103,8 @@ void SendData::writeData()
 		cout << "sdjhfgjdsfjhgsdfskdjfhkdsjhf" << endl;
 		client.sendData(_d);
 	}
-	
-	prev_d = d;
 
+	prev_d = d;
 }
 
 // to find position in a string
@@ -136,42 +145,40 @@ string SendData::str_findWithName_excludeName(string data, string str)
 	return data;
 }
 
-
 // get RA value
-float SendData::getRA(string data) {
+float SendData::getRA(string data)
+{
 
-    int flag = 1;
-    string str_h = data.substr(0, data.find("h"));  // get h
-    float h = stof(str_h);  // convert string to float
-    if (h < 0)
-        flag = -1;
-    h *= flag;
-    data = str_replaceAll(data, str_h+"h", ""); // remove hour
-    string str_m = data.substr(0, data.find("m"));  // get m
-    float m = stof(str_m);  // convert string to float
-    data = str_replaceAll(data, str_m+"m", ""); // remove min
-    float s = stof(data.substr(0, data.find("s"))); // get s
-    return (h + m/60 + s/3600) * flag;   // calculate and return
+	int flag = 1;
+	string str_h = data.substr(0, data.find("h")); // get h
+	float h = stof(str_h);						   // convert string to float
+	if (h < 0) flag = -1;
+	h *= flag;
+	data = str_replaceAll(data, str_h + "h", "");   // remove hour
+	string str_m = data.substr(0, data.find("m"));  // get m
+	float m = stof(str_m);							// convert string to float
+	data = str_replaceAll(data, str_m + "m", "");   // remove min
+	float s = stof(data.substr(0, data.find("s"))); // get s
+	return (h + m / 60 + s / 3600) * flag;			// calculate and return
 }
 
 // get dec value
-float SendData::getDEC(string data) {
-    int flag = 1;
-    string str_deg = data.substr(0, data.find("°"));  // get deg(°)
-    float deg = stof(str_deg);  // convert string to float
-    if (deg < 0)
-        flag = -1;
-    deg *= flag;
-    data = str_replaceAll(data, str_deg+"°", ""); // remove deg
-    string str_m = data.substr(0, data.find("'"));  // get min(')
-    float m = stof(str_m);  // convert string to float
-    data = str_replaceAll(data, str_m+"'", ""); // remove min(')
-    float s = stof(data.substr(0, data.find("\""))); // get sec(")
-    return (deg + m/60 + s/3600) * flag;   // calculate and return
+float SendData::getDEC(string data)
+{
+	int flag = 1;
+	string str_deg = data.substr(0, data.find("°")); // get deg(°)
+	float deg = stof(str_deg);						 // convert string to float
+	if (deg < 0) flag = -1;
+	deg *= flag;
+	data = str_replaceAll(data, str_deg + "°", "");  // remove deg
+	string str_m = data.substr(0, data.find("'"));   // get min(')
+	float m = stof(str_m);							 // convert string to float
+	data = str_replaceAll(data, str_m + "'", "");	// remove min(')
+	float s = stof(data.substr(0, data.find("\""))); // get sec(")
+	return (deg + m / 60 + s / 3600) * flag;		 // calculate and return
 }
 
-
-int SendData::sendToServer(string data) {
+int SendData::sendToServer(string data)
+{
 	return 0;
 }
-
