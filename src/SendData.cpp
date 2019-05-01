@@ -100,8 +100,9 @@ void SendData::writeData()
 
 	if (d.compare(prev_d) != 0)
 	{
-		cout << "sdjhfgjdsfjhgsdfskdjfhkdsjhf" << endl;
 		client.sendData(_d);
+		cout << "CURRENT ********************" << d << "***********" << endl;
+		cout << "prev    ********************" << prev_d << "***********" << endl;
 	}
 
 	prev_d = d;

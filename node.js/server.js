@@ -4,11 +4,12 @@ var serialport = require('serialport');
 var SerialPort = serialport.SerialPort;
 var pet = false;
 var first_pet = false;
+var arduino_data = "";
 
 var portName = "/dev/ttyACM0";  // serial port to connect
 // create  a serial port
 var mySerialPort = new serialport(portName, {
-    baudRate:9600,
+    baudRate:115200,
     parser:serialport.parsers.raw
 });
 
@@ -17,7 +18,17 @@ mySerialPort.on("open",()=>{
 });
 // on receive data
 mySerialPort.on("data", (data)=>{
-    //console.log("data: "+data);
+    arduino_data += data.toString("utf8");
+    
+    if(arduino_data.endsWith("\n")) {
+      arduino_data = arduino_data.replace("\n", "");
+      arduino_data = arduino_data.replace("\0", "");
+      console.log("************************************  ARDUINO SAYS : "  + arduino_data);
+      arduino_data = "";
+    }
+
+    // console.log("*********************  ARDUINO SAYS : " 
+    //   + data.toString('utf8') + " **********************");
 });
 
 
@@ -44,7 +55,7 @@ function onClientConnected(sock) {
         pet = true;
     } else if(mySerialPort.isOpen) {  // if port is open
         mySerialPort.flush();
-        mySerialPort.write(data, (err, result) => {
+        mySerialPort.write(data+"#", (err, result) => {
             // code
         });
     }
