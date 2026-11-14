@@ -17,6 +17,7 @@
  */
 
 #include "OLE.hpp"
+#include "TelescopeControl.hpp"
 #ifdef Q_OS_WIN
 #include <Ole2.h>
 #include <Windows.h>
@@ -28,10 +29,10 @@ static HRESULT OleInternalDispatch(
 {
 	va_list vMarker;
 	HRESULT hResult;
-	DISPPARAMS dp = {Q_NULLPTR, Q_NULLPTR, 0, 0};
+	DISPPARAMS dp = {nullptr, nullptr, 0, 0};
 	DISPID dispNamedId = DISPID_PROPERTYPUT;
 	DISPID dispId;
-	VARIANT* pArgs = Q_NULLPTR;
+	VARIANT* pArgs = nullptr;
 	EXCEPINFO execpInfo;
 	UINT puArgErr = 0;
 
@@ -40,7 +41,8 @@ static HRESULT OleInternalDispatch(
 	hResult = pIDispatch->GetIDsOfNames(IID_NULL, &pOleName, 1, LOCALE_USER_DEFAULT, &dispId);
 	if (FAILED(hResult))
 	{
-		qWarning() << "OleInvoke: Failed to get DispId";
+		qCWarning(Telescopes).nospace().noquote() << "OleInvoke: Failed to get DispId. hResult="
+							  << hResult << " (0x" << QString::number(hResult, 16) << ").";
 		return hResult;
 	}
 
@@ -72,8 +74,10 @@ static HRESULT OleInternalDispatch(
 
 	if (FAILED(hResult))
 	{
-		qWarning() << "OleInvoke: Exception [scode: " << execpInfo.scode << "wcode: " << execpInfo.wCode
-				   << " puArgErr: " << puArgErr << "] GLE: " << GetLastError();
+		qCWarning(Telescopes).nospace().noquote() << "OleInvoke: Exception [scode: " << execpInfo.scode << " (0x"
+							  << QString::number(unsigned(execpInfo.scode), 16) << ") wcode: "
+							  << execpInfo.wCode << " (0x" << QString::number(unsigned(execpInfo.wCode), 16)
+							  << ") puArgErr: " << puArgErr << " (0x" << QString::number(puArgErr, 16) << ")] GLE: " << GetLastError();
 
 		SysFreeString(execpInfo.bstrDescription);
 		SysFreeString(execpInfo.bstrHelpFile);
@@ -151,6 +155,73 @@ VARIANT OleBoolToVariant(BOOL b)
 	return v;
 }
 
+QString variantToQstring(VARIANT &var)
+{
+	VARIANT varDest;
+	VariantInit(&varDest);
+	QPair<QString, QString>out;
+
+	// Attempt to convert to string type (VT_BSTR)
+	if (SUCCEEDED(VariantChangeType(&varDest, &var, 0, VT_BSTR))) {
+		out.first="VT_BSTR";
+		out.second=QString::fromUtf16(reinterpret_cast<const ushort*>(varDest.bstrVal));
+		VariantClear(&varDest); // Clean up
+	} else {
+		out.first="Not";
+		out.second="understood";
+		qCWarning(Telescopes) << "Unsupported variant type: " << var.vt;
+	}
+	return QString("%1: %2").arg(out.first, out.second);
+}
+
+int variantToInt(VARIANT &var)
+{
+	VARIANT varDest;
+	VariantInit(&varDest);
+	int out;
+
+	// Attempt to convert to string type (VT_BSTR)
+	if (SUCCEEDED(VariantChangeType(&varDest, &var, 0, VT_I4))){
+		out=varDest.intVal;
+		VariantClear(&varDest); // Clean up
+	} else {
+		qCWarning(Telescopes) << "Unsupported variant type: " << var.vt;
+	}
+	return out;
+}
+
+double variantToDouble(VARIANT &var)
+{
+	VARIANT varDest;
+	VariantInit(&varDest);
+	double out;
+
+	// Attempt to convert to string type (VT_BSTR)
+	if (SUCCEEDED(VariantChangeType(&varDest, &var, 0, VT_R8))){
+		out=varDest.dblVal;
+		VariantClear(&varDest); // Clean up
+	} else {
+		qCWarning(Telescopes) << "Unsupported variant type: " << var.vt;
+	}
+	return out;
+}
+
+bool variantToBool(VARIANT &var)
+{
+	VARIANT varDest;
+	VariantInit(&varDest);
+	bool out;
+
+	// Attempt to convert to string type (VT_BSTR)
+	if (SUCCEEDED(VariantChangeType(&varDest, &var, 0, VT_BOOL))){
+		out = ( varDest.boolVal == 0 ? false : true );
+		VariantClear(&varDest); // Clean up
+	} else {
+		qCWarning(Telescopes) << "Unsupported variant type: " << var.vt;
+	}
+	return out;
+}
+
 VOID OleReleaseInstance(IDispatch* pIDispatch)
 {
 	pIDispatch->Release();
@@ -166,7 +237,7 @@ HRESULT OleCreateInstance(LPCOLESTR lpszProgID, IDispatch** ppIDispatch)
 	if (FAILED(hResult)) return hResult;
 
 	hResult = CoCreateInstance(
-	  (REFCLSID)clsid, 0, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER, (REFCLSID)IID_IDispatch, &p);
+	  static_cast<REFCLSID>(clsid), nullptr, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER, static_cast<REFCLSID>(IID_IDispatch), &p);
 
 	if (FAILED(hResult)) return hResult;
 
@@ -177,11 +248,9 @@ HRESULT OleCreateInstance(LPCOLESTR lpszProgID, IDispatch** ppIDispatch)
 
 BOOL OleInit(DWORD dwInitType)
 {
-	HRESULT hResult;
-
 	if (!dwInitType) dwInitType = COINIT_MULTITHREADED;
 
-	hResult = CoInitializeEx(Q_NULLPTR, dwInitType);
+	HRESULT hResult = CoInitializeEx(nullptr, dwInitType);
 	if (FAILED(hResult))
 	{
 		return FALSE;

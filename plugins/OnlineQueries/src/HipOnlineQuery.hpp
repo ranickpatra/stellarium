@@ -30,7 +30,6 @@ class QNetworkAccessManager;
 class HipOnlineReply : public QObject
 {
 	Q_OBJECT
-	Q_ENUMS(HipQueryStatus)
 
 	friend class HipOnlineQuery;
 
@@ -39,11 +38,12 @@ public:
 	enum HipQueryStatus
 	{
 		HipQueryQuerying,          //!< Starnames is still being queried.
-		HipQueryErrorOccured,      //!< An error occured while looking up Starnames. Call getErrorString() for a description of the error.
+		HipQueryErrorOccured,      //!< An error occurred while looking up Starnames. Call getErrorString() for a description of the error.
 		HipQueryFinished           //!< The query is over. The reply can be deleted.
 	};
+	Q_ENUM(HipQueryStatus)
 
-	~HipOnlineReply();
+	~HipOnlineReply() override;
 
 	//! Get the raw result HTML string from HIP search
 	QString getResult() const {return htmlResult;}
@@ -54,7 +54,7 @@ public:
 	//! Get a I18n string describing the current status. It can be used e.g for reporting in widgets.
 	QString getCurrentStatusString() const;
 
-	//! Get the error description string. Return empty string if no error occured.
+	//! Get the error description string. Return empty string if no error occurred.
 	QString getErrorString() const {return errorString;}
 
 	//! Explicitly delete the internal QNetworkReply. Must not be called from a QNetworkReply signal.
@@ -83,7 +83,7 @@ private:
 	//! Current query status.
 	HipQueryStatus currentStatus;
 
-	//! The error description. Empty if no errors occured.
+	//! The error description. Empty if no errors occurred.
 	QString errorString;
 };
 
@@ -98,10 +98,10 @@ public:
 	//! Constructor
 	//! @param baseURL complete URL like "https://mysite.org/lookForInfo.php?HIP=%1"
 	//! It is allowed to initialize with an empty URL.
-	HipOnlineQuery(QString baseURL, QObject* parent = Q_NULLPTR);
+	HipOnlineQuery(const QString &baseURL, QObject* parent = nullptr);
 
 	//! set a new URL for the query. There must be a "%1" included, else no number or name can be added to the query!
-	void setUrl(QString url);
+	//void setUrl(const QString &url);
 
 	//! Lookup in an external starnames information site for object with catalog number.
 	//! @param hipID the object ID. Only HIP IDs are supported.
@@ -111,19 +111,19 @@ public:
 	//! Lookup in an external information site for object with name.
 	//! @param name the object name. Use getEnglishName() for a typical name.
 	//! @return a new HipOnlineReply which is owned by the caller.
-	HipOnlineReply* lookup(const QString name);
+	HipOnlineReply* lookup(const QString &name);
 
 	//! Lookup in an external starnames information site for object with catalog number.
 	//! @param url a new URL to use.
 	//! @param hipID the object ID. Only HIP IDs are supported.
 	//! @return a new HipOnlineReply which is owned by the caller.
-	HipOnlineReply* lookup(const QString url, const int hipID);
+	HipOnlineReply* lookup(const QString &url, const int hipID);
 
 	//! Lookup in an external information site for object with name.
 	//! @param url a new URL to use.
 	//! @param name the object name. Use getEnglishName() for a typical name.
 	//! @return a new HipOnlineReply which is owned by the caller.
-	HipOnlineReply* lookup(const QString url, const QString name);
+	HipOnlineReply* lookup(const QString &url, const QString &name);
 private:
 	//! The specific URL for the site like "https://mysite.org/lookForInfo.php?HIP="
 	QString baseURL;

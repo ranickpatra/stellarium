@@ -29,6 +29,7 @@
 #include <QtConcurrent>
 
 #include <stdexcept>
+#include <memory>
 
 #include "Scenery3d.hpp"
 #include "Scenery3dRemoteControlService.hpp"
@@ -54,23 +55,26 @@ Q_LOGGING_CATEGORY(scenery3d,"stel.plugin.scenery3d")
 #define S3D_CONFIG_PREFIX QString("Scenery3d")
 
 Scenery3d::Scenery3d() :
-	renderer(Q_NULLPTR),
+	renderer(nullptr),
 	flagEnabled(false),
 	cleanedUp(false),
 	movementKeyInput(0.0,0.0,0.0),
 	oldProjectionType(StelCore::ProjectionPerspective),
+	fontSize(16),
+	currentMessage(),
 	forceHorizonPolyline(false),
+	ignoreInitialViewSettings(false),
 	loadCancel(false),
-	progressBar(Q_NULLPTR),
+	progressBar(nullptr),
 	currentLoadScene(),
-	currentScene(Q_NULLPTR),
+	currentScene(nullptr),
 	currentLoadFuture(this)
 {
 	setObjectName("Scenery3d");
+#ifndef NO_GUI
 	scenery3dDialog = new Scenery3dDialog();
 	storedViewDialog = new StoredViewDialog();
-
-	font.setPixelSize(16);
+#endif
 	messageFader.setDuration(500);
 	messageTimer = new QTimer(this);
 	messageTimer->setInterval(2000);
@@ -88,16 +92,18 @@ Scenery3d::Scenery3d() :
 
 	//create scenery3d object
 	renderer = new S3DRenderer();
-	connect(renderer, SIGNAL(message(QString)), this, SLOT(showMessage(QString)));
+	connect(renderer, &S3DRenderer::message, this, &Scenery3d::showMessage);
 }
 
 Scenery3d::~Scenery3d()
 {
 	if(!cleanedUp)
-		deinit();
+		Scenery3d::deinit();
 
+#ifndef NO_GUI
 	delete storedViewDialog;
 	delete scenery3dDialog;
+#endif
 }
 
 double Scenery3d::getCallOrder(StelModuleActionName actionName) const
@@ -121,7 +127,7 @@ void Scenery3d::handleKeys(QKeyEvent* e)
 	//on OSX, there is a still-unfixed bug which prevents the command key (=Qt's Control key) to be used here
 	//see https://bugreports.qt.io/browse/QTBUG-36839
 	//we have to use the option/ALT key instead to activate walking around, and CMD is used as multiplier.
-#ifdef Q_OS_OSX
+#ifdef Q_OS_MACOS
 	static const Qt::KeyboardModifier S3D_CTRL_MODIFIER = Qt::AltModifier;
 	static const Qt::KeyboardModifier S3D_SPEEDMUL_MODIFIER = Qt::ControlModifier;
 #else
@@ -132,19 +138,19 @@ void Scenery3d::handleKeys(QKeyEvent* e)
 	if ((e->type() == QKeyEvent::KeyPress) && (e->modifiers() & S3D_CTRL_MODIFIER))
 	{
 		// Pressing CTRL+ALT: 5x, CTRL+SHIFT: 10x speedup; CTRL+SHIFT+ALT: 50x!
-		float speedup=((e->modifiers() & S3D_SPEEDBASE_MODIFIER)? 10.0f : 1.0f);
-		speedup *= ((e->modifiers() & S3D_SPEEDMUL_MODIFIER)? 5.0f : 1.0f);
+		double speedup=((e->modifiers() & S3D_SPEEDBASE_MODIFIER)? 10.0 : 1.0);
+		speedup *= ((e->modifiers() & S3D_SPEEDMUL_MODIFIER)? 5.0 : 1.0);
 
 		switch (e->key())
 		{
 			case Qt::Key_Plus:      // or
-			case Qt::Key_PageUp:    movementKeyInput[2] =  1.0f * speedup; e->accept(); break;
+			case Qt::Key_PageUp:    movementKeyInput[2] =  1.0 * speedup; e->accept(); break;
 			case Qt::Key_Minus:     // or
-			case Qt::Key_PageDown:  movementKeyInput[2] = -1.0f * speedup; e->accept(); break;
-			case Qt::Key_Up:        movementKeyInput[1] =  1.0f * speedup; e->accept(); break;
-			case Qt::Key_Down:      movementKeyInput[1] = -1.0f * speedup; e->accept(); break;
-			case Qt::Key_Right:     movementKeyInput[0] =  1.0f * speedup; e->accept(); break;
-			case Qt::Key_Left:      movementKeyInput[0] = -1.0f * speedup; e->accept(); break;
+			case Qt::Key_PageDown:  movementKeyInput[2] = -1.0 * speedup; e->accept(); break;
+			case Qt::Key_Up:        movementKeyInput[1] =  1.0 * speedup; e->accept(); break;
+			case Qt::Key_Down:      movementKeyInput[1] = -1.0 * speedup; e->accept(); break;
+			case Qt::Key_Right:     movementKeyInput[0] =  1.0 * speedup; e->accept(); break;
+			case Qt::Key_Left:      movementKeyInput[0] = -1.0 * speedup; e->accept(); break;
 #ifdef QT_DEBUG
 				//leave this out on non-debug builds to reduce conflict chance
 			case Qt::Key_P:         renderer->saveFrusts(); e->accept(); break;
@@ -152,7 +158,7 @@ void Scenery3d::handleKeys(QKeyEvent* e)
 		}
 	}
 	// FS: No modifier here!? GZ: I want the lock feature. If this does not work for MacOS, it is not there, but only on that platform...
-#ifdef Q_OS_OSX
+#ifdef Q_OS_MACOS
 	else if ((e->type() == QKeyEvent::KeyRelease) )
 #else
 	else if ((e->type() == QKeyEvent::KeyRelease) && (e->modifiers() & S3D_CTRL_MODIFIER))
@@ -166,22 +172,22 @@ void Scenery3d::handleKeys(QKeyEvent* e)
 			case Qt::Key_PageUp:
 			case Qt::Key_Minus:
 			case Qt::Key_PageDown:
-				movementKeyInput[2] = 0.0f;
-#ifndef Q_OS_OSX
+				movementKeyInput[2] = 0.0;
+#ifndef Q_OS_MACOS
 				e->accept();
 #endif
 				break;
 			case Qt::Key_Up:
 			case Qt::Key_Down:
-				movementKeyInput[1] = 0.0f;
-#ifndef Q_OS_OSX
+				movementKeyInput[1] = 0.0;
+#ifndef Q_OS_MACOS
 				e->accept();
 #endif
 				break;
 			case Qt::Key_Right:
 			case Qt::Key_Left:
-				movementKeyInput[0] = 0.0f;
-#ifndef Q_OS_OSX
+				movementKeyInput[0] = 0.0;
+#ifndef Q_OS_MACOS
 				e->accept();
 #endif
 				break;
@@ -201,7 +207,7 @@ void Scenery3d::update(double deltaTime)
 
 		//perform movement
 		//when zoomed in more than 5°, we slow down movement
-		if(movementKeyInput.lengthSquared() > 0.00001)
+		if(movementKeyInput.normSquared() > 0.00001)
 			currentScene->moveViewer(movementKeyInput * deltaTime * 0.01 * std::max(5.0, mvMgr->getCurrentFov()));
 
 		//update material fade info, if necessary
@@ -220,6 +226,9 @@ void Scenery3d::update(double deltaTime)
 
 void Scenery3d::draw(StelCore* core)
 {
+	if(!core->getFlagClearSky())
+		return;
+
 	if (flagEnabled && currentScene)
 	{
 		renderer->draw(core,*currentScene);
@@ -233,8 +242,10 @@ void Scenery3d::draw(StelCore* core)
 	{
 		const StelProjectorP prj = core->getProjection(StelCore::FrameEquinoxEqu);
 		StelPainter painter(prj);
+		QFont font=QGuiApplication::font();
+		font.setPixelSize(fontSize);
 		painter.setFont(font);
-		painter.setColor(textColor[0], textColor[1], textColor[2], messageFader.getInterstate());
+		painter.setColor(textColor, messageFader.getInterstate());
 		painter.drawText(83, 120, currentMessage);
 	}
 }
@@ -262,7 +273,7 @@ void Scenery3d::init()
 	createActions();
 	createToolbarButtons();
 
-	connect(&StelMainView::getInstance(), SIGNAL(reloadShadersRequested()), this, SLOT(reloadShaders()));
+	connect(&StelMainView::getInstance(), &StelMainView::reloadShadersRequested, this, &Scenery3d::reloadShaders);
 
 	//finally, hook up the lightscape toggle event (external to this plugin) to cubemap redraw
 	StelAction* action = StelApp::getInstance().getStelActionManager()->findAction("actionShow_LandscapeIllumination");
@@ -284,9 +295,9 @@ void Scenery3d::deinit()
 	}
 	//this is correct the place to delete all OpenGL related stuff, not the destructor
 	delete renderer;
-	renderer = Q_NULLPTR;
+	renderer = nullptr;
 	delete currentScene;
-	currentScene = Q_NULLPTR;
+	currentScene = nullptr;
 
 	cleanedUp = true;
 }
@@ -304,6 +315,7 @@ void Scenery3d::loadConfig()
 	renderer->setTorchEnabled(conf->value("torch_enabled", false).toBool());
 	renderer->setTorchBrightness(conf->value("torch_brightness", 0.5f).toFloat());
 	renderer->setTorchRange(conf->value("torch_range",5.0f).toFloat());
+	renderer->setDirectionalLightPush(conf->value("directional_push", 1.0f).toFloat());
 	renderer->setBumpsEnabled(conf->value("flag_bumpmap", false).toBool());
 	renderer->setShadowsEnabled(conf->value("flag_shadow", false).toBool());
 	renderer->setUseSimpleShadows(conf->value("flag_shadow_simple", false).toBool());
@@ -312,6 +324,7 @@ void Scenery3d::loadConfig()
 	renderer->setLazyCubemapInterval(conf->value("cubemap_lazy_interval",1.0).toDouble());
 	renderer->setPixelLightingEnabled(conf->value("flag_pixel_lighting", false).toBool());
 	renderer->setLocationInfoEnabled(conf->value("flag_location_info", false).toBool());
+	renderer->setLocationInfoStyle(static_cast<S3DRenderer::LocationInfoStyle>(conf->value("location_info_style", 0).toInt()));
 
 	forceHorizonPolyline = conf->value("force_landscape_polyline", false).toBool();
 
@@ -330,8 +343,10 @@ void Scenery3d::createActions()
 
 	//enable action will be set checkable if a scene was loaded
 	addAction("actionShow_Scenery3d",                  groupName, N_("Toggle 3D landscape"),      this,          "enableScene",       "Ctrl+W");
+#ifndef NO_GUI
 	addAction("actionShow_Scenery3d_dialog",           groupName, N_("Show settings dialog"),  scenery3dDialog,  "visible",           "Ctrl+Shift+W");
 	addAction("actionShow_Scenery3d_storedViewDialog", groupName, N_("Show viewpoint dialog"), storedViewDialog, "visible",           "Ctrl+Alt+W");
+#endif
 	addAction("actionShow_Scenery3d_shadows",          groupName, N_("Toggle shadows"),           this,          "enableShadows",     "Ctrl+R, S");
 	addAction("actionShow_Scenery3d_debuginfo",        groupName, N_("Toggle debug information"), this,          "enableDebugInfo",   "Ctrl+R, D");
 	addAction("actionShow_Scenery3d_locationinfo",     groupName, N_("Toggle location text"),     this,          "enableLocationInfo","Ctrl+R, T");
@@ -340,38 +355,36 @@ void Scenery3d::createActions()
 
 void Scenery3d::createToolbarButtons() const
 {
+#ifndef NO_GUI
 	// Add 3 toolbar buttons (copy/paste widely from AngleMeasure): activate, settings, and viewpoints.
 	try
 	{
 		StelGui* gui = dynamic_cast<StelGui*>(StelApp::getInstance().getGui());
 
-		if (gui!=Q_NULLPTR)
+		if (gui!=nullptr)
 		{
-			StelButton* toolbarEnableButton =	new StelButton(Q_NULLPTR,
+			StelButton* toolbarEnableButton =	new StelButton(nullptr,
 									       QPixmap(":/Scenery3d/bt_scenery3d_on.png"),
 									       QPixmap(":/Scenery3d/bt_scenery3d_off.png"),
 									       QPixmap(":/graphicGui/miscGlow32x32.png"),
-									       "actionShow_Scenery3d");
-			StelButton* toolbarSettingsButton =	new StelButton(Q_NULLPTR,
-									       QPixmap(":/Scenery3d/bt_scenery3d_settings_on.png"),
-									       QPixmap(":/Scenery3d/bt_scenery3d_settings_off.png"),
-									       QPixmap(":/graphicGui/miscGlow32x32.png"),
+									       "actionShow_Scenery3d",
+									       false,
 									       "actionShow_Scenery3d_dialog");
-			StelButton* toolbarStoredViewButton =	new StelButton(Q_NULLPTR,
+			StelButton* toolbarStoredViewButton =	new StelButton(nullptr,
 									       QPixmap(":/Scenery3d/bt_scenery3d_eyepoint_on.png"),
 									       QPixmap(":/Scenery3d/bt_scenery3d_eyepoint_off.png"),
 									       QPixmap(":/graphicGui/miscGlow32x32.png"),
 									       "actionShow_Scenery3d_storedViewDialog");
 
 			gui->getButtonBar()->addButton(toolbarEnableButton, "065-pluginsGroup");
-			gui->getButtonBar()->addButton(toolbarSettingsButton, "065-pluginsGroup");
 			gui->getButtonBar()->addButton(toolbarStoredViewButton, "065-pluginsGroup");
 		}
 	}
 	catch (std::runtime_error& e)
 	{
-		qCWarning(scenery3d) << "WARNING: unable to create toolbar buttons for Scenery3d plugin: " << e.what();
+		qCWarning(scenery3d) << "Unable to create toolbar buttons for Scenery3d plugin: " << e.what();
 	}
+#endif
 }
 
 void Scenery3d::relativeMove(const Vec3d &move)
@@ -392,14 +405,20 @@ void Scenery3d::reloadShaders()
 
 bool Scenery3d::configureGui(bool show)
 {
+#ifdef NO_GUI
+	return false;
+#else
 	if (show)
 		scenery3dDialog->setVisible(show);
 	return true;
+#endif
 }
 
 void Scenery3d::showStoredViewDialog()
 {
+#ifndef NO_GUI
 	storedViewDialog->setVisible(true);
+#endif
 }
 
 void Scenery3d::updateProgress(const QString &str, int val, int min, int max) const
@@ -439,23 +458,27 @@ void Scenery3d::loadScene(const SceneInfo& scene)
 	// Loading may take a while...
 	showMessage(QString(q_("Loading scene. Please be patient!")));
 	progressBar = StelApp::getInstance().addProgressBar();
-	progressBar->setFormat(QString(q_("Loading scene '%1'")).arg(scene.name));
+	progressBar->setFormat(q_("Loading scene '%1'").arg(scene.name));
 	progressBar->setValue(0);
 
 	currentLoadScene = scene;
 	emit loadingSceneIDChanged(currentLoadScene.id);
 
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+	QFuture<S3DScene*> future = QtConcurrent::run(&Scenery3d::loadSceneBackground,this,scene);
+#else
 	QFuture<S3DScene*> future = QtConcurrent::run(this,&Scenery3d::loadSceneBackground,scene);
+#endif
 	currentLoadFuture.setFuture(future);
 }
 
 S3DScene* Scenery3d::loadSceneBackground(const SceneInfo& scene) const
 {
 	//the scoped pointer ensures this scene is deleted when errors occur
-	QScopedPointer<S3DScene> newScene(new S3DScene(scene));
+	std::unique_ptr<S3DScene> newScene(new S3DScene(scene));
 
 	if(loadCancel)
-		return Q_NULLPTR;
+		return nullptr;
 
 	updateProgress(q_("Loading model..."),1,0,6);
 
@@ -463,20 +486,20 @@ S3DScene* Scenery3d::loadSceneBackground(const SceneInfo& scene) const
 	StelOBJ modelOBJ;
 	QString modelFile = StelFileMgr::findFile( scene.fullPath+ "/" + scene.modelScenery);
 	qCDebug(scenery3d)<<"Loading scene from "<<modelFile;
-	if(!modelOBJ.load(modelFile, scene.vertexOrderEnum))
+	if(!modelOBJ.load(modelFile, scene.vertexOrderEnum, scene.sceneryGenerateNormals))
 	{
 	    qCCritical(scenery3d)<<"Failed to load OBJ file"<<modelFile;
-	    return Q_NULLPTR;
+	    return nullptr;
 	}
 
 	if(loadCancel)
-		return Q_NULLPTR;
+		return nullptr;
 
 	updateProgress(q_("Transforming model..."),2,0,6);
 	newScene->setModel(modelOBJ);
 
 	if(loadCancel)
-		return Q_NULLPTR;
+		return nullptr;
 
 	if(scene.modelGround.isEmpty())
 	{
@@ -490,26 +513,26 @@ S3DScene* Scenery3d::loadSceneBackground(const SceneInfo& scene) const
 		StelOBJ groundOBJ;
 		modelFile = StelFileMgr::findFile(scene.fullPath + "/" + scene.modelGround);
 		qCDebug(scenery3d)<<"Loading ground from"<<modelFile;
-		if(!groundOBJ.load(modelFile, scene.vertexOrderEnum))
+		if(!groundOBJ.load(modelFile, scene.vertexOrderEnum, scene.groundGenerateNormals))
 		{
 			qCCritical(scenery3d)<<"Failed to load ground model"<<modelFile;
-			return Q_NULLPTR;
+			return nullptr;
 		}
 
 		updateProgress(q_("Transforming ground..."),4,0,6);
 		if(loadCancel)
-			return Q_NULLPTR;
+			return nullptr;
 
 		updateProgress(q_("Calculating collision map..."),5,0,6);
 		newScene->setGround(groundOBJ);
 	}
 
 	if(loadCancel)
-		return Q_NULLPTR;
+		return nullptr;
 
 	updateProgress(q_("Finalizing load..."),6,0,6);
 
-	return newScene.take();
+	return newScene.release();
 }
 
 void Scenery3d::loadSceneCompleted()
@@ -518,7 +541,7 @@ void Scenery3d::loadSceneCompleted()
 
 	progressBar->setValue(100);
 	StelApp::getInstance().removeProgressBar(progressBar);
-	progressBar=Q_NULLPTR;
+	progressBar=nullptr;
 
 	if(!result)
 	{
@@ -546,7 +569,7 @@ void Scenery3d::loadSceneCompleted()
 	if (info.hasLocation())
 	{
 		qCDebug(scenery3d) << "Setting location to given coordinates";
-		StelApp::getInstance().getCore()->moveObserverTo(*info.location, 0., 0.);
+		StelApp::getInstance().getCore()->moveObserverTo(*info.location, 0., 0., info.landscapeName);
 	}
 	else qCDebug(scenery3d) << "No coordinates given in scenery3d.ini";
 
@@ -845,6 +868,23 @@ void Scenery3d::setEnableLocationInfo(const bool enableLocationInfo)
 	}
 }
 
+S3DRenderer::LocationInfoStyle Scenery3d::getLocationInfoStyle() const
+{
+	return renderer->getLocationInfoStyle();
+}
+
+void Scenery3d::setLocationInfoStyle(const S3DRenderer::LocationInfoStyle style)
+{
+	if(style != renderer->getLocationInfoStyle())
+	{
+		renderer->setLocationInfoStyle(style);
+
+		conf->setValue(S3D_CONFIG_PREFIX + "/location_info_style", style);
+
+		emit locationInfoStyleChanged(style);
+	}
+}
+
 void Scenery3d::setForceHorizonPolyline(const bool forcePolyline)
 {
 	if(forcePolyline != getForceHorizonPolyline())
@@ -906,6 +946,39 @@ void Scenery3d::setTorchRange(const float torchRange)
 
 	emit torchRangeChanged(torchRange);
 }
+
+float Scenery3d::getDirectionalLightPush() const
+{
+	return renderer->getDirectionalLightPush();
+}
+
+void Scenery3d::setDirectionalLightPush(const float push)
+{
+	renderer->setDirectionalLightPush(push);
+
+	conf->setValue(S3D_CONFIG_PREFIX + "/directional_push",push);
+
+	emit directionalLightPushChanged(push);
+}
+
+// Allow ignoring the configured start_az_alt_fov.
+// This may be helpful in a digital planetarium where fov should stay at ~180...200° and view direction is usually close to zenith.
+bool Scenery3d::getIgnoreInitialView() const
+{
+	return ignoreInitialViewSettings;
+}
+
+void Scenery3d::setIgnoreInitialView(const bool ignore)
+{
+	if (ignoreInitialViewSettings != ignore)
+	{
+		ignoreInitialViewSettings=ignore;
+		conf->setValue(S3D_CONFIG_PREFIX + "/ignore_start_az_alt_fov",ignore);
+
+		emit ignoreInitialViewChanged(ignore);
+	}
+}
+
 
 bool Scenery3d::getEnableLazyDrawing() const
 {
@@ -1073,7 +1146,7 @@ void Scenery3d::setView(const StoredView &view, const bool setDate)
 	mvMgr->zoomTo(view.view_fov[2]);
 }
 
-StoredView Scenery3d::getCurrentView()
+StoredView Scenery3d::getCurrentView() const
 {
 	if(!currentScene)
 	{
@@ -1092,12 +1165,12 @@ StoredView Scenery3d::getCurrentView()
 	//convert to spherical angles
 	StelUtils::rectToSphe(&view.view_fov[0],&view.view_fov[1],vd);
 	//convert to degrees
-	view.view_fov[0]*=180.0/M_PI;
-	view.view_fov[1]*=180.0/M_PI;
+	view.view_fov[0]*=180.0f/M_PIf;
+	view.view_fov[1]*=180.0f/M_PIf;
 	// we must patch azimuth
-	view.view_fov[0]=180.0-view.view_fov[0];
+	view.view_fov[0]=180.0f-view.view_fov[0];
 	//3rd comp is fov
-	view.view_fov[2] = mvMgr->getAimFov();
+	view.view_fov[2] = static_cast<float>(mvMgr->getAimFov());
 
 	//get current grid pos + eye height
 	Vec3d pos = currentScene->getGridPosition();

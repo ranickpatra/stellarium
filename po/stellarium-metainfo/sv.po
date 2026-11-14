@@ -1,15 +1,16 @@
-# 
 # Translators:
-# cardinot <mcardinot@gmail.com>, 2017
-# Karl Birgersson <birgerssonkarl@outlook.com>, 2018
+# cardinot <mcardinot@gmail.com>, 2022
+# Alexander V. Wolf <alex.v.wolf@gmail.com>, 2022
+# Karl Birgersson <birgerssonkarl@outlook.com>, 2024
+# Jonatan Nyberg, 2026
 # 
 msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
-"POT-Creation-Date: 2021-03-28 15:14+0700\n"
-"PO-Revision-Date: 2017-11-29 01:17+0000\n"
-"Last-Translator: Karl Birgersson <birgerssonkarl@outlook.com>, 2018\n"
-"Language-Team: Swedish (https://www.transifex.com/stellarium/teams/80998/sv/)\n"
+"POT-Creation-Date: 2026-04-05 19:12+0700\n"
+"PO-Revision-Date: 2022-10-21 17:42+0000\n"
+"Last-Translator: Jonatan Nyberg, 2026\n"
+"Language-Team: Swedish (https://app.transifex.com/stellarium/teams/80998/sv/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -43,22 +44,23 @@ msgstr ""
 #: org.stellarium.Stellarium.appdata.xml:12
 msgid ""
 "Stellarium comes with a star catalogue of about 600 thousand stars and it is"
-" possible to download extra catalogues with up to 210 million stars."
+" possible to download extra catalogues with up to 220 million stars."
 msgstr ""
-"Stellarium kommer med en stjärnkatalog med ungefär 600000 stjärnor och det "
-"är möjligt att hämta hem extra kataloger med upp till 210 miljoner stjärnor."
+"Stellarium levereras med en katalog med cirka 600 000 stjärnor. Det går att "
+"hämta ytterligare kataloger med upp till 220 miljoner stjärnor."
 
 #. (itstool) path: description/p
 #: org.stellarium.Stellarium.appdata.xml:13
 msgid ""
 "Stellarium has multiple sky cultures - see the constellations from the "
-"traditions of Polynesian, Inuit, Navajo, Korean, Lakota, Egyptian and "
-"Chinese astronomers, as well as the traditional Western constellations."
+"traditions of Polynesian, Inuit, Navajo, Korean, Greek and Chinese "
+"astronomers, as well as the traditional Western or official modern "
+"constellations."
 msgstr ""
-"Stellarium har flera stjärnmytologier - se stjärnbilderna enligt "
-"traditionerna hos polynesiska, inuitiska, navajoiska, koreanska, lakotaiska,"
-" egyptiska och kinesiska astronomer, så väl som de traditionella "
-"västerländska stjärnbilderna."
+"Stellarium har flera himmelskulturer. Se stjärnbilder enligt polynesiska, "
+"inuitiska, navajoiska, koreanska, grekiska och kinesiska astronomiska "
+"traditioner, liksom de traditionella västerländska eller officiella moderna "
+"stjärnbilderna."
 
 #. (itstool) path: description/p
 #: org.stellarium.Stellarium.appdata.xml:14
@@ -71,7 +73,27 @@ msgstr ""
 " såg ut för astronauterna på Apollo, eller hur Saturnus ringar ser ut från "
 "Titan."
 
+#. (itstool) path: keywords/keyword
+#: org.stellarium.Stellarium.appdata.xml:17
+msgid "astronomy"
+msgstr "astronomi"
+
+#. (itstool) path: keywords/keyword
+#: org.stellarium.Stellarium.appdata.xml:18
+msgid "planetarium"
+msgstr "planetarium"
+
+#. (itstool) path: keywords/keyword
+#: org.stellarium.Stellarium.appdata.xml:19
+msgid "sky"
+msgstr "himmel"
+
+#. (itstool) path: keywords/keyword
+#: org.stellarium.Stellarium.appdata.xml:20
+msgid "universe"
+msgstr "universum"
+
 #. (itstool) path: component/developer_name
-#: org.stellarium.Stellarium.appdata.xml:108
+#: org.stellarium.Stellarium.appdata.xml:144
 msgid "Stellarium team"
 msgstr "Stellariumteamet"

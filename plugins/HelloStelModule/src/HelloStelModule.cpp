@@ -25,6 +25,7 @@
 #include "HelloStelModule.hpp"
 
 #include <QDebug>
+#include <QFont>
 
 /*************************************************************************
  This method is the one called automatically by the StelModuleMgr just 
@@ -42,17 +43,16 @@ StelPluginInfo HelloStelModuleStelPluginInterface::getPluginInfo() const
 	info.displayedName = "Hello World test plugin";
 	info.authors = "Stellarium team";
 	info.contact = "www.stellarium.org";
-	info.description = "An minimal plugin example.";
+	info.description = "A minimal plugin example.";
 	return info;
 }
 
 /*************************************************************************
  Constructor
 *************************************************************************/
-HelloStelModule::HelloStelModule()
+HelloStelModule::HelloStelModule(): fontSize(25)
 {
 	setObjectName("HelloStelModule");
-	font.setPixelSize(25);
 }
 
 /*************************************************************************
@@ -88,6 +88,8 @@ void HelloStelModule::draw(StelCore* core)
 {
 	StelPainter painter(core->getProjection2d());
 	painter.setColor(1,1,1,1);
+	QFont font=QGuiApplication::font();
+	font.setPixelSize(fontSize);
 	painter.setFont(font);
 	painter.drawText(300, 300, "Hello World!");
 }

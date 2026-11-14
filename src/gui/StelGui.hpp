@@ -69,6 +69,7 @@ class StelGui : public QObject, public StelGuiBase
 	Q_PROPERTY(bool flagShowGalacticGridButton READ getFlagShowGalacticGridButton WRITE setFlagShowGalacticGridButton NOTIFY flagShowGalacticGridButtonChanged )
 	Q_PROPERTY(bool flagShowEclipticGridButton READ getFlagShowEclipticGridButton WRITE setFlagShowEclipticGridButton NOTIFY flagShowEclipticGridButtonChanged )
 	Q_PROPERTY(bool flagShowConstellationBoundariesButton READ getFlagShowConstellationBoundariesButton WRITE setFlagShowConstellationBoundariesButton NOTIFY flagShowConstellationBoundariesButtonChanged )
+	Q_PROPERTY(bool flagShowConstellationArtsButton READ getFlagShowConstellationArtsButton WRITE setFlagShowConstellationArtsButton NOTIFY flagShowConstellationArtsButtonChanged )
 	Q_PROPERTY(bool flagShowAsterismLinesButton READ getFlagShowAsterismLinesButton WRITE setFlagShowAsterismLinesButton NOTIFY flagShowAsterismLinesButtonChanged )
 	Q_PROPERTY(bool flagShowAsterismLabelsButton READ getFlagShowAsterismLabelsButton WRITE setFlagShowAsterismLabelsButton NOTIFY flagShowAsterismLabelsButtonChanged )
 	Q_PROPERTY(bool flagUseButtonsBackground   READ getFlagUseButtonsBackground   WRITE setFlagUseButtonsBackground   NOTIFY flagUseButtonsBackgroundChanged)
@@ -76,25 +77,27 @@ class StelGui : public QObject, public StelGuiBase
 	Q_PROPERTY(bool flagEnableFocusOnDaySpinner READ getFlagEnableFocusOnDaySpinner WRITE setFlagEnableFocusOnDaySpinner NOTIFY flagEnableFocusOnDaySpinnerChanged)
 	Q_PROPERTY(bool flagShowCardinalButton READ getFlagShowCardinalButton WRITE setFlagShowCardinalButton NOTIFY  flagShowCardinalButtonChanged)
 	Q_PROPERTY(bool flagShowCompassButton READ getFlagShowCompassButton WRITE setFlagShowCompassButton NOTIFY  flagShowCompassButtonChanged)
+	//! Toolbar corner: 0=bottom-left, 1=bottom-right, 2=top-left, 3=top-right
+	Q_PROPERTY(int toolbarCorner READ getToolbarCorner WRITE setToolbarCorner NOTIFY toolbarCornerChanged)
 
 public:
 	friend class ViewDialog;
 	
 	StelGui();
-	virtual ~StelGui() Q_DECL_OVERRIDE;
+	~StelGui() override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in the StelModule class
 	//! Initialize the StelGui object.
-	virtual void init(QGraphicsWidget* topLevelGraphicsWidget) Q_DECL_OVERRIDE;
+	void init(QGraphicsWidget* topLevelGraphicsWidget) override;
 	void update();
 
 	StelStyle getStelStyle() const {return currentStelStyle;}
 	
 	///////////////////////////////////////////////////////////////////////////
 	// Methods specific to the StelGui class
-	//! Load a Qt style sheet to define the widgets style
-	void loadStyle(const QString& fileName);
+	// ! Load a Qt style sheet to define the widgets style
+	//void loadStyle(const QString& fileName);
 	
 	//! Get the button bar at the bottom of the screen
 	BottomStelBar* getButtonBar() const;
@@ -114,122 +117,104 @@ public:
 #endif
 
 	//! Used to force a refreshing of the GUI elements such as the button bars.
-	virtual void forceRefreshGui() Q_DECL_OVERRIDE;
+	void forceRefreshGui() override;
 	
-	virtual void setVisible(bool b) Q_DECL_OVERRIDE;
+	void setVisible(bool b) override;
 
-	virtual bool getVisible() const Q_DECL_OVERRIDE;
+	bool getVisible() const override;
 
-	virtual bool getAstroCalcVisible() const;
+	bool getAstroCalcVisible() const;
 
-	virtual bool isCurrentlyUsed() const Q_DECL_OVERRIDE;
+	bool isCurrentlyUsed() const override;
 	
-	virtual void setInfoTextFilters(const StelObject::InfoStringGroup& aflags) Q_DECL_OVERRIDE;
-	virtual const StelObject::InfoStringGroup& getInfoTextFilters() const Q_DECL_OVERRIDE;
+	void setInfoTextFilters(const StelObject::InfoStringGroup& aflags) override;
+	const StelObject::InfoStringGroup& getInfoTextFilters() const override;
 
 public slots:
-	//! Set the state of the flag of usage background for GUI buttons
-	void setFlagUseButtonsBackground(bool b);
-	//! Get the state of the flag of usage background for GUI buttons
-	bool getFlagUseButtonsBackground() const { return flagUseButtonsBackground; }
-
-	//! Set the state of the flag for kinetic scrolling
-	void setFlagUseKineticScrolling(bool b);
-	//! Get the state of the flag for kinetic scrolling
-	bool getFlagUseKineticScrolling() const { return flagUseKineticScrolling; }
-
-	//! Set the state of the flag for enable focus on day spinner in Date and Time dialog
-	void setFlagEnableFocusOnDaySpinner(bool b);
-	//! Get the state of the flag for enable focus on day spinner in Date and Time dialog
-	bool getFlagEnableFocusOnDaySpinner() const { return flagEnableFocusOnDaySpinner; }
-
-	//! Define whether the button for exit should be visible
-	void setFlagShowQuitButton(bool b);
-	//! Get whether the exit button is visible
-	bool getFlagShowQuitButton() const;
-
 	//! Define whether the buttons toggling image flip should be visible
+	//! This immediately also stores flag to config.ini
 	void setFlagShowFlipButtons(bool b);
-	//! Get whether the buttons toggling image flip are visible
-	bool getFlagShowFlipButtons() const;
 
 	//! Define whether the button toggling nebulae background should be visible
+	//! This immediately also stores flag to config.ini
 	void setFlagShowNebulaBackgroundButton(bool b);
-	//! Get whether the button toggling nebulae background is visible
-	bool getFlagShowNebulaBackgroundButton() const;
-
-	//! Define whether the button toggling DSS survey (TOAST) should be visible
-	void setFlagShowDSSButton(bool b);
-	//! Get whether the button toggling DSS survey (TOAST) is visible
-	bool getFlagShowDSSButton() const;
-
-	//! Define whether the button toggling cardinal should be visible
-	void setFlagShowCardinalButton(bool b);
-	//! Get whether the button toggling cardinal is visible
-	bool getFlagShowCardinalButton() const;
-
-	//! Define whether the button toggling compass marks should be visible
-	void setFlagShowCompassButton(bool b);
-	//! Get whether the button toggling compass marks is visible
-	bool getFlagShowCompassButton() const;
-
-	//! Define whether the button toggling HiPS surveys should be visible
-	void setFlagShowHiPSButton(bool b);
-	//! Get whether the button toggling HiPS surveys is visible
-	bool getFlagShowHiPSButton() const;
-
-	//! Define whether the button for centering on selected object should be visible. If not, user can still press SPACE to center.
-	void setFlagShowGotoSelectedObjectButton(bool b);
-	//! Get whether the button for centering on selected object is visible
-	bool getFlagShowGotoSelectedObjectButton() const;
-
-	//! Define whether the button toggling nightmode should be visible in addition to the Ctrl+N hotkey.
-	void setFlagShowNightmodeButton(bool b);
-	//! Get whether the button toggling nightmode is visible
-	bool getFlagShowNightmodeButton() const;
-
-	//! Define whether the button toggling fullscreen view should be visible in addition to F11 hotkey.
-	void setFlagShowFullscreenButton(bool b);
-	//! Get whether the button toggling fullscreen view is visible
-	bool getFlagShowFullscreenButton() const;
 
 	//! Define whether the button toggling observing list should be visible
+	//! This immediately also stores flag to config.ini
 	void setFlagShowObsListButton(bool b);
-	//! Get whether the button toggling observing list is visible
-	bool getFlagShowObsListButton() const;
 
 	//! Define whether the button toggling ICRS grid should be visible
+	//! This immediately also stores flag to config.ini
 	void setFlagShowICRSGridButton(bool b);
-	//! Get whether the button toggling ICRS grid is visible
-	bool getFlagShowICRSGridButton() const;
 
 	//! Define whether the button toggling galactic grid should be visible
+	//! This immediately also stores flag to config.ini
 	void setFlagShowGalacticGridButton(bool b);
-	//! Get whether the button toggling galactic grid is visible
-	bool getFlagShowGalacticGridButton() const;
 
 	//! Define whether the button toggling ecliptic grid should be visible
+	//! This immediately also stores flag to config.ini
 	void setFlagShowEclipticGridButton(bool b);
-	//! Get whether the button toggling ecliptic grid is visible
-	bool getFlagShowEclipticGridButton() const;
 
 	//! Define whether the button toggling constellation boundaries should be visible
+	//! This immediately also stores flag to config.ini
 	void setFlagShowConstellationBoundariesButton(bool b);
-	//! Get whether the button toggling constellation boundaries is visible
-	bool getFlagShowConstellationBoundariesButton() const;
+
+	//! Define whether the button toggling constellation arts should be visible
+	//! This immediately also stores flag to config.ini
+	void setFlagShowConstellationArtsButton(bool b);
 
 	//! Define whether the button toggling asterism lines should be visible
+	//! This immediately also stores flag to config.ini
 	void setFlagShowAsterismLinesButton(bool b);
-	//! Get whether the button toggling asterism lines is visible
-	bool getFlagShowAsterismLinesButton() const;
 
 	//! Define whether the button toggling asterism labels should be visible
+	//! This immediately also stores flag to config.ini
 	void setFlagShowAsterismLabelsButton(bool b);
-	//! Get whether the button toggling asterism labels is visible
-	bool getFlagShowAsterismLabelsButton() const;
 
-	//! Get the auto-hide status of the horizontal toolbar.
-	bool getAutoHideHorizontalButtonBar() const;
+	//! Define whether the button toggling DSS survey (TOAST) should be visible
+	//! This immediately also stores flag to config.ini
+	void setFlagShowDSSButton(bool b);
+
+	//! Define whether the button toggling HiPS surveys should be visible
+	//! This immediately also stores flag to config.ini
+	void setFlagShowHiPSButton(bool b);
+
+	//! Define whether the button for centering on selected object should be visible. If not, user can still press SPACE to center.
+	//! This immediately also stores flag to config.ini
+	void setFlagShowGotoSelectedObjectButton(bool b);
+
+	//! Define whether the button toggling nightmode should be visible in addition to the Ctrl+N hotkey.
+	//! This immediately also stores flag to config.ini
+	void setFlagShowNightmodeButton(bool b);
+
+	//! Define whether the button toggling fullscreen view should be visible in addition to F11 hotkey.
+	//! This immediately also stores flag to config.ini
+	void setFlagShowFullscreenButton(bool b);
+
+	//! Define whether the button for exit should be visible
+	//! This immediately also stores flag to config.ini
+	void setFlagShowQuitButton(bool b);
+
+	//! Define whether the button toggling cardinal should be visible
+	//! This immediately also stores flag to config.ini
+	void setFlagShowCardinalButton(bool b);
+
+	//! Define whether the button toggling compass marks should be visible
+	//! This immediately also stores flag to config.ini
+	void setFlagShowCompassButton(bool b);
+
+	//! Set the state of the flag of usage background for GUI buttons
+	//! This immediately also stores flag to config.ini
+	void setFlagUseButtonsBackground(bool b);
+
+	//! Set the state of the flag for kinetic scrolling
+	//! This immediately also stores flag to config.ini
+	void setFlagUseKineticScrolling(bool b);
+
+	//! Set the state of the flag for enable focus on day spinner in Date and Time dialog
+	//! This immediately also stores flag to config.ini
+	void setFlagEnableFocusOnDaySpinner(bool b);
+
 	//! Set the auto-hide status of the horizontal toolbar.
 	//! When set to true, the horizontal toolbar will auto-hide itself, only
 	//! making an appearance when the mouse is nearby.  When false, it will
@@ -237,14 +222,15 @@ public slots:
 	//! @param b to hide or not to hide
 	void setAutoHideHorizontalButtonBar(bool b);
 	
-	//! Get the auto-hide status of the vertical toolbar.
-	bool getAutoHideVerticalButtonBar() const;
 	//! Set the auto-hide status of the vertical toolbar.
 	//! When set to true, the vertical toolbar will auto-hide itself, only
 	//! making an appearance when the mouse is nearby.  When false, it will
 	//! remain on screen.
 	//! @param b to hide or not to hide
 	void setAutoHideVerticalButtonBar(bool b);
+
+	//! Hide or show the GUI.  Public so it can be called from scripts.
+	void setGuiVisible(bool);
 
 #ifdef ENABLE_SCRIPTING
 	//! change keys when a script is running / not running
@@ -253,12 +239,70 @@ public slots:
 	void decreaseScriptSpeed();
 	void setRealScriptSpeed();
 	void stopScript();
+	#ifndef ENABLE_SCRIPT_QML
 	void pauseScript();
 	void resumeScript();
+	#endif
 #endif
 
-	//! Hide or show the GUI.  Public so it can be called from scripts.
-	void setGuiVisible(bool);	
+	void displayAllInfo();
+	void displayDefaultInfo();
+	void displayShortInfo();
+	void displayNoneInfo();
+	void displayCustomInfo();
+
+    public:
+	// Getters
+	//! Get the state of the flag of usage background for GUI buttons
+	bool getFlagUseButtonsBackground() const { return flagUseButtonsBackground; }
+	//! Get the state of the flag for kinetic scrolling
+	bool getFlagUseKineticScrolling() const { return flagUseKineticScrolling; }
+	//! Get the state of the flag for enable focus on day spinner in Date and Time dialog
+	bool getFlagEnableFocusOnDaySpinner() const { return flagEnableFocusOnDaySpinner; }
+	//! Get whether the exit button is visible
+	bool getFlagShowQuitButton() const;
+	//! Get whether the buttons toggling image flip are visible
+	bool getFlagShowFlipButtons() const;
+	//! Get whether the button toggling nebulae background is visible
+	bool getFlagShowNebulaBackgroundButton() const;
+	//! Get whether the button toggling DSS survey (TOAST) is visible
+	bool getFlagShowDSSButton() const;
+	//! Get whether the button toggling cardinal is visible
+	bool getFlagShowCardinalButton() const;
+	//! Get whether the button toggling compass marks is visible
+	bool getFlagShowCompassButton() const;
+	//! Get whether the button toggling HiPS surveys is visible
+	bool getFlagShowHiPSButton() const;
+	//! Get whether the button for centering on selected object is visible
+	bool getFlagShowGotoSelectedObjectButton() const;
+	//! Get whether the button toggling nightmode is visible
+	bool getFlagShowNightmodeButton() const;
+	//! Get whether the button toggling fullscreen view is visible
+	bool getFlagShowFullscreenButton() const;
+	//! Get whether the button toggling observing list is visible
+	bool getFlagShowObsListButton() const;
+	//! Get whether the button toggling ICRS grid is visible
+	bool getFlagShowICRSGridButton() const;
+	//! Get whether the button toggling galactic grid is visible
+	bool getFlagShowGalacticGridButton() const;
+	//! Get whether the button toggling ecliptic grid is visible
+	bool getFlagShowEclipticGridButton() const;
+	//! Get whether the button toggling constellation boundaries is visible
+	bool getFlagShowConstellationBoundariesButton() const;
+	//! Get whether the button toggling constellation arts is visible
+	bool getFlagShowConstellationArtsButton() const;
+	//! Get whether the button toggling asterism lines is visible
+	bool getFlagShowAsterismLinesButton() const;
+	//! Get whether the button toggling asterism labels is visible
+	bool getFlagShowAsterismLabelsButton() const;
+	//! Get the auto-hide status of the horizontal toolbar.
+	bool getAutoHideHorizontalButtonBar() const;
+	//! Get the auto-hide status of the vertical toolbar.
+	bool getAutoHideVerticalButtonBar() const;
+	//! Get the toolbar corner (0=bottom-left, 1=bottom-right, 2=top-left, 3=top-right).
+	int  getToolbarCorner() const;
+	//! Set the toolbar corner (0=bottom-left, 1=bottom-right, 2=top-left, 3=top-right).
+	void setToolbarCorner(int corner);
 
 signals:
 	void visibleChanged(bool b);
@@ -280,10 +324,15 @@ signals:
 	void flagShowGalacticGridButtonChanged(bool b);
 	void flagShowEclipticGridButtonChanged(bool b);
 	void flagShowConstellationBoundariesButtonChanged(bool b);
+	void flagShowConstellationArtsButtonChanged(bool b);
 	void flagShowAsterismLinesButtonChanged(bool b);
 	void flagShowAsterismLabelsButtonChanged(bool b);
 	void flagShowCardinalButtonChanged(bool b);
 	void flagShowCompassButtonChanged(bool b);
+	void toolbarCornerChanged(int corner);
+	void infoStringChanged();
+	void guiStyleChanged(const QString &style);
+	void htmlStyleChanged(const QString &style);
 
 private slots:
 	void reloadStyle();
@@ -292,12 +341,13 @@ private slots:
 	void scriptStopped();
 #endif
 	//! Load color scheme from the given ini file and section name
-	virtual void setStelStyle(const QString& section) Q_DECL_OVERRIDE;
+	void setStelStyle(const QString& style) override final;
 	void quit();	
 	void updateI18n();
-	void copySelectedObjectInfo(void);
+	void copySelectedObjectInfo(void); //! Copy object infoString to system clipboard in both plaintext and HTML versions
 
 private:
+	void updateStelStyle();
 	//! convenience method to find an action in the StelActionMgr.
 	StelAction* getAction(const QString& actionName) const;
 
@@ -334,7 +384,7 @@ private:
 	ScriptConsole* scriptConsole;
 #endif
 	AstroCalcDialog* astroCalcDialog;
-    ObsListDialog* obsListDialog;
+	ObsListDialog* obsListDialog;
 
 	bool flagShowFlipButtons;
 	StelButton* flipVert;
@@ -370,6 +420,9 @@ private:
 	bool flagShowConstellationBoundariesButton;
 	StelButton* btShowConstellationBoundaries;
 
+	bool flagShowConstellationArtsButton;
+	StelButton* btShowConstellationArts;
+
 	bool flagShowAsterismLinesButton;
 	StelButton* btShowAsterismLines;
 
@@ -403,15 +456,15 @@ private:
 class StelGui : public StelGuiBase
 {
 public:
-	StelGui() {;}
+	StelGui(): dummyInfoTextFilter(StelObject::InfoStringGroupFlags::None), visible(false) {;}
 	~StelGui() {;}
-	virtual void init(QGraphicsWidget* topLevelGraphicsWidget, class StelAppGraphicsWidget* stelAppGraphicsWidget) {;}
+	virtual void init(QGraphicsWidget* topLevelGraphicsWidget) {;}
 	virtual void updateI18n() {;}
 	virtual void setStelStyle(const QString& section) {;}
 	virtual void setInfoTextFilters(const StelObject::InfoStringGroup& aflags) {dummyInfoTextFilter=aflags;}
 	virtual const StelObject::InfoStringGroup& getInfoTextFilters() const {return dummyInfoTextFilter;}
 	virtual QProgressBar* addProgressBar() {return new QProgressBar;}
-	virtual QAction* addGuiActions(const QString& actionName, const QString& text, const QString& shortCut, const QString& helpGroup, bool checkable=true, bool autoRepeat=false) {return Q_NULLPTR;}
+	virtual QAction* addGuiActions(const QString& actionName, const QString& text, const QString& shortCut, const QString& helpGroup, bool checkable=true, bool autoRepeat=false) {return nullptr;}
 	virtual void forceRefreshGui() {;}
 	virtual void setVisible(bool b) {visible=b;}
 	virtual bool getVisible() const {return visible;}

@@ -36,7 +36,7 @@ SimbadLookupReply::SimbadLookupReply(const QString& aurl, QNetworkAccessManager*
 	else
 	{
 		// First wait before starting query. This avoids sending a query for each autocompletion letter.
-		QTimer::singleShot(delayMs, this, SLOT(delayTimerCompleted()));
+		QTimer::singleShot(delayMs, this, &SimbadLookupReply::delayTimerCompleted);
 	}
 }
 
@@ -44,7 +44,7 @@ SimbadLookupReply::~SimbadLookupReply()
 {
 	if (reply)
 	{
-		disconnect(reply, SIGNAL(finished()), this, SLOT(httpQueryFinished()));
+		disconnect(reply, &QNetworkReply::finished, this, &SimbadLookupReply::httpQueryFinished);
 		reply->abort();
 		//do not use delete here
 		reply->deleteLater();
@@ -57,7 +57,7 @@ void SimbadLookupReply::deleteNetworkReply()
 {
 	if(reply)
 	{
-		disconnect(reply, SIGNAL(finished()), this, SLOT(httpQueryFinished()));
+		disconnect(reply, &QNetworkReply::finished, this, &SimbadLookupReply::httpQueryFinished);
 		reply->abort();
 		delete reply;
 		reply = Q_NULLPTR;
@@ -67,7 +67,7 @@ void SimbadLookupReply::deleteNetworkReply()
 void SimbadLookupReply::delayTimerCompleted()
 {
 	reply = netMgr->get(QNetworkRequest(url));
-	connect(reply, SIGNAL(finished()), this, SLOT(httpQueryFinished()));
+	connect(reply, &QNetworkReply::finished, this, &SimbadLookupReply::httpQueryFinished);
 }
 
 void SimbadLookupReply::httpQueryFinished()
@@ -75,7 +75,7 @@ void SimbadLookupReply::httpQueryFinished()
 	if (reply->error()!=QNetworkReply::NoError || reply->bytesAvailable()==0)
 	{
 		currentStatus = SimbadLookupErrorOccured;
-		errorString = QString("%1: %2").arg(q_("Network error")).arg(reply->errorString());
+		errorString = QString("%1: %2").arg(q_("Network error"), reply->errorString());
 		emit statusChanged();
 		return;
 	}
@@ -148,13 +148,26 @@ void SimbadLookupReply::httpQueryFinished()
 					}
 					Vec3d v;
 					StelUtils::spheToRect(ra, dec, v);
+					
+					// Read object type (second line after coordinates)
 					line = reply->readLine();
-					line.chop(1); // Remove a line break at the end
+					line.chop(1); // Remove line break at the end
+					QString objectType = line.simplified();
+					
+					// Read object identifiers
+					line = reply->readLine();
+					while (line.simplified().isEmpty())
+					{   // for example SDSS J140312.52+542056.2 (i.e. M101) does not have HIP so an empty lines, need to check
+						line = reply->readLine();
+						line.chop(1); // Remove a line break at the end
+					}
 					line.replace("NAME " ,"");
-					resultPositions[line.simplified()]=v; // Remove an extra spaces
+					QString objectName = line.simplified();
+					results.insert({objectName, v, objectType});
 				}
 				line = reply->readLine();
 				line.chop(1); // Remove a line break at the end
+				break;  // there might be more than one result of names for the same object
 			}
 			currentStatus = SimbadLookupFinished;
 		}
@@ -172,7 +185,7 @@ QString SimbadLookupReply::getCurrentStatusString() const
 		case SimbadLookupErrorOccured:
 			return q_("Error");
 		case SimbadLookupFinished:
-			return resultPositions.isEmpty() ? q_("Not found") : q_("Found");
+			return results.empty() ? q_("Not found") : q_("Found");
 		case SimbadCoordinateLookupFinished:
 			return cooResult.isEmpty() ? q_("Not found") : q_("Found");
 	}
@@ -189,7 +202,7 @@ SimbadLookupReply* SimbadSearcher::lookup(const QString& serverUrl, const QStrin
 {
 	// Create the Simbad query
 	QString url(serverUrl);
-	QString query = "format object \"%COO(d;A D)\\n%IDLIST(1)\"\n";
+	QString query = "format object \"%COO(d;A D)\\n%OTYPE(V)\\n%IDLIST(HIP)\\n%IDLIST(Gaia DR3)\\n%IDLIST(1)\"\n";
 	query += QString("set epoch J2000\nset limit %1\n query id ").arg(maxNbResult);
 	query += objectName;
 	QByteArray ba = QUrl::toPercentEncoding(query, "", "");
@@ -216,7 +229,7 @@ SimbadLookupReply* SimbadSearcher::lookupCoords(const QString& serverUrl, const 
 
 	// Create the Simbad query
 	QString url(serverUrl);
-	// The query format could be enriched! http://simbad.u-strasbg.fr/simbad/sim-help?Page=sim-fscript#Formats
+	// The query format could be enriched! https://simbad.cds.unistra.fr/simbad/sim-help?Page=sim-fscript#Formats
 	// NOTE: Newlines and other specials must be coded with double-backslash!
 	QString query = "format object \""
 			"At coords (J2000.0) %-20COO(s:;A D):\\n"

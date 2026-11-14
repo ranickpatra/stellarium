@@ -53,7 +53,7 @@ QNetworkAccessManager& MultiLevelJsonBase::getNetworkAccessManager()
 // 		QString cachePath = StelApp::getInstance().getCacheDir();
 // 		cache->setCacheDirectory(cachePath+"/JSONCache");
 // 		networkAccessManager->setCache(cache);
-		connect(networkAccessManager, SIGNAL(finished(QNetworkReply*)), &StelApp::getInstance(), SLOT(reportFileDownloadFinished(QNetworkReply*)));
+		connect(networkAccessManager, &QNetworkAccessManager::finished, &StelApp::getInstance(), &StelApp::reportFileDownloadFinished);
 	}
 	return *networkAccessManager;
 }
@@ -64,9 +64,9 @@ QNetworkAccessManager& MultiLevelJsonBase::getNetworkAccessManager()
 class JsonLoadThread : public QThread
 {
 	public:
-		JsonLoadThread(MultiLevelJsonBase* atile, QByteArray content, bool aqZcompressed=false, bool agzCompressed=false) : QThread((QObject*)atile),
-			tile(atile), data(content), qZcompressed(aqZcompressed), gzCompressed(agzCompressed){;}
-		virtual void run();
+		JsonLoadThread(MultiLevelJsonBase* atile, QByteArray content, bool aqZcompressed=false, bool agzCompressed=false) : QThread(static_cast<QObject*>(atile)),
+			tile(atile), data(content), qZcompressed(aqZcompressed), gzCompressed(agzCompressed){}
+		void run() override;
 	private:
 		MultiLevelJsonBase* tile;
 		QByteArray data;
@@ -84,7 +84,7 @@ void JsonLoadThread::run()
 	}
 	catch (std::runtime_error& e)
 	{
-		qWarning() << "WARNING : Can't parse loaded JSON description: " << e.what();
+		qWarning() << "Can't parse loaded JSON description: " << e.what();
 		tile->errorOccured = true;
 	}
 }
@@ -108,7 +108,7 @@ MultiLevelJsonBase::MultiLevelJsonBase(MultiLevelJsonBase* parent) : StelSkyLaye
 void MultiLevelJsonBase::initFromUrl(const QString& url)
 {
 	const MultiLevelJsonBase* parent = qobject_cast<MultiLevelJsonBase*>(QObject::parent());
-	contructorUrl = url;
+	constructorUrl = url;
 	if (!url.startsWith("http", Qt::CaseInsensitive) && (parent==Q_NULLPTR || !parent->getBaseUrl().startsWith("http", Qt::CaseInsensitive)))
 	{
 		// Assume a local file
@@ -124,7 +124,7 @@ void MultiLevelJsonBase::initFromUrl(const QString& url)
 			fileName = StelFileMgr::findFile(parent->getBaseUrl()+url);
 			if (fileName.isEmpty())
 			{
-				qWarning() << "WARNING : Can't find JSON description: " << url;
+				qWarning() << "Can't find JSON description: " << url;
 				errorOccured = true;
 				return;
 			}
@@ -142,7 +142,7 @@ void MultiLevelJsonBase::initFromUrl(const QString& url)
 			}
 			catch (std::runtime_error& e)
 			{
-				qWarning() << "WARNING: Can't parse JSON document: " << QDir::toNativeSeparators(fileName) << ":" << e.what();
+				qWarning() << "Can't parse JSON document: " << QDir::toNativeSeparators(fileName) << ":" << e.what();
 				errorOccured = true;
 				f.close();
 				return;
@@ -152,8 +152,8 @@ void MultiLevelJsonBase::initFromUrl(const QString& url)
 	}
 	else
 	{
-		// Use a very short deletion delay to ensure that tile which are outside screen are discared before they are even downloaded
-		// This is useful to reduce bandwidth when the user moves rapidely
+		// Use a very short deletion delay to ensure that tiles which are outside screen are discarded before they are even downloaded
+		// This is useful to reduce bandwidth when the user moves the view rapidly
 		deletionDelay = 0.001;
 		QUrl qurl;
 		if (url.startsWith("http", Qt::CaseInsensitive))
@@ -172,9 +172,9 @@ void MultiLevelJsonBase::initFromUrl(const QString& url)
 		//qDebug() << "Started downloading " << httpReply->request().url().path();
 		Q_ASSERT(httpReply->error()==QNetworkReply::NoError);
 		//qDebug() << httpReply->attribute(QNetworkRequest::SourceIsFromCacheAttribute).toBool();
-		connect(httpReply, SIGNAL(finished()), this, SLOT(downloadFinished()));
-		//connect(httpReply, SIGNAL(error(QNetworkReply::NetworkError)), this, SLOT(downloadError(QNetworkReply::NetworkError)));
-		//connect(httpReply, SIGNAL(destroyed()), this, SLOT(replyDestroyed()));
+		connect(httpReply, &QNetworkReply::finished, this, &MultiLevelJsonBase::downloadFinished);
+		//connect(httpReply, &QNetworkReply::error, this, &MultiLevelJsonBase::downloadError);
+		//connect(httpReply, &QNetworkReply::destroyed, this, &MultiLevelJsonBase::replyDestroyed);
 		downloading = true;
 		QString turl = qurl.toString();
 		baseUrl = turl.left(turl.lastIndexOf('/')+1);
@@ -188,7 +188,7 @@ void MultiLevelJsonBase::initFromQVariantMap(const QVariantMap& map)
 	if (parent!=Q_NULLPTR)
 	{
 		baseUrl = parent->getBaseUrl();
-		contructorUrl = parent->contructorUrl + "/?";
+		constructorUrl = parent->constructorUrl + "/?";
 	}
 	try
 	{
@@ -196,7 +196,7 @@ void MultiLevelJsonBase::initFromQVariantMap(const QVariantMap& map)
 	}
 	catch (std::runtime_error& e)
 	{
-		qWarning() << "WARNING: invalid variant map: " << e.what();
+		qWarning() << "Invalid variant map: " << e.what();
 		errorOccured = true;
 		return;
 	}
@@ -220,7 +220,7 @@ MultiLevelJsonBase::~MultiLevelJsonBase()
 	if (loadThread && loadThread->isRunning())
 	{
 		//qDebug() << "--> Abort thread " << contructorUrl;
-		disconnect(loadThread, SIGNAL(finished()), this, SLOT(jsonLoadFinished()));
+		disconnect(loadThread, &JsonLoadThread::finished, this, &MultiLevelJsonBase::jsonLoadFinished);
 		// The thread is currently running, it needs to be properly stopped
 		if (loadThread->wait(1)==false)
 		{
@@ -228,7 +228,7 @@ MultiLevelJsonBase::~MultiLevelJsonBase()
 			//loadThread->wait(2000);
 		}
 	}
-	for (auto* tile : subTiles)
+	for (auto* tile : std::as_const(subTiles))
 	{
 		tile->deleteLater();
 	}
@@ -238,7 +238,7 @@ MultiLevelJsonBase::~MultiLevelJsonBase()
 
 void MultiLevelJsonBase::scheduleChildsDeletion()
 {
-	for (auto* tile : subTiles)
+	for (auto* tile : std::as_const(subTiles))
 	{
 		if (tile->timeWhenDeletionScheduled<0)
 			tile->timeWhenDeletionScheduled = StelApp::getInstance().getTotalRunTime();
@@ -249,7 +249,7 @@ void MultiLevelJsonBase::scheduleChildsDeletion()
 void MultiLevelJsonBase::cancelDeletion()
 {
 	timeWhenDeletionScheduled=-1.;
-	for (auto* tile : subTiles)
+	for (auto* tile : std::as_const(subTiles))
 	{
 		tile->cancelDeletion();
 	}
@@ -293,7 +293,7 @@ void MultiLevelJsonBase::downloadFinished()
 	if (httpReply->error()!=QNetworkReply::NoError)
 	{
 		if (httpReply->error()!=QNetworkReply::OperationCanceledError)
-			qWarning() << "WARNING : Problem while downloading JSON description for " << httpReply->request().url().path() << ": "<< httpReply->errorString();
+			qWarning() << "Problem while downloading JSON description for " << httpReply->request().url().path() << ": "<< httpReply->errorString();
 		errorOccured = true;
 		httpReply->deleteLater();
 		httpReply=Q_NULLPTR;
@@ -305,7 +305,7 @@ void MultiLevelJsonBase::downloadFinished()
 	QByteArray content = httpReply->readAll();
 	if (content.isEmpty())
 	{
-		qWarning() << "WARNING : empty JSON description for " << httpReply->request().url().path();
+		qWarning() << "Empty JSON description for " << httpReply->request().url().path();
 		errorOccured = true;
 		httpReply->deleteLater();
 		httpReply=Q_NULLPTR;
@@ -320,7 +320,7 @@ void MultiLevelJsonBase::downloadFinished()
 
 	Q_ASSERT(loadThread==Q_NULLPTR);
 	loadThread = new JsonLoadThread(this, content, qZcompressed, gzCompressed);
-	connect(loadThread, SIGNAL(finished()), this, SLOT(jsonLoadFinished()));
+	connect(loadThread, &JsonLoadThread::finished, this, &MultiLevelJsonBase::jsonLoadFinished);
 	loadThread->start(QThread::LowestPriority);
 }
 
@@ -339,7 +339,7 @@ void MultiLevelJsonBase::jsonLoadFinished()
 	}
 	catch (std::runtime_error& e)
 	{
-		qWarning() << "WARNING: invalid variant map: " << e.what();
+		qWarning() << "Invalid variant map: " << e.what();
 		errorOccured = true;
 		return;
 	}
@@ -353,7 +353,7 @@ void MultiLevelJsonBase::deleteUnusedSubTiles()
 		return;
 	const double now = StelApp::getInstance().getTotalRunTime();
 	bool deleteAll = true;
-	for (auto* tile : subTiles)
+	for (auto* tile : std::as_const(subTiles))
 	{
 		if (tile->timeWhenDeletionScheduled<0 || (now-tile->timeWhenDeletionScheduled)<deletionDelay)
 		{
@@ -363,15 +363,15 @@ void MultiLevelJsonBase::deleteUnusedSubTiles()
 	}
 	if (deleteAll==true)
 	{
-		//qDebug() << "Delete all tiles for " << this << ": " << contructorUrl;
-		for (auto* tile : subTiles)
+		//qDebug() << "Delete all tiles for " << this << ": " << constructorUrl;
+		for (auto* tile : std::as_const(subTiles))
 			tile->deleteLater();
 		subTiles.clear();
 	}
 	else
 	{
 		// Nothing to delete at this level, propagate
-		for (auto* tile : subTiles)
+		for (auto* tile : std::as_const(subTiles))
 			tile->deleteUnusedSubTiles();
 	}
 }
@@ -383,7 +383,7 @@ void MultiLevelJsonBase::updatePercent(int tot, int toBeLoaded)
 		if (loadingState==true)
 		{
 			loadingState=false;
-			emit(loadingStateChanged(false));
+			emit loadingStateChanged(false);
 		}
 		return;
 	}
@@ -394,7 +394,7 @@ void MultiLevelJsonBase::updatePercent(int tot, int toBeLoaded)
 		if (loadingState==true)
 		{
 			loadingState=false;
-			emit(loadingStateChanged(false));
+			emit loadingStateChanged(false);
 		}
 		return;
 	}
@@ -403,11 +403,11 @@ void MultiLevelJsonBase::updatePercent(int tot, int toBeLoaded)
 		if (loadingState==false)
 		{
 			loadingState=true;
-			emit(loadingStateChanged(true));
+			emit loadingStateChanged(true);
 		}
 	}
 	if (p==lastPercent)
 		return;
 	lastPercent=p;
-	emit(percentLoadedChanged(p));
+	emit percentLoadedChanged(p);
 }

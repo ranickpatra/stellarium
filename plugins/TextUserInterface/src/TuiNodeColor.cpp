@@ -20,12 +20,6 @@
 #include "TuiNodeColor.hpp"
 #include <QKeyEvent>
 
-TuiNodeColor::TuiNodeColor(const QString& text, QObject* receiver, const char* method, Vec3f defValue, TuiNode* parent, TuiNode* prev)
-	: TuiNodeEditable(text, parent, prev), value(defValue), editingPart(0)
-{
-	this->connect(this, SIGNAL(setValue(Vec3f)), receiver, method);
-}
-
 TuiNodeResponse TuiNodeColor::handleEditingKey(int key)
 {
 	TuiNodeResponse response;
@@ -44,7 +38,7 @@ TuiNodeResponse TuiNodeColor::handleEditingKey(int key)
 		response.accepted = true;
 		if (!editing) 
 		{
-			emit(setValue(value));
+			emit setValue(value);
 		}
 		return response;
 	}
@@ -53,7 +47,7 @@ TuiNodeResponse TuiNodeColor::handleEditingKey(int key)
 		editing = false;
 		editingPart = 0;
 		response.accepted = true;
-		emit(setValue(value));
+		emit setValue(value);
 		return response;
 	}
 	if (key==Qt::Key_Right)
@@ -69,14 +63,14 @@ TuiNodeResponse TuiNodeColor::handleEditingKey(int key)
 	{
 		incPart(editingPart, true);
 		response.accepted = true;
-		emit(setValue(value));
+		emit setValue(value);
 		return response;
 	}
 	if (key==Qt::Key_Down)
 	{
 		incPart(editingPart, false);
 		response.accepted = true;
-		emit(setValue(value));
+		emit setValue(value);
 		return response;
 	}
 	return response;

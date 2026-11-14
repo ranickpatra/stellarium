@@ -20,6 +20,7 @@
 #ifndef STELLOCALEMGR_HPP
 #define STELLOCALEMGR_HPP
 
+#include <memory>
 #include "StelTranslator.hpp"
 #include "StelCore.hpp"
 
@@ -43,12 +44,12 @@ public:
 	///////////////////////////////////////////////////////////////////////////
 	//! Get the application language currently used for GUI etc.
 	//! This function has no permanent effect on the global locale.
-	//! @return the abbreviated name of the language (e.g "fr").
+	//! @return the abbreviated name of the language (ISO 639, e.g "fr").
 	QString getAppLanguage() const { return StelTranslator::globalTranslator->getTrueLocaleName(); }
 	
 	//! Set the application language. 
 	//! This applies to GUI etc. This function has no permanent effect on the global locale.
-	//! @param newAppLangName the abbreviated name of the language (e.g fr).
+	//! @param newAppLangName the abbreviated name of the language (ISO 639, e.g fr).
 	void setAppLanguage(const QString& newAppLangName, bool refreshAll=true);
 	
 	//! Get the StelTranslator object currently used for global application.
@@ -62,12 +63,6 @@ public:
 	//! @return the name of the language (e.g fr).
 	QString getSkyLanguage() const;
 	
-	//! Set the sky language and reload the sky object names with the new 
-	//! translation.  This function has no permanent effect on the global locale.
-	//! @param newSkyLangName The abbreviated name of the locale (e.g fr) to use 
-	//! for sky object labels.
-	void setSkyLanguage(const QString& newSkyLangName, bool refreshAll=true);
-	
 	//! Get a reference to the StelTranslator object currently used for sky objects.
 	const StelTranslator &getSkyTranslator() const;
 
@@ -76,6 +71,9 @@ public:
 
 	//! Get a reference to the StelTranslator object currently used for scripts.
 	const StelTranslator &getScriptsTranslator() const;
+
+	//! Get a reference to the StelTranslator object currently used for sky cultures descriptions.
+	const StelTranslator &getSkyCultureDescriptionsTranslator() const;
 
 	//! Get the type (RTL or LTR) of language currently used for sky objects
 	bool isSkyRTL() const;
@@ -105,6 +103,9 @@ public:
 	QString getDateFormatStr(void) const {return sDateFormatToString(dateFormat);}	
 	void setDateFormatStr(const QString& df) {dateFormat=stringToSDateFormat(df);}
 
+	//! Get the format string which describes the current time format (Qt style).
+	QString getQtTimeFormatStr(void) const;
+
 	//! Get the format string which describes the current date format (Qt style).
 	QString getQtDateFormatStr(void) const;
 	
@@ -129,17 +130,21 @@ public:
 	};
 	
 	//! Get a localized, formatted string representation of the date component of a Julian date.
-	QString getPrintableDateLocal(double JD) const;
+	//! @param utcOffsetHrs from StelCore::getUTCOffset(JD)
+	QString getPrintableDateLocal(double JD, double utcOffsetHrs) const;
 	
 	//! Get a localized, formatted string representation of the time component of a Julian date.
-	QString getPrintableTimeLocal(double JD) const;
+	//! @param utcOffsetHrs from StelCore::getUTCOffset(JD)
+	QString getPrintableTimeLocal(double JD, double utcOffsetHrs) const;
 
 	//! Get a localized, formatted string representation of the time zone of a Julian date.
-	QString getPrintableTimeZoneLocal(double JD) const;
+	//! @param utcOffsetHrs from StelCore::getUTCOffset(JD)
+	QString getPrintableTimeZoneLocal(double JD, double utcOffsetHrs) const;
 
 	//! Return the time in ISO 8601 format that is : %Y-%m-%dT%H:%M:%S
 	//! @param JD the time and date expressed as a Julian date value.
-	QString getISO8601TimeLocal(double JD) const;
+	//! @param utcOffsetHrs from StelCore::getUTCOffset(JD)
+	QString getISO8601TimeLocal(double JD, double utcOffsetHrs) const;
 
 	//! Return the JD time for a local time ISO 8601 format that is:
 	//! %Y-%m-%dT%H:%M:%S, but %Y can be a large number with sign, and
@@ -147,14 +152,6 @@ public:
 	//! @param str the local time in ISO 8601 format.
 	//! @param ok set to false if the string was an invalid date.
 	double getJdFromISO8601TimeLocal(const QString& str, bool* ok) const;
-
-	//! Convert a 2 letter country code to string. Returns empty string if countryCode unknown.
-	static QString countryCodeToString(const QString& countryCode);
-	//! Convert a countryName to 2 letter country code. Returns "??" if not found.
-	static QString countryNameToCode(const QString& countryName);
-
-	//! Return an alphabetically ordered list of all the known country names
-	static QStringList getAllCountryNames();
 
 	//! Returns the short name of the \a weekday [0=Sunday, 1=Monday..6]; weekday mod 7)
 	static QString shortDayName(int weekday);
@@ -179,9 +176,10 @@ private:
 	//! Call this at program start and then after each language change.
 	static void createNameLists();
 	// The translator used for astronomical object naming
-	StelTranslator* skyTranslator;
-	StelTranslator* planetaryFeaturesTranslator;
-	StelTranslator* scriptsTranslator;
+	std::unique_ptr<StelTranslator> skyTranslator;
+	std::unique_ptr<StelTranslator> planetaryFeaturesTranslator;
+	std::unique_ptr<StelTranslator> scriptsTranslator;
+	std::unique_ptr<StelTranslator> skyCultureDescriptionsTranslator;
 	StelCore* core;
 	
 	// Date and time variables
@@ -196,16 +194,12 @@ private:
 	static SDateFormat stringToSDateFormat(const QString& df);
 	static QString sDateFormatToString(SDateFormat df);
 	
-	static QMap<QString, QString> countryCodeToStringMap;
-	
 	// Lists for rapid access. These must be recreated on language change by createNameLists().
 	static QStringList shortWeekDays;
 	static QStringList longWeekDays;
 	static QStringList shortMonthNames;
 	static QStringList longMonthNames;
 	static QStringList longGenitiveMonthNames;
-
-	static void generateCountryList();
 };
 
 #endif // STELLOCALEMGR_HPP

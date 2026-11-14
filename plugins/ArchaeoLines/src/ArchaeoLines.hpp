@@ -19,7 +19,6 @@
 #ifndef ARCHAEOLINES_HPP
 #define ARCHAEOLINES_HPP
 
-#include <QFont>
 #include <QColor>
 #include <QKeyEvent>
 #include "VecMath.hpp"
@@ -75,8 +74,9 @@ declinations very slightly move as well.
 */
 
 //! @class ArchaeoLine
-//! Class which manages a line (small circle) to display around the sky like the solstices line.
-//! Modelled after @class SkyLine found in GridLinesMgr.cpp at V0.13.2, but with small-circle drawing.
+//! @brief Class which manages a line (small circle) to display around the sky like the solstices line.
+//!
+//! Modelled after @c SkyLine found in GridLinesMgr.cpp at V0.13.2, but with small-circle drawing.
 //! @author Georg Zotti
 //! @ingroup archaeoLines
 class ArchaeoLine : public QObject
@@ -86,9 +86,6 @@ class ArchaeoLine : public QObject
 	Q_PROPERTY(bool flagLabel READ isLabelVisible WRITE setLabelVisible NOTIFY flagLabelChanged)
 	Q_PROPERTY(double definingAngle READ getDefiningAngle WRITE setDefiningAngle NOTIFY definingAngleChanged)
 
-	//Need to register Enum with Qt to be able to use it as Q_PROPERTY
-	//or in signals/slots
-	Q_ENUMS(Line)
 public:
 	enum Line { // we must start with the planet lines to allow proper handling in the combobox.
 		CurrentPlanetNone, // actually a placeholder for counting/testing. By itself it makes no sense, i.e. deactivates the planet line
@@ -119,9 +116,10 @@ public:
 		CustomAltitude1,
 		CustomAltitude2
 	};
+	Q_ENUM(Line)
 
 	ArchaeoLine(ArchaeoLine::Line lineType, double definingAngle);
-	virtual ~ArchaeoLine(){}
+	~ArchaeoLine() override {}
 	void draw(StelCore* core, float intensity=1.0f) const;
 	const Vec3f& getColor() const {return color;}
 	bool isDisplayed(void) const {return fader;}
@@ -134,9 +132,9 @@ public slots:
 	void update(const double deltaTime) {fader.update(static_cast<int>(deltaTime*1000));}
 	void setFadeDuration(const float duration) {fader.setDuration(static_cast<int>(duration*1000.f));}
 	void setDisplayed(const bool displayed){fader = displayed;}
-	void setFontSize(const int newSize){font.setPixelSize(newSize);}
+	void setFontSize(const int newSize){fontSize = newSize;}
 	//! To be connected to StelApp font size. newSize will be enlarged by 1.
-	void setFontSizeFromApp(const int newSize){font.setPixelSize(newSize+1);}
+	void setFontSizeFromApp(const int newSize){fontSize = newSize+1;}
 	//! reset declination/azimuth angle (degrees) of this arc. Any azimuth angles MUST be given counted from north.
 	void setDefiningAngle(const double angle);
 	double getDefiningAngle(void) const {return definingAngle;} // returns declination for most, or azimuth.
@@ -146,7 +144,7 @@ public slots:
 	bool isLabelVisible() const {return flagLabel;}
 	void setLineType(const ArchaeoLine::Line line) {lineType=line; updateLabel();} // Meaningful only for CurrentPlanet... types
 	//! change label. Used only for selected-object line - the other labels should not be changed!
-	void setLabel(const QString newLabel){label=newLabel;}
+	void setLabel(const QString &newLabel){label=newLabel;}
 	QString getLabel() const {return label;}
 
 private:
@@ -157,7 +155,7 @@ private:
 	bool flagLabel; //! show the label. (some should be permanently silent)
 	QString label;
 	LinearFader fader;
-	QFont font;
+	int fontSize;
 };
 
 //! Main class of the ArchaeoLines plug-in.
@@ -209,6 +207,8 @@ class ArchaeoLines : public StelModule
 
 
 	// More "forwarding properties" for geo locations and custom azimuths/declination labels.
+	Q_PROPERTY(QString geographicLocation1Name    READ getGeographicLocation1Name      WRITE setGeographicLocation1Name      NOTIFY geographicLocation1NameChanged)
+	Q_PROPERTY(QString geographicLocation2Name    READ getGeographicLocation2Name      WRITE setGeographicLocation2Name      NOTIFY geographicLocation2NameChanged)
 	Q_PROPERTY(QString geographicLocation1Label   READ getGeographicLocation1Label     WRITE setGeographicLocation1Label     NOTIFY geographicLocation1LabelChanged)
 	Q_PROPERTY(QString geographicLocation2Label   READ getGeographicLocation2Label     WRITE setGeographicLocation2Label     NOTIFY geographicLocation2LabelChanged)
 	Q_PROPERTY(QString customAzimuth1Label        READ getCustomAzimuth1Label          WRITE setCustomAzimuth1Label          NOTIFY customAzimuth1LabelChanged)
@@ -245,17 +245,17 @@ class ArchaeoLines : public StelModule
 	Q_PROPERTY(int lineWidth    READ getLineWidth WRITE setLineWidth NOTIFY lineWidthChanged)
 public:
 	ArchaeoLines();
-	virtual ~ArchaeoLines() Q_DECL_OVERRIDE;
+	~ArchaeoLines() override;
 	
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in the StelModule class
-	virtual void init() Q_DECL_OVERRIDE;
-	virtual void update(double deltaTime) Q_DECL_OVERRIDE;
-	virtual void draw(StelCore* core) Q_DECL_OVERRIDE;
-	virtual double getCallOrder(StelModuleActionName actionName) const Q_DECL_OVERRIDE;
-	virtual void handleKeys(class QKeyEvent* event) Q_DECL_OVERRIDE {event->setAccepted(false);}
-	virtual bool configureGui(bool show=true) Q_DECL_OVERRIDE;
+	void init() override;
+	void update(double deltaTime) override;
+	void draw(StelCore* core) override;
+	double getCallOrder(StelModuleActionName actionName) const override;
+	void handleKeys(class QKeyEvent* event) override {event->setAccepted(false);}
+	bool configureGui(bool show=true) override;
 	//////////////////////////////////////////////////////////////////////////
 
 	//! Restore the plug-in's settings to the default state.
@@ -303,36 +303,38 @@ signals:
 	void customDeclination1Changed(double dec);
 	void customDeclination2Changed(double dec);
 	void currentPlanetChanged(ArchaeoLine::Line l); // meaningful only CurrentPlanetNone...CurrentPlanetSaturn.
-	void geographicLocation1LabelChanged(QString label);
-	void geographicLocation2LabelChanged(QString label);
-	void customAzimuth1LabelChanged(QString label);
-	void customAzimuth2LabelChanged(QString label);
-	void customAltitude1LabelChanged(QString label);
-	void customAltitude2LabelChanged(QString label);
-	void customDeclination1LabelChanged(QString label);
-	void customDeclination2LabelChanged(QString label);
-	void equinoxColorChanged(Vec3f color);
-	void solsticesColorChanged(Vec3f color);
-	void crossquartersColorChanged(Vec3f color);
-	void majorStandstillColorChanged(Vec3f color);
-	void minorStandstillColorChanged(Vec3f color);
-	void polarCirclesColorChanged(Vec3f color);
-	void zenithPassageColorChanged(Vec3f color);
-	void nadirPassageColorChanged(Vec3f color);
-	void selectedObjectColorChanged(Vec3f color);
-	void selectedObjectAzimuthColorChanged(Vec3f color);
-	void selectedObjectHourAngleColorChanged(Vec3f color);
-	void currentSunColorChanged(Vec3f color);
-	void currentMoonColorChanged(Vec3f color);
-	void currentPlanetColorChanged(Vec3f color);
-	void geographicLocation1ColorChanged(Vec3f color);
-	void geographicLocation2ColorChanged(Vec3f color);
-	void customAzimuth1ColorChanged(Vec3f color);
-	void customAzimuth2ColorChanged(Vec3f color);
-	void customAltitude1ColorChanged(Vec3f color);
-	void customAltitude2ColorChanged(Vec3f color);
-	void customDeclination1ColorChanged(Vec3f color);
-	void customDeclination2ColorChanged(Vec3f color);
+	void geographicLocation1NameChanged(const QString &name);
+	void geographicLocation2NameChanged(const QString &name);
+	void geographicLocation1LabelChanged(const QString &label);
+	void geographicLocation2LabelChanged(const QString &label);
+	void customAzimuth1LabelChanged(const QString &label);
+	void customAzimuth2LabelChanged(const QString &label);
+	void customAltitude1LabelChanged(const QString &label);
+	void customAltitude2LabelChanged(const QString &label);
+	void customDeclination1LabelChanged(const QString &label);
+	void customDeclination2LabelChanged(const QString &label);
+	void equinoxColorChanged(const Vec3f &color);
+	void solsticesColorChanged(const Vec3f &color);
+	void crossquartersColorChanged(const Vec3f &color);
+	void majorStandstillColorChanged(const Vec3f &color);
+	void minorStandstillColorChanged(const Vec3f &color);
+	void polarCirclesColorChanged(const Vec3f &color);
+	void zenithPassageColorChanged(const Vec3f &color);
+	void nadirPassageColorChanged(const Vec3f &color);
+	void selectedObjectColorChanged(const Vec3f &color);
+	void selectedObjectAzimuthColorChanged(const Vec3f &color);
+	void selectedObjectHourAngleColorChanged(const Vec3f &color);
+	void currentSunColorChanged(const Vec3f &color);
+	void currentMoonColorChanged(const Vec3f &color);
+	void currentPlanetColorChanged(const Vec3f &color);
+	void geographicLocation1ColorChanged(const Vec3f &color);
+	void geographicLocation2ColorChanged(const Vec3f &color);
+	void customAzimuth1ColorChanged(const Vec3f &color);
+	void customAzimuth2ColorChanged(const Vec3f &color);
+	void customAltitude1ColorChanged(const Vec3f &color);
+	void customAltitude2ColorChanged(const Vec3f &color);
+	void customDeclination1ColorChanged(const Vec3f &color);
+	void customDeclination2ColorChanged(const Vec3f &color);
 	void lineWidthChanged(int width);
 
 public slots:
@@ -376,15 +378,19 @@ public slots:
 	void showCurrentSun(bool b);
 	void showCurrentMoon(bool b);
 	void showCurrentPlanet(ArchaeoLine::Line l); // Allowed values for l: CurrentPlanetNone...CurrentPlanetSaturn.
-	void showCurrentPlanetNamed(QString planet); // Allowed values for planet: "none", "Mercury", "Venus", "Mars", "Jupiter", "Saturn".
+	void showCurrentPlanetNamed(const QString &planet); // Allowed values for planet: "none", "Mercury", "Venus", "Mars", "Jupiter", "Saturn".
 	void showGeographicLocation1(bool b);
 	void showGeographicLocation2(bool b);
 	void setGeographicLocation1Longitude(double lng);
 	void setGeographicLocation1Latitude(double lat);
 	void setGeographicLocation2Longitude(double lng);
 	void setGeographicLocation2Latitude(double lat);
-	void setGeographicLocation1Label(QString label);
-	void setGeographicLocation2Label(QString label);
+	void setGeographicLocation1Name(const QString &name);
+	void setGeographicLocation2Name(const QString &name);
+	void setGeographicLocation1Label(const QString &label);
+	void setGeographicLocation2Label(const QString &label);
+	QString getGeographicLocation1Name() const {return geographicLocation1Name;}
+	QString getGeographicLocation2Name() const {return geographicLocation2Name;}
 	QString getGeographicLocation1Label() const {return geographicLocation1Line->getLabel();}
 	QString getGeographicLocation2Label() const {return geographicLocation2Line->getLabel();}
 	double getGeographicLocation1Longitude() const {return geographicLocation1Longitude; }
@@ -397,8 +403,8 @@ public slots:
 	double getCustomAzimuth1() const { return customAzimuth1Line->getDefiningAngle(); }
 	void setCustomAzimuth2(double az);
 	double getCustomAzimuth2() const { return customAzimuth2Line->getDefiningAngle(); }
-	void setCustomAzimuth1Label(QString label);
-	void setCustomAzimuth2Label(QString label);
+	void setCustomAzimuth1Label(const QString &label);
+	void setCustomAzimuth2Label(const QString &label);
 	QString getCustomAzimuth1Label() const {return customAzimuth1Line->getLabel();}
 	QString getCustomAzimuth2Label() const {return customAzimuth2Line->getLabel();}
 	void showCustomAltitude1(bool b);
@@ -407,8 +413,8 @@ public slots:
 	double getCustomAltitude1() const { return customAltitude1Line->getDefiningAngle(); }
 	void setCustomAltitude2(double alt);
 	double getCustomAltitude2() const { return customAltitude2Line->getDefiningAngle(); }
-	void setCustomAltitude1Label(QString label);
-	void setCustomAltitude2Label(QString label);
+	void setCustomAltitude1Label(const QString &label);
+	void setCustomAltitude2Label(const QString &label);
 	QString getCustomAltitude1Label() const {return customAltitude1Line->getLabel();}
 	QString getCustomAltitude2Label() const {return customAltitude2Line->getLabel();}
 	void showCustomDeclination1(bool b);
@@ -417,8 +423,8 @@ public slots:
 	double getCustomDeclination1() const { return customDeclination1Line->getDefiningAngle(); }
 	void setCustomDeclination2(double dec);
 	double getCustomDeclination2() const { return customDeclination2Line->getDefiningAngle(); }
-	void setCustomDeclination1Label(QString label);
-	void setCustomDeclination2Label(QString label);
+	void setCustomDeclination1Label(const QString &label);
+	void setCustomDeclination2Label(const QString &label);
 	QString getCustomDeclination1Label() const {return customDeclination1Line->getLabel();}
 	QString getCustomDeclination2Label() const {return customDeclination2Line->getLabel();}
 
@@ -453,28 +459,28 @@ public slots:
 	Vec3f getCustomAltitude2Color()         const {return customAltitude2Color;}
 	Vec3f getCustomDeclination1Color()      const {return customDeclination1Color;}
 	Vec3f getCustomDeclination2Color()      const {return customDeclination2Color;}
-	void setEquinoxColor(Vec3f color);
-	void setSolsticesColor(Vec3f color);
-	void setCrossquartersColor(Vec3f color);
-	void setMajorStandstillColor(Vec3f color);
-	void setMinorStandstillColor(Vec3f color);
-	void setPolarCirclesColor(Vec3f color);
-	void setZenithPassageColor(Vec3f color);
-	void setNadirPassageColor(Vec3f color);
-	void setSelectedObjectColor(Vec3f color);
-	void setSelectedObjectAzimuthColor(Vec3f color);
-	void setSelectedObjectHourAngleColor(Vec3f color);
-	void setCurrentSunColor(Vec3f color);
-	void setCurrentMoonColor(Vec3f color);
-	void setCurrentPlanetColor(Vec3f color);
-	void setGeographicLocation1Color(Vec3f color);
-	void setGeographicLocation2Color(Vec3f color);
-	void setCustomAzimuth1Color(Vec3f color);
-	void setCustomAzimuth2Color(Vec3f color);
-	void setCustomAltitude1Color(Vec3f color);
-	void setCustomAltitude2Color(Vec3f color);
-	void setCustomDeclination1Color(Vec3f color);
-	void setCustomDeclination2Color(Vec3f color);
+	void setEquinoxColor(const Vec3f &color);
+	void setSolsticesColor(const Vec3f &color);
+	void setCrossquartersColor(const Vec3f &color);
+	void setMajorStandstillColor(const Vec3f &color);
+	void setMinorStandstillColor(const Vec3f &color);
+	void setPolarCirclesColor(const Vec3f &color);
+	void setZenithPassageColor(const Vec3f &color);
+	void setNadirPassageColor(const Vec3f &color);
+	void setSelectedObjectColor(const Vec3f &color);
+	void setSelectedObjectAzimuthColor(const Vec3f &color);
+	void setSelectedObjectHourAngleColor(const Vec3f &color);
+	void setCurrentSunColor(const Vec3f &color);
+	void setCurrentMoonColor(const Vec3f &color);
+	void setCurrentPlanetColor(const Vec3f &color);
+	void setGeographicLocation1Color(const Vec3f &color);
+	void setGeographicLocation2Color(const Vec3f &color);
+	void setCustomAzimuth1Color(const Vec3f &color);
+	void setCustomAzimuth2Color(const Vec3f &color);
+	void setCustomAltitude1Color(const Vec3f &color);
+	void setCustomAltitude2Color(const Vec3f &color);
+	void setCustomDeclination1Color(const Vec3f &color);
+	void setCustomDeclination2Color(const Vec3f &color);
 
 	int getLineWidth() const {return lineWidth;}
 	void setLineWidth(int width);
@@ -482,9 +488,11 @@ public slots:
 private slots:
 	//! a slot connected to core which cares for location changes, updating the geographicLocation lines.
 	void updateObserverLocation(const StelLocation &loc);
+	//! Recompute distance and set label after target location changed.
+	void updateGeographicLocation1Label();
+	void updateGeographicLocation2Label();
 
 private:
-	QFont font;
 	bool flagShowArchaeoLines;
 	LinearFader lineFader;
 	int lineWidth;
@@ -527,9 +535,11 @@ private:
 	bool flagShowCurrentMoon;
 	ArchaeoLine::Line enumShowCurrentPlanet;
 	bool flagShowGeographicLocation1;
+	QString geographicLocation1Name;
 	double geographicLocation1Longitude;
 	double geographicLocation1Latitude;
 	bool flagShowGeographicLocation2;
+	QString geographicLocation2Name;
 	double geographicLocation2Longitude;
 	double geographicLocation2Latitude;
 	bool flagShowCustomAzimuth1;
@@ -571,15 +581,15 @@ private:
 	ArchaeoLine * customAltitude2Line;
 	ArchaeoLine * customDeclination1Line;
 	ArchaeoLine * customDeclination2Line;
-
-	StelButton* toolbarButton;
   
 	QSettings* conf;
-
-	// GUI
-	ArchaeoLinesDialog* configDialog;
 	StelCore* core; // used quite often, better keep a reference...
 	StelObjectMgr* objMgr;
+
+#ifndef NO_GUI
+	ArchaeoLinesDialog* configDialog;
+	StelButton* toolbarButton;
+#endif
 };
 
 
@@ -594,9 +604,9 @@ class ArchaeoLinesStelPluginInterface : public QObject, public StelPluginInterfa
 	Q_PLUGIN_METADATA(IID StelPluginInterface_iid)
 	Q_INTERFACES(StelPluginInterface)
 public:
-	virtual StelModule* getStelModule()    const Q_DECL_OVERRIDE;
-	virtual StelPluginInfo getPluginInfo() const Q_DECL_OVERRIDE;
-	virtual QObjectList getExtensionList() const Q_DECL_OVERRIDE { return QObjectList(); }
+	StelModule* getStelModule()    const override;
+	StelPluginInfo getPluginInfo() const override;
+	//QObjectList getExtensionList() const override { return QObjectList(); }
 };
 
 #endif /*ARCHAEOLINES_HPP*/

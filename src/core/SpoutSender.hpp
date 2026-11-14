@@ -34,7 +34,7 @@ public:
 	//! Requires a valid GL context
 	SpoutSender(const QString& senderName);
 	//! Releases all held resources
-	virtual ~SpoutSender();
+	~SpoutSender() override;
 public slots:
 	//! Captures a frame from the currently bound framebuffer,
 	//! and sends it to Spout.
@@ -44,7 +44,7 @@ public slots:
 	//! Informs the sender about changed buffer dimensions.
 	//! Does not need a GL context.
 	void resize(uint width, uint height);
-	//! True if the sender has been successfuly created
+	//! True if the sender has been successfully created
 	bool isValid() { return valid; }
 private:
 	SPOUTLIBRARY* spoutLib;

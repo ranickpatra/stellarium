@@ -34,18 +34,16 @@ class LocationDialog : public StelDialog
 	Q_OBJECT
 public:
 	LocationDialog(QObject* parent);
-	virtual ~LocationDialog() Q_DECL_OVERRIDE;
-	//! Notify that the application style changed
-	virtual void styleChanged() Q_DECL_OVERRIDE;
+	~LocationDialog() override;
 
 public slots:
-	virtual void retranslate() Q_DECL_OVERRIDE;
-	//! In addition to StelDialog's inherited solution, puts the arrow on the right spot in the map.
-	virtual void handleDialogSizeChanged(QSizeF size) Q_DECL_OVERRIDE;
+	//! Apply application style change
+	void styleChanged(const QString &style) override;
+	void retranslate() override;
 
 protected:
 	//! Initialize the dialog widgets and connect the signals/slots
-	virtual void createDialogContent() Q_DECL_OVERRIDE;
+	void createDialogContent() override;
 	Ui_locationDialogForm* ui;
 
 private:
@@ -61,6 +59,9 @@ private:
 	
 	void disconnectEditSignals();
 	void connectEditSignals();
+
+	//! show or hide UI elements to edit location (Hide if on observer planet!)
+	void setLocationUIvisible(bool visible);
 	
 	//! Update the map for the given location.
 	void setMapForLocation(const StelLocation& loc);
@@ -71,11 +72,11 @@ private:
 	//! item.
 	void populatePlanetList();
 
-	//! Populates the drop-down list of countries.
+	//! Populates the drop-down list of regions.
 	//! The displayed names are localized in the current interface language.
 	//! The original names are kept in the user data field of each QComboBox
 	//! item.
-	void populateCountryList();
+	void populateRegionList(const QString& planet = "");
 
 	//! Populates the drop-down list of time zones.
 	//! The displayed names are localized in the current interface language.
@@ -101,21 +102,22 @@ private slots:
 	
 	//! Update the widget to make sure it is synchrone if the location is changed programmatically
 	//! This function should be called repeatidly with e.g. a timer
-	void updateFromProgram(const StelLocation& location);
+	void updateFromProgram(const StelLocation& newLocation);
 	
 	//! Called when the map is clicked.
-	//! create new list for places nearby and feed into location list box.
-	void setLocationFromMap(double longitude, double latitude);
+	//! Creates new list for places nearby and feed into location list box.
+	//! Sets lolcation to the clicked location
+	//! Also signals (for locations on Earth only) to LandscapeMgr to load zero landscape with just the color of the clicked point.
+	void setLocationFromMap(double longitude, double latitude, const QColor &color);
 	
 	//! Called when the user activates an item from the locations list.
 	void setLocationFromList(const QModelIndex& index);
 	
 	//! Called when the planet is manually changed.
-	void moveToAnotherPlanet(const QString& text);
+	void moveToAnotherPlanet();
 
 	//! Called when latitude/longitude/altitude is modified
-	//! The int argument is required by the Altitude spinbox signal connection, but unused.
-	void setLocationFromCoords(int i=0);
+	void setLocationFromCoords();
 
 	//! Called when the user clicks on the add to list button
 	void addCurrentLocationToList();
@@ -123,8 +125,8 @@ private slots:
 	//! Called when the user clicks on the delete button
 	void deleteCurrentLocationFromList();
 
-	//! filter city list to show entries from single country only
-	void filterSitesByCountry();
+	//! filter city list to show entries from single region only
+	void filterSitesByRegion();
 
 	//! reset city list to complete list (may have been reduced to picked list)
 	void resetLocationList();
@@ -135,9 +137,6 @@ private slots:
 	//! @arg state true to immediately query location and activate auto-query on next launch.
 	//! @arg state false to store current location as startup location.
 	void ipQueryLocation(bool state);
-
-	// Esp. for signals from StelSkyCultureMgr
-	void populatePlanetList(QString) { populatePlanetList(); }
 
 	void setDisplayFormatForSpins(bool flagDecimalDegrees);
 

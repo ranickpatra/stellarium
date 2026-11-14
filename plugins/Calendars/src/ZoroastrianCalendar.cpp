@@ -123,19 +123,19 @@ QStringList ZoroastrianCalendar::getDateStrings() const
 QString ZoroastrianCalendar::getFormattedDateString() const
 {
 	QStringList str=getDateStrings();
-	return QString("%1 (%2) - %3 (%4) - %5 %6")
-			.arg(str.at(4)) // dayName
-			.arg(str.at(3)) // day
-			.arg(str.at(2)) // monthName
-			.arg(str.at(1)) // month
-			.arg(str.at(0)) // year
-			.arg(q_("Jezdegerd Era"));// year
+	return QString("%1 (%2) - %3 (%4) - %5 %6").arg(
+			str.at(4), // dayName
+			str.at(3), // day
+			str.at(2), // monthName
+			str.at(1), // month
+			str.at(0), // year
+			q_("Jezdegerd Era"));// year
 }
 
 // set date from a vector of calendar date elements sorted from the largest to the smallest.
 // Year-Month[1...13]-Day[1...30]
 // Time is not changed!
-void ZoroastrianCalendar::setDate(QVector<int> parts)
+void ZoroastrianCalendar::setDate(const QVector<int> &parts)
 {
 	this->parts=parts;
 
@@ -148,7 +148,7 @@ void ZoroastrianCalendar::setDate(QVector<int> parts)
 }
 
 // actually implementation of alt-fixed-from-egyptian
-int ZoroastrianCalendar::fixedFromZoroastrian(QVector<int> zoroastrian)
+int ZoroastrianCalendar::fixedFromZoroastrian(const QVector<int> &zoroastrian)
 {
 	return zoroastrianEpoch + fixedFromEgyptian(zoroastrian)-EgyptianCalendar::egyptianEpoch;
 }

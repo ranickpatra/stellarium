@@ -64,12 +64,12 @@ class LibGPSLookupHelper : public GPSLookupHelper
 	Q_OBJECT
 public:
 	LibGPSLookupHelper(QObject * parent);
-	~LibGPSLookupHelper() Q_DECL_OVERRIDE;
+	~LibGPSLookupHelper() override;
 
-	virtual bool isReady() Q_DECL_OVERRIDE;
+	bool isReady() override;
 public slots:
-	virtual void query() Q_DECL_OVERRIDE;
-	virtual void setPeriodicQuery(int interval) Q_DECL_OVERRIDE;
+	void query() override;
+	void setPeriodicQuery(int interval) override;
 private:
 	bool ready;
 	gpsmm* gps_rec;
@@ -85,19 +85,21 @@ class NMEALookupHelper : public GPSLookupHelper
 	Q_OBJECT
 public:
 	NMEALookupHelper(QObject* parent);
-	~NMEALookupHelper() Q_DECL_OVERRIDE;
-	virtual bool isReady() Q_DECL_OVERRIDE
+	~NMEALookupHelper() override;
+	bool isReady() override
 	{
 		//if (nmea) qDebug() << "NMEALookupHelper::isReady(): Last Error was:" << nmea->error();
 		return nmea && nmea->device();
 	}
 public slots:
-	virtual void query() Q_DECL_OVERRIDE;
-	virtual void setPeriodicQuery(int interval) Q_DECL_OVERRIDE;
+	void query() override;
+	void setPeriodicQuery(int interval) override;
 private slots:
-	void nmeaError(QGeoPositionInfoSource::Error error);
 	void nmeaUpdated(const QGeoPositionInfo &update);
+	void nmeaError(QGeoPositionInfoSource::Error error);
+	#if (QT_VERSION<QT_VERSION_CHECK(6,0,0))
 	void nmeaTimeout();
+	#endif
 private:
 	QSerialPort* serial;
 	QNmeaPositionInfoSource* nmea;

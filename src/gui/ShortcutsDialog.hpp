@@ -45,8 +45,7 @@ public:
 	ShortcutsFilterModel(QObject* parent = Q_NULLPTR);
 	
 protected:
-	virtual bool filterAcceptsRow(int source_row,
-			      const QModelIndex &source_parent) const Q_DECL_OVERRIDE;
+	bool filterAcceptsRow(int source_row, const QModelIndex &source_parent) const override;
 };
 
 
@@ -56,7 +55,7 @@ class ShortcutsDialog : public StelDialog
 
 public:
 	ShortcutsDialog(QObject* parent);
-	~ShortcutsDialog() Q_DECL_OVERRIDE;
+	~ShortcutsDialog() override;
 
 	//! highlight items that have collisions with current lineEdits' state according to CSS.
 	//! Note: previous collisions aren't redrawn.
@@ -65,7 +64,7 @@ public:
 public slots:
 	//! restore colors of all items it TreeWidget to defaults.
 	void resetCollisions();
-	virtual void retranslate() Q_DECL_OVERRIDE;
+	void retranslate() override;
 	//! initialize editors state when current item changed.
 	void initEditors();
 	//! checks whether one QKeySequence is prefix of another.
@@ -88,14 +87,14 @@ public slots:
 
 protected:
 	//! Initialize the dialog widgets and connect the signals/slots.
-	virtual void createDialogContent() Q_DECL_OVERRIDE;
+	void createDialogContent() override;
 
 private:
 	//! checks whether given item can be changed by editors.
 	static bool itemIsEditable(QStandardItem *item);
 
 	//! Apply style changes.
-	//! See http://qt-project.org/faq/answer/how_can_my_stylesheet_account_for_custom_properties
+	//! See https://wiki.qt.io/Technical_FAQ#How_can_my_stylesheet_account_for_custom_properties.3F
 	void polish();
 
 	QStandardItem* updateGroup(const QString& group);
@@ -103,7 +102,7 @@ private:
 	//! search for first appearance of item with requested data.
 	QStandardItem* findItemByData(QVariant value, int role, int column = 0) const;
 
-	//! pointer to mgr, for not getting it from StelApp every time.
+	//! pointer to mgr, to avoid getting it from StelApp every time.
 	class StelActionMgr* actionMgr;
 
 	//! list for storing collisions items, so we can easy restore their colors.
@@ -114,7 +113,7 @@ private:
 	QStandardItemModel* mainModel;
 	//! Initialize or reset the main model.
 	void resetModel();
-	//! Set the main model's column lables.
+	//! Set the main model's column labels.
 	void setModelHeader();
 };
 

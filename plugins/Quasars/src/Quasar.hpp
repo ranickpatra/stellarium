@@ -22,13 +22,12 @@
 #include <QVariant>
 #include <QString>
 #include <QStringList>
-#include <QFont>
 #include <QList>
 #include <QDateTime>
 
 #include "StelObject.hpp"
 #include "StelTextureTypes.hpp"
-#include "StelFader.hpp"
+#include "StelTranslator.hpp"
 
 class StelPainter;
 
@@ -46,7 +45,7 @@ public:
 
 	//! @param id The official designation for a quasar, e.g. "RXS J00066+4342"
 	Quasar(const QVariantMap& map);
-	~Quasar();
+	~Quasar() override;
 
 	//! Get a QVariantMap which describes the Quasar.  Could be used to create a duplicate.
 	//! - designation
@@ -61,45 +60,49 @@ public:
 	//! - sclass
 	QVariantMap getMap(void) const;
 
-	virtual QString getType(void) const
+	QString getType(void) const override
 	{
 		return QUASAR_TYPE;
 	}
 
-	virtual QString getID(void) const
+	QString getObjectType(void) const override
+	{
+		return N_("quasar");
+	}
+	QString getObjectTypeI18n(void) const override
+	{
+		return q_(getObjectType());
+	}
+
+	QString getID(void) const override
 	{
 		return designation;
 	}
 
-	virtual float getSelectPriority(const StelCore *core) const;
+	float getSelectPriority(const StelCore *core) const override;
 
 	//! Get an HTML string to describe the object
 	//! @param core A pointer to the core
-	//! @flags a set of flags with information types to include.
-	virtual QString getInfoString(const StelCore* core, const InfoStringGroup& flags) const;
+	//! @param flags a set of flags with information types to include.
+	QString getInfoString(const StelCore* core, const InfoStringGroup& flags) const override;
 	//! Return a map like StelObject::getInfoMap(), but with a few extra tags also available in getMap().
-	// TODO: Describe the fields.
-	//! - amag
-	//! - bV
-	//! - redshift
-	virtual QVariantMap getInfoMap(const StelCore *core) const;
-	virtual Vec3f getInfoColor(void) const;
-	virtual Vec3d getJ2000EquatorialPos(const StelCore*) const
-	{
-		return XYZ;
-	}
-        virtual float getVMagnitude(const StelCore* core) const;
-	virtual double getAngularSize(const StelCore* core) const;
-	virtual QString getNameI18n(void) const
+	//! - amag: absolute magnitude of quasar
+	//! - bV: B-V color index
+	//! - redshift: redshift value
+	//! - f6: radio flux density around 5GHz (6cm) [Jy = Jansky (10^-26W/m2/Hz)]
+	//! - f20: radio flux density around 1.4GHz (21cm) [Jy = Jansky (10^-26W/m2/Hz)]
+	//! - sclass: spectral class
+	QVariantMap getInfoMap(const StelCore *core) const override;
+	Vec3d getJ2000EquatorialPos(const StelCore* core) const override;
+	float getVMagnitude(const StelCore* core) const override;
+	QString getNameI18n(void) const override
 	{
 		return designation;
 	}
-	virtual QString getEnglishName(void) const
+	QString getEnglishName(void) const override
 	{
 		return designation;
 	}
-
-	void update(double deltaTime);
 
 private:
 	bool initialized;
@@ -129,8 +132,6 @@ private:
 	float f6;			//! Radio flux density around 5GHz (6cm)
 	float f20;			//! Radio flux density around 1.4GHz (21cm)
 	QString sclass;			//! Spectrum classification
-
-	LinearFader labelsFader;
 };
 
 #endif // QUASAR_HPP

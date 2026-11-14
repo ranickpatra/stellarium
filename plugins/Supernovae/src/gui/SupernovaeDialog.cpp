@@ -25,17 +25,12 @@
 #include <QFileDialog>
 
 #include "StelApp.hpp"
-#include "StelCore.hpp"
 #include "ui_supernovaeDialog.h"
 #include "SupernovaeDialog.hpp"
 #include "Supernovae.hpp"
 #include "StelModuleMgr.hpp"
-#include "StelObjectMgr.hpp"
-#include "StelMovementMgr.hpp"
 #include "StelStyle.hpp"
 #include "StelGui.hpp"
-#include "StelMainView.hpp"
-#include "StelFileMgr.hpp"
 #include "StelTranslator.hpp"
 
 SupernovaeDialog::SupernovaeDialog()
@@ -73,8 +68,7 @@ void SupernovaeDialog::createDialogContent()
 	sn = GETSTELMODULE(Supernovae);
 	ui->setupUi(dialog);
 	ui->tabs->setCurrentIndex(0);	
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()),
-		this, SLOT(retranslate()));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &SupernovaeDialog::retranslate);
 
 	// Kinetic scrolling
 	kineticScrollingList << ui->aboutTextBrowser;
@@ -82,28 +76,28 @@ void SupernovaeDialog::createDialogContent()
 	if (gui)
 	{
 		enableKineticScrolling(gui->getFlagUseKineticScrolling());
-		connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+		connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &SupernovaeDialog::enableKineticScrolling);
 	}
 
 	// Settings tab / updates group
-	connect(ui->internetUpdatesCheckbox, SIGNAL(stateChanged(int)), this, SLOT(setUpdatesEnabled(int)));
-	connect(ui->updateButton, SIGNAL(clicked()), this, SLOT(updateJSON()));
-	connect(sn, SIGNAL(updateStateChanged(Supernovae::UpdateState)), this, SLOT(updateStateReceiver(Supernovae::UpdateState)));
-	connect(sn, SIGNAL(jsonUpdateComplete(void)), this, SLOT(updateCompleteReceiver(void)));	
-	connect(ui->updateFrequencySpinBox, SIGNAL(valueChanged(int)), this, SLOT(setUpdateValues(int)));
+	connect(ui->internetUpdatesCheckbox, &QCheckBox::stateChanged, this, &SupernovaeDialog::setUpdatesEnabled);
+	connect(ui->updateButton, &QPushButton::clicked, this, &SupernovaeDialog::updateJSON);
+	connect(sn, &Supernovae::updateStateChanged, this, &SupernovaeDialog::updateStateReceiver);
+	connect(sn, &Supernovae::jsonUpdateComplete, this, &SupernovaeDialog::updateCompleteReceiver);
+	connect(ui->updateFrequencySpinBox, qOverload<int>(&QSpinBox::valueChanged), this, &SupernovaeDialog::setUpdateValues);
 	refreshUpdateValues(); // fetch values for last updated and so on
 	// if the state didn't change, setUpdatesEnabled will not be called, so we force it
 	setUpdatesEnabled(ui->internetUpdatesCheckbox->checkState());
 
 	updateTimer = new QTimer(this);
-	connect(updateTimer, SIGNAL(timeout()), this, SLOT(refreshUpdateValues()));
+	connect(updateTimer, &QTimer::timeout, this, &SupernovaeDialog::refreshUpdateValues);
 	updateTimer->start(7000);
 
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
-	connect(ui->restoreDefaultsButton, SIGNAL(clicked()), this, SLOT(restoreDefaults()));
-	connect(ui->saveSettingsButton, SIGNAL(clicked()), this, SLOT(saveSettings()));
+	connect(ui->restoreDefaultsButton, &QPushButton::clicked, this, &SupernovaeDialog::restoreDefaults);
+	connect(ui->saveSettingsButton, &QPushButton::clicked, this, &SupernovaeDialog::saveSettings);
 
 	// About tab
 	setAboutHtml();
@@ -115,14 +109,11 @@ void SupernovaeDialog::createDialogContent()
 
 void SupernovaeDialog::setAboutHtml(void)
 {
-	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
-
 	QString html = "<html><head></head><body>";
-	html += "<h2>" + q_("Historical Supernovae Plug-in") + "</h2><table width=\"90%\">";
+	html += "<h2>" + q_("Historical Supernovae Plug-in") + "</h2><table class='layout' width=\"90%\">";
 	html += "<tr width=\"30%\"><td><strong>" + q_("Version") + ":</strong></td><td>" + SUPERNOVAE_PLUGIN_VERSION + "</td></tr>";
 	html += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + SUPERNOVAE_PLUGIN_LICENSE + "</td></tr>";
-	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Alexander Wolf &lt;alex.v.wolf@gmail.com&gt;</td></tr>";
+	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Alexander Wolf</td></tr>";
 	html += "</table>";
 
 	html += "<p>" + q_("This plugin allows you to see some bright historical supernovae: ");
@@ -131,15 +122,15 @@ void SupernovaeDialog::setAboutHtml(void)
 	html += " " + q_("All those supernovae are brighter %1 at peak of brightness.").arg(QString::number(sn->getLowerLimitBrightness(), 'f', 2) + "<sup>m</sup>") + "</p>";
 
 	html += "<h3>" + q_("Light curves") + "</h3>";
-	html += "<p>" + QString(q_("This plugin implements a simple model of light curves for different supernovae. Typical views of light curves for type I and type II supernova can be seen %1here%2 (right scale in days), and this model is used for this plugin.")).arg("<a href=\"http://stellarium.sourceforge.net/wiki/index.php/Historical_Supernovae_plugin#Light_curves\">").arg("</a>") + "</p>";
+	html += "<p>" + QString(q_("This plugin implements a simple model of light curves for type I and type II supernovae. Figures and a description of the model can be found in the Stellarium User Guide.")) + "</p>";
 
 	html += "<h3>" + q_("Acknowledgments") + "</h3>";
 	html += "<p>" + q_("We thank the following people for their contribution and valuable comments:") + "</p><ul>";
-	html += "<li>" + QString("%1 (<a href='%2'>%3</a> %4)")
-			.arg(q_("Sergei Blinnikov"))
-			.arg("http://www.itep.ru/")
-			.arg(q_("Institute for Theoretical and Experimental Physics"))
-			.arg(q_("in Russia")) + "</li>";
+	html += "<li>" + QString("%1 (<a href='%2'>%3</a> %4)").arg(
+				 q_("Sergei Blinnikov"),
+				 "http://www.itep.ru/",
+				 q_("Institute for Theoretical and Experimental Physics"),
+				 q_("in Russia")) + "</li>";
 	html += "</ul>";
 
 	html += StelApp::getInstance().getModuleMgr().getStandardSupportLinksInfo("Historical Supernovae plugin");
@@ -226,7 +217,7 @@ void SupernovaeDialog::updateCompleteReceiver(void)
 	updateTimer->start();
 	ui->lastUpdateDateTimeEdit->setDateTime(sn->getLastUpdate());
 	QTimer *timer = new QTimer(this);
-	connect(timer, SIGNAL(timeout()), this, SLOT(refreshUpdateValues()));
+	connect(timer, &QTimer::timeout, this, &SupernovaeDialog::refreshUpdateValues);
 	setAboutHtml();
 }
 

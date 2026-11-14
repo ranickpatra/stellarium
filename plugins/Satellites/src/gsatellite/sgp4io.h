@@ -6,7 +6,7 @@
 *
 *    this file contains a function to read two line element sets. while 
 *    not formerly part of the sgp4 mathematical theory, it is 
-*    required for practical implemenation.
+*    required for practical implementation.
 *
 *                            companion code for
 *               fundamentals of astrodynamics and applications
@@ -28,7 +28,7 @@
 #include <cstdio>
 #include <cmath>
 
-#include "sgp4ext.h"    // for several misc routines
+//#include "sgp4ext.h"    // for several misc routines
 #include "sgp4unit.h"   // for sgp4init and getgravconst
 
 // ------------------------- function declarations -------------------------

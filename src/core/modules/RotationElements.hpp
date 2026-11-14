@@ -60,9 +60,6 @@
 #include <QString>
 #include "VecMath.hpp"
 
-// epoch J2000: 12 UT on 1 Jan 2000
-#define J2000 2451545.0
-
 class RotationElements
 {
 public:
@@ -79,10 +76,12 @@ public:
 		Uranus=7,
 		Neptune=8
 	};
+	// epoch J2000: 12 UT on 1 Jan 2000
+	static inline constexpr double J2000 = 2451545.0;
 
 	RotationElements(void) : period(1.), offset(0.), epoch(J2000), obliquity(0.), ascendingNode(0.),
 		method(Traditional), ra0(0.), ra1(0.), de0(0.), de1(0.), W0(0.), W1(0.),
-		currentAxisRA(0.), currentAxisDE(0.), currentAxisW(0.) {}
+		currentAxisRA(0.), currentAxisDE(0.), currentAxisW(0.), corrW(nullptr), corrOri(nullptr) {}
 	double period;          // [deprecated] (sidereal) rotation period [earth days]
 	double offset;          // [deprecated] rotation at epoch  [degrees]
 	double epoch;           // JDE (JD TT) of epoch for these elements
@@ -127,7 +126,7 @@ public:
 		double E11;
 		double E12;
 		double E13;
-		double M1;  // Mars corrections. These are from WGCCRE2015.
+		double M1; // Mars corrections. These are from WGCCRE2015.
 		double M2;
 		double M3;
 		double M4;
@@ -142,7 +141,7 @@ public:
 		double Jc;
 		double Jd;
 		double Je;
-		double Na; // Neptune axix term
+		double Na; // Neptune axis term
 		double J1; // corrective terms for Jupiter' moons, Table 10.10
 		double J2;
 		double J3;
@@ -284,10 +283,9 @@ public:
 	static void corrOriLarissa(const double d, const double T, double* J2000NPoleRA, double* J2000NPoleDE);
 	static void corrOriProteus(const double d, const double T, double* J2000NPoleRA, double* J2000NPoleDE);
 
-	static bool flagCustomGrsSettings;	//!< Use custom settings for calculation of position of Great Red Spot?
-	static double customGrsJD;		//!< Initial JD (epoch) for calculation of position of Great Red Spot
-	static double customGrsLongitude;	//!< Longitude of Great Red Spot at customGrsJD (System II, degrees)
-	static double customGrsDrift;		//!< Annual drift of Great Red Spot position (degrees)
+	static double grsJD;		//!< JD (epoch) for calculation of position of Great Red Spot
+	static double grsLongitude;	//!< Longitude of Great Red Spot at grsJD (System II, degrees)
+	static double grsDrift;		//!< Annual drift of Great Red Spot position (degrees)
 
 	//! Retrieve magnitude variation depending on angle Ls [radians].
 	//! Source: A. Mallama: The magnitude and albedo of Mars. Icarus 192(2007) 404-416.

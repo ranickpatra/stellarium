@@ -32,8 +32,8 @@ class TelescopeClientASCOMWidget : public QWidget
 	Q_OBJECT
 
 public:
-	explicit TelescopeClientASCOMWidget(QWidget *parent = Q_NULLPTR);
-	~TelescopeClientASCOMWidget();
+	explicit TelescopeClientASCOMWidget(QWidget *parent = nullptr);
+	~TelescopeClientASCOMWidget() override;
 	QString selectedDevice() const;
 	void setSelectedDevice(const QString& device);
 	bool useDeviceEqCoordType() const;
@@ -46,7 +46,7 @@ private slots:
 private:
 	Ui::TelescopeClientASCOMWidget *ui;
 	ASCOMDevice *ascom;
-	QString mSelectedDevice = Q_NULLPTR;
+	QString mSelectedDevice = nullptr;
 };
 
 #endif // TELESCOPECLIENTASCOMUI_HPP

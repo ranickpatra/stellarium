@@ -21,8 +21,6 @@
 #define ANGLEMEASUREDIALOG_HPP
 
 #include "StelDialog.hpp"
-#include "StelGui.hpp"
-#include "StelTranslator.hpp"
 #include <QString>
 
 class Ui_angleMeasureDialog;
@@ -35,13 +33,13 @@ class AngleMeasureDialog : public StelDialog
 
 public:
 	AngleMeasureDialog();
-	~AngleMeasureDialog();
+	~AngleMeasureDialog() override;
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 
 protected:
-	void createDialogContent();
+	void createDialogContent() override;
 
 private slots:
 	void restoreDefaults();

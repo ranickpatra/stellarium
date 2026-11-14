@@ -20,9 +20,15 @@
 #ifndef STELAPP_HPP
 #define STELAPP_HPP
 
+#include <memory>
+#include <qopengl.h>
+#include <qguiapplication.h>
 #include <QString>
 #include <QObject>
+#include <QRandomGenerator>
+#include "StelTextureTypes.hpp"
 #include "StelModule.hpp"
+#include "StelUtils.hpp"
 #include "VecMath.hpp"
 
 // Predeclaration of some classes
@@ -35,6 +41,9 @@ class StelMainView;
 class StelSkyCultureMgr;
 class StelViewportEffect;
 class QOpenGLFramebufferObject;
+class QOpenGLVertexArrayObject;
+class QOpenGLShaderProgram;
+class QOpenGLBuffer;
 class QOpenGLFunctions;
 class QSettings;
 class QNetworkAccessManager;
@@ -44,6 +53,7 @@ class StelLocationMgr;
 class StelSkyLayerMgr;
 class StelAudioMgr;
 class StelVideoMgr;
+class StelSpeechMgr;
 class StelGuiBase;
 class StelMainScriptAPIProxy;
 class StelScriptMgr;
@@ -60,7 +70,7 @@ class SpoutSender;
 //! This is the central class of Stellarium.  Only one singleton instance of
 //! this class is created and can be accessed from anywhere else.  This class
 //! is the access point to several "Manager" class which provide application-wide
-//! services for managment of font, textures, localization, sky culture, and in
+//! services for management of font, textures, localization, sky culture, and in
 //! theory all other services used by the other part of the program.
 //!
 //! The StelApp class is also the one managing the StelModule in a generic manner
@@ -69,9 +79,12 @@ class SpoutSender;
 class StelApp : public QObject
 {
 	Q_OBJECT
-	Q_PROPERTY(bool nightMode READ getVisionModeNight WRITE setVisionModeNight NOTIFY visionNightModeChanged)
-	Q_PROPERTY(bool flagShowDecimalDegrees  READ getFlagShowDecimalDegrees  WRITE setFlagShowDecimalDegrees  NOTIFY flagShowDecimalDegreesChanged)
+	Q_PROPERTY(bool nightMode               READ getVisionModeNight         WRITE setVisionModeNight         NOTIFY visionNightModeChanged)
+	Q_PROPERTY(bool flagUseDecDegreesCoords READ getFlagUseDecDegreesCoords WRITE setFlagUseDecDegreesCoords NOTIFY flagUseDecDegreesCoordsChanged)
+	Q_PROPERTY(bool flagUseDecDegreesOther  READ getFlagUseDecDegreesOther  WRITE setFlagUseDecDegreesOther  NOTIFY flagUseDecDegreesOtherChanged)
 	Q_PROPERTY(bool flagUseAzimuthFromSouth READ getFlagSouthAzimuthUsage   WRITE setFlagSouthAzimuthUsage   NOTIFY flagUseAzimuthFromSouthChanged)
+	Q_PROPERTY(bool flagUseNegativeHourAngles READ getFlagUseNegativeHourAngles WRITE setFlagUseNegativeHourAngles NOTIFY flagUseNegativeHourAnglesChanged)
+	Q_PROPERTY(bool flagUsePolarDistance    READ getFlagPolarDistanceUsage  WRITE setFlagPolarDistanceUsage  NOTIFY flagUsePolarDistanceChanged)
 	Q_PROPERTY(bool flagUseCCSDesignation   READ getFlagUseCCSDesignation   WRITE setFlagUseCCSDesignation   NOTIFY flagUseCCSDesignationChanged)
 	Q_PROPERTY(bool flagUseFormattingOutput READ getFlagUseFormattingOutput WRITE setFlagUseFormattingOutput NOTIFY flagUseFormattingOutputChanged)
 	Q_PROPERTY(bool flagOverwriteInfoColor  READ getFlagOverwriteInfoColor  WRITE setFlagOverwriteInfoColor  NOTIFY flagOverwriteInfoColorChanged)
@@ -79,11 +92,14 @@ class StelApp : public QObject
 	Q_PROPERTY(Vec3f daylightInfoColor	READ getDaylightInfoColor	WRITE setDaylightInfoColor	 NOTIFY daylightInfoColorChanged)
 	Q_PROPERTY(int  screenFontSize          READ getScreenFontSize          WRITE setScreenFontSize          NOTIFY screenFontSizeChanged)
 	Q_PROPERTY(int  guiFontSize             READ getGuiFontSize             WRITE setGuiFontSize             NOTIFY guiFontSizeChanged)
+	Q_PROPERTY(double screenButtonScale     READ getScreenButtonScale       WRITE setScreenButtonScale       NOTIFY screenButtonScaleChanged)
+	Q_PROPERTY(bool flagImmediateSave       READ getFlagImmediateSave       WRITE setFlagImmediateSave       NOTIFY flagImmediateSaveChanged)
 
-	Q_PROPERTY(QString version READ getVersion)
+	Q_PROPERTY(QString version READ getVersion CONSTANT)
 
 public:
 	friend class StelAppGraphicsWidget;
+	friend class StelMainView;
 	friend class StelRootItem;
 
 	//! Create and initialize the main Stellarium application.
@@ -94,7 +110,7 @@ public:
 	StelApp(StelMainView* parent);
 
 	//! Deinitialize and destroy the main Stellarium application.
-	virtual ~StelApp();
+	~StelApp() override;
 
 	//! Initialize core and all the modules.
 	void init(QSettings* conf);
@@ -150,6 +166,9 @@ public:
 	//! Get the audio manager
 	StelAudioMgr* getStelAudioMgr() const {return audioMgr;}
 
+	//! Get the speech manager
+	StelSpeechMgr* getStelSpeechMgr() const {return speechMgr;}
+
 	//! Get the actions manager to use for managing and editing actions
 	StelActionMgr* getStelActionManager() const {return actionMgr;}
 
@@ -164,6 +183,13 @@ public:
 	//! @return the StelCore instance of the program
 	StelCore* getCore() const {return core;}
 
+	//! get a pseudo-random integer
+	quint32 getRand() const {Q_ASSERT(randomGenerator); return randomGenerator->generate();}
+	int getRandBounded(int lowest, int highest) const {Q_ASSERT(randomGenerator); return randomGenerator->bounded(lowest, highest);}
+	//! shortcut to retrieve a random float [0...1).
+	float getRandF() const {Q_ASSERT(randomGenerator); return static_cast<float>(randomGenerator->generateDouble());}
+	float getRandFp1() const {Q_ASSERT(randomGenerator); return static_cast<float>(randomGenerator->generate()) / (static_cast<float>(RAND_MAX)+1.f);}
+
 	//! Get the common instance of QNetworkAccessManager used in stellarium
 	QNetworkAccessManager* getNetworkAccessManager() const {return networkAccessManager;}
 
@@ -174,7 +200,12 @@ public:
 	QSettings* getSettings() const {return confSettings;}
 
 	//! Return the currently used style
-	const QString getCurrentStelStyle() const {return "color";}
+	const QString getCurrentStelStyle() const {
+		if (qApp->property("onetime_custom_css").isValid())
+			return qApp->property("onetime_custom_css").toString();
+		else
+			return "default";
+	}
 
 	//! Update all object according to the deltaTime in seconds.
 	void update(double deltaTime);
@@ -189,26 +220,41 @@ public:
 	qreal getDevicePixelsPerPixel() const {return devicePixelsPerPixel;}
 	void setDevicePixelsPerPixel(qreal dppp);
 	
-	//! Get the scaling ratio to apply on all display elements, like GUI, text etc..
-	//! When this ratio is 1, all pixel sizes used in Stellarium will look OK on a regular
-	//! computer screen with 96 pixel per inch (reference for tuning sizes).
-	float getGlobalScalingRatio() const {return globalScalingRatio;}
-	void setGlobalScalingRatio(float r) {globalScalingRatio=r;}
-
 	//! Get the fontsize used for screen text.
 	int getScreenFontSize() const { return screenFontSize; }
 	//! Change screen font size.
 	void setScreenFontSize(int s);
+	//! Get the ratio of current font size used for screen text to the default value
+	double screenFontSizeRatio() const;
+	//! Get the ratio of current font size used for GUI to the default value
+	double guiFontSizeRatio() const { return double(getGuiFontSize()) / getDefaultGuiFontSize(); }
 	//! Get the principal font size used for GUI panels.
 	int getGuiFontSize() const;
 	//! change GUI font size.
 	void setGuiFontSize(int s);
+
+	//! Get the ratio (in percent) of screen button size to the default screen scale-dependent one
+	double getScreenButtonScale() const { return screenButtonScale; }
+	//! Set the ratio (in percent) of screen button size to the default screen scale-dependent one
+	void setScreenButtonScale(double s);
+
+	//! Combines #getDevicePixelsPerPixel and #guiFontSizeRatio
+	float getGuiScale() const;
+
+	//! Combines #getDevicePixelsPerPixel and #screenFontSizeRatio
+	float getScreenScale() const;
 
 	//! Get the GUI instance implementing the abstract GUI interface.
 	StelGuiBase* getGui() const {return stelGui;}
 	//! Tell the StelApp instance which GUI is currently being used.
 	//! The caller is responsible for destroying the GUI.
 	void setGui(StelGuiBase* b) {stelGui=b;}
+
+	//! Enable/disable updates to StelBottomBar
+	//! This may be important for temporary changes which should not cause two costly redraws of the texts.
+	//! After program launch, the bottom bar is updating according to signal connections.
+	//! This means, enclose the temporary state change with 2 calls (false/true) per such method.
+	void enableBottomStelBarUpdates(bool enable);
 
 #ifdef ENABLE_SCRIPTING
 	//! Get the script API proxy (for signal handling)
@@ -219,6 +265,12 @@ public:
 
 	static void initStatic();
 	static void deinitStatic();
+
+	//! Power feature: allow immediate storing of config.ini entries.
+	//! Storing only takes place if property StelApp.flagImmediateSave is set,
+	//! a flag activated with a manual config.ini entry gui/immediate_save_details=true
+	//! Items saved with this method still need to be saved as well with ConfigurationDialog::saveAllSettings()!
+	static void immediateSave(const QString &key, const QVariant &value);
 
 	//! Add a progression indicator to the GUI (if applicable).
 	//! @return a controller which can be used to indicate the current status.
@@ -234,12 +286,23 @@ public:
 
 	//! Dump diagnostics about action call priorities
 	void dumpModuleActionPriorities(StelModule::StelModuleActionName actionName) const;
+
+	//! Dump font info from QFontDatabase
+	//! You can trigger it once after program start by setting CLI option --dump-fontinfo
+	void dumpFontInfo() const;
+
+	static constexpr int getDefaultGuiFontSize() { return DEFAULT_FONT_SIZE; }
+
+	static bool isInitialized() {if (singleton) return singleton->initialized; else return false;}
 	
 	///////////////////////////////////////////////////////////////////////////
 	// Scriptable methods
 public slots:
-	//! Call this when the size of the GL window has changed.
+	//! Call this when the virtual size of the GL window has changed.
 	void glWindowHasBeenResized(const QRectF &rect);
+
+	//! Call this when the physical size of the GL window has changed.
+	void glPhysicalWindowHasBeenResized(const QRectF &rect);
 
 	//! Set flag for activating night vision mode.
 	void setVisionModeNight(bool);
@@ -251,15 +314,30 @@ public slots:
 	//! Get flag for activating overwrite mode for text color in info panel.
 	bool getFlagOverwriteInfoColor() const {return flagOverwriteInfoColor; }
 
-	//! Set flag for showing decimal degree in various places.
-	void setFlagShowDecimalDegrees(bool b);
-	//! Get flag for showing decimal degree in various places.
-	bool getFlagShowDecimalDegrees() const {return flagShowDecimalDegrees;}
+	//! Set flag for using decimal degrees for coordinates.
+	void setFlagUseDecDegreesCoords(bool b);
+	//! Get flag for using decimal degrees for coordinates.
+	bool getFlagUseDecDegreesCoords() const {return flagUseDecDegreesCoords;}
+
+	//! Set flag for using decimal degrees in various places, except the coordinates.
+	void setFlagUseDecDegreesOther(bool b);
+	//! Get flag for using decimal degrees in various places, except the coordinates.
+	bool getFlagUseDecDegreesOther() const {return flagUseDecDegreesOther;}
 
 	//! Set flag for using calculation of azimuth from south towards west (instead north towards east)
-	bool getFlagSouthAzimuthUsage() const { return flagUseAzimuthFromSouth; }
+	void setFlagSouthAzimuthUsage(bool use);
 	//! Get flag for using calculation of azimuth from south towards west (instead north towards east)
-	void setFlagSouthAzimuthUsage(bool use) { flagUseAzimuthFromSouth=use; emit flagUseAzimuthFromSouthChanged(use);}
+	bool getFlagSouthAzimuthUsage() const { return flagUseAzimuthFromSouth; }
+
+	//! Set flag for using negative hour angles (i.e., counting -12h...12h, not 0...24h)
+	void setFlagUseNegativeHourAngles(bool use);
+	//! Get flag for using negative hour angles (i.e., counting -12h...12h, not 0...24h)
+	bool getFlagUseNegativeHourAngles() const { return flagUseNegativeHourAngles; }
+
+	//! Set flag for using calculation of polar distance for equatorial coordinates
+	bool getFlagPolarDistanceUsage() const { return flagUsePolarDistance; }
+	//! Get flag for using calculation of polar distance for equatorial coordinates
+	void setFlagPolarDistanceUsage(bool use);
 	
 	//! Set flag for using of formatting output for coordinates
 	void setFlagUseFormattingOutput(bool b);
@@ -280,6 +358,13 @@ public slots:
 	void setDaylightInfoColor(const Vec3f& color);
 	//! Get info text color
 	Vec3f getDaylightInfoColor() const;
+
+	//! Set flag for storing some settings immediately
+	//! To not accidentally activate this mode permanently, you must use the "save settings" button to activate!
+	//! Switching it off is however stored immediately.
+	void setFlagImmediateSave(bool b);
+	//! Get flag about storing some settings immediately
+	bool getFlagImmediateSave() const {return flagImmediateSave;}
 
 	//! Get the current number of frame per second.
 	//! @return the FPS averaged on the last second
@@ -307,7 +392,7 @@ public slots:
 	//! Return the scaled time for animated objects
 	static double getAnimationTime();
 
-	//! Report that a download occured. This is used for statistics purposes.
+	//! Report that a download occurred. This is used for statistics purposes.
 	//! Connect this slot to QNetworkAccessManager::finished() slot to obtain statistics at the end of the program.
 	void reportFileDownloadFinished(QNetworkReply* reply);
 
@@ -315,8 +400,11 @@ public slots:
 	void quit();
 signals:
 	void visionNightModeChanged(bool);
-	void flagShowDecimalDegreesChanged(bool);
+	void flagUseDecDegreesCoordsChanged(bool);
+	void flagUseDecDegreesOtherChanged(bool);
 	void flagUseAzimuthFromSouthChanged(bool);
+	void flagUseNegativeHourAnglesChanged(bool);
+	void flagUsePolarDistanceChanged(bool);
 	void flagUseCCSDesignationChanged(bool);
 	void flagUseFormattingOutputChanged(bool);
 	void flagOverwriteInfoColorChanged(bool);
@@ -324,9 +412,11 @@ signals:
 	void languageChanged();
 	void screenFontSizeChanged(int);
 	void guiFontSizeChanged(int);
-	void fontChanged(QFont);
+	void screenButtonScaleChanged(double);
+	void fontChanged(const QFont&);
 	void overwriteInfoColorChanged(const Vec3f & color);
 	void daylightInfoColorChanged(const Vec3f & color);
+	void flagImmediateSaveChanged(bool);
 
 	//! Called just after a progress bar is added.
 	void progressBarAdded(const StelProgressController*);
@@ -353,10 +443,16 @@ private:
 	//! @param drawFbo the OpenGL fbo we need to render into.
 	void applyRenderBuffer(quint32 drawFbo=0);
 
+	void setupPostProcessor();
+	void highGraphicsModeDraw();
+
 	QString getVersion() const;
 
 	// The StelApp singleton
 	static StelApp* singleton;
+
+	//! The app-global random number generator
+	QRandomGenerator *randomGenerator;
 
 	//! The main window which is the parent of this object
 	StelMainView* mainWin;
@@ -373,7 +469,7 @@ private:
 	// Sky cultures manager for the application
 	StelSkyCultureMgr* skyCultureMgr;
 
-	//Actions manager fot the application.  Will replace shortcutMgr.
+	//Actions manager for the application.  Will replace shortcutMgr.
 	StelActionMgr* actionMgr;
 
 	//Property manager for the application
@@ -400,6 +496,9 @@ private:
 	// The video manager.  Must execute in the main thread.
 	StelVideoMgr* videoMgr;
 
+	// The speech synthesizer
+	StelSpeechMgr *speechMgr;
+
 	StelSkyLayerMgr* skyImageMgr;
 
 #ifdef ENABLE_SCRIPTING
@@ -415,9 +514,6 @@ private:
 	// Store the ratio between real device pixel in "Device Independent Pixel"
 	// Usually this value is 1, but for a mac with retina screen this will be value 2.
 	qreal devicePixelsPerPixel;
-
-	// The scaling ratio to apply on all display elements, like GUI, text etc..
-	float globalScalingRatio;
 	
 	float fps;
 	int frame;
@@ -451,20 +547,48 @@ private:
 
 	QList<StelProgressController*> progressControllers;
 
+	double screenButtonScale = 100; // in percent
 	int screenFontSize;
+	int numMultiSamples = 1;
 
 	// Framebuffer object used for viewport effects.
 	QOpenGLFramebufferObject* renderBuffer;
+	std::unique_ptr<QOpenGLBuffer> postProcessorVBO;
+	std::unique_ptr<QOpenGLVertexArrayObject> postProcessorVAO;
+	std::unique_ptr<QOpenGLShaderProgram> postProcessorProgram;
+	std::unique_ptr<QOpenGLShaderProgram> postProcessorProgramMS; // multisampled
+	std::unique_ptr<QOpenGLFramebufferObject> sceneFBO;
+	GLuint sceneMultisampledFBO = 0;
+	GLuint sceneMultisampledTex = 0;
+	GLuint sceneMultisampledRenderbuffer = 0;
+	StelTextureSP ditherPatternTex;
+	struct PostProcessorUniformLocations
+	{
+		int tex;
+		int ditherPattern;
+		int rgbMaxValue;
+	} postProcessorUniformLocations;
+	struct PostProcessorUniformLocationsMS
+	{
+		int tex;
+		int ditherPattern;
+		int rgbMaxValue;
+		int numMultiSamples;
+	} postProcessorUniformLocationsMS;
 	StelViewportEffect* viewportEffect;
 	QOpenGLFunctions* gl;
 	
-	bool flagShowDecimalDegrees;  // Format infotext with decimal degrees, not minutes/seconds
-	bool flagUseAzimuthFromSouth; // Display calculate azimuth from south towards west (as in some astronomical literature)
-	bool flagUseFormattingOutput; // Use tabular coordinate format for infotext
-	bool flagUseCCSDesignation;   // Use symbols like alpha (RA), delta (declination) for coordinate system labels
-	bool flagOverwriteInfoColor; // Overwrite and use color for text in info panel
+	bool flagUseDecDegreesCoords;   //!< Formatting infotext with decimal degrees for coordinates (not degrees/minutes/seconds)
+	bool flagUseDecDegreesOther;    //!< Formatting infotext with decimal degrees for non coordinates data (not degrees/minutes/seconds)
+	bool flagUseAzimuthFromSouth;   //!< Display calculate azimuth from south towards west (as in some astronomical literature)
+	bool flagUseNegativeHourAngles; //!< Count hour angles -12h...12h, not 0h...24h
+	bool flagUsePolarDistance;      //!< Display calculate polar distance for equatorial coordinates
+	bool flagUseFormattingOutput;   //!< Use tabular coordinate format for infotext
+	bool flagUseCCSDesignation;     //!< Use symbols like alpha (RA), delta (declination) for coordinate system labels
+	bool flagOverwriteInfoColor;    //!< Overwrite and use color for text in info panel
 	Vec3f overwriteInfoColor;
 	Vec3f daylightInfoColor;
+	bool flagImmediateSave;         //!< set true to allow more immediate-mode settings. By default this is limited to detail settings, e.g. orbit or nomenclature details, DSO filter types, ...
 #ifdef 	ENABLE_SPOUT
 	SpoutSender* spoutSender;
 #endif

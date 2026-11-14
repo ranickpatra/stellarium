@@ -32,20 +32,21 @@ class QNetworkAccessManager;
 class QListWidgetItem;
 class StelGui;
 class CustomDeltaTEquationDialog;
+class ConfigureScreenshotsDialog;
 
 class ConfigurationDialog : public StelDialog
 {
 	Q_OBJECT
 public:
 	ConfigurationDialog(StelGui* agui, QObject* parent);
-	virtual ~ConfigurationDialog() Q_DECL_OVERRIDE;
+	~ConfigurationDialog() override;
 
 public slots:
-	virtual void retranslate() Q_DECL_OVERRIDE;
+	void retranslate() override;
 
 protected:
 	//! Initialize the dialog widgets and connect the signals/slots
-	virtual void createDialogContent() Q_DECL_OVERRIDE;
+	void createDialogContent() override;
 	Ui_configurationDialogForm* ui;
 
 private:
@@ -71,20 +72,30 @@ private:
 	class StelProgressController* progressBar;
 
 private slots:
+	void updateSelectedInfoGui();
 	void setNoSelectedInfo();
 	void setAllSelectedInfo();
 	void setBriefSelectedInfo();
+	void setDefaultSelectedInfo();
 	void setCustomSelectedInfo();
 	//! Set the selected object info fields from the "Displayed Fields" boxes.
-	//! Called when any of the boxes has been clicked. Sets the
-	//! "selected info" mode to "Custom".
+	//! Called when any of the boxes has been clicked.
+	//! Sets the "selected info" mode to "Custom".
 	void setSelectedInfoFromCheckBoxes();
 	void saveCustomSelectedInfo();
 
+	void setCustomSelectedNarration();
+	//! Set the selected object narration fields from the "Displayed Fields" boxes.
+	//! Called when any of the boxes has been clicked.
+	void setSelectedNarrationFromCheckBoxes();
+	void saveCustomSelectedNarration();
+
 	void updateCurrentLanguage();
-	void updateCurrentSkyLanguage();
-	void selectLanguage(const QString& languageCode);
-	void selectSkyLanguage(const QString& languageCode);
+	void selectLanguage(const int id);    // id is index of name in QComboBox (must be called in a signal/slot connection!)
+	void setToolbarCorner(int idx);
+	void populateToolbarCornerComboBox();
+	void storeLanguageSettings(); // Store only currently set language settings (program and skyculture)
+	void storeFontSettings(); // Store only currently set font settings (sizes and program font)
 	void setStartupTimeMode();
 	//! Show/bring to foreground the shortcut editor window.
 	void showShortcutsWindow();
@@ -106,6 +117,13 @@ private slots:
 	//! value will be changed, but not saved to config file.
 	void browseForScreenshotDir();
 	void selectScreenshotDir();
+	//! Update tooltip of the dpi spinner to tell users the final print size at current dpi
+	//! This is called
+	//! - when DPI changes
+	//! - when custom size is toggled
+	//! - when window is resized
+	//! - when custom screenshot size is changed
+	void updateDpiTooltip();
 
 	//! Save the current viewing options including location and sky culture
 	//! This doesn't include the current viewing direction, landscape, time and FOV since those
@@ -121,12 +139,19 @@ private slots:
 	void populatePluginsList();
 	void pluginsSelectionChanged(QListWidgetItem *item, QListWidgetItem *previousItem);
 	void pluginConfigureCurrentSelection();
-	void loadAtStartupChanged(int);
-
+#if (QT_VERSION<QT_VERSION_CHECK(6,7,0))
+	void loadAtStartupChanged(int state);
+#else
+	void loadAtStartupChanged(Qt::CheckState state);
+#endif
 	void populateDeltaTAlgorithmsList();
 	void setDeltaTAlgorithm(int algorithmID);
 	void setDeltaTAlgorithmDescription();
 	void showCustomDeltaTEquationDialog();
+
+	void showConfigureScreenshotsDialog();
+
+	void updateDateTimeDisplayFormat();
 
 	void populateDateFormatsList();
 	void setDateFormat();
@@ -158,6 +183,8 @@ private slots:
 
 	void de430ButtonClicked();
 	void de431ButtonClicked();
+	void de440ButtonClicked();
+	void de441ButtonClicked();
 
 	//! feed the combo with useful values. Call in createDialogContent().
 	void populateFontWritingSystemCombo();
@@ -170,14 +197,30 @@ private:
 	StelGui* gui;
 
 	CustomDeltaTEquationDialog* customDeltaTEquationDialog;
+	ConfigureScreenshotsDialog * configureScreenshotsDialog;
 
 	int savedProjectionType;
+
+	void populateTooltips();
 	
 	//! Set the displayed fields checkboxes from the current displayed fields.
 	void updateSelectedInfoCheckBoxes();
 	//! Make sure that no tabs icons are outside of the viewport.
 	//! @todo Limit the width to the width of the screen *available to the window*.
 	void updateTabBarListWidgetWidth();
+
+	//! Speech configuration (needs Qt6.4+)
+	void populateSpeechEngineCombo();
+#ifdef ENABLE_SPEECH
+	//! Speech configuration (needs Qt6.4+)
+	void populateVoiceCombo();
+	//! Speech configuration (needs Qt6.4+)
+	void selectSpeechEngine(int idx);
+	//! Speech configuration (needs Qt6.4+)
+	void selectVoice(int idx);
+	//! react to changes after setting Speech Engine
+	void onSpeechReady();
+#endif
 };
 
 #endif // CONFIGURATIONDIALOG_HPP

@@ -24,15 +24,39 @@
 #include <QObject>
 #include <QMetaType>
 #include <QMap>
+#include <QImage>
+#include <QtPositioning/QGeoPositionInfoSource>
+#include <QLoggingCategory>
+#include "VecMath.hpp"
 
 typedef QList<StelLocation> LocationList;
 typedef QMap<QString,StelLocation> LocationMap;
 typedef QMap<QByteArray,QByteArray> TimezoneNameMap;
 
+typedef struct
+{
+	int code;
+	QString regionName;
+	QString countries;
+	QString planet;
+} GeoRegion;
+
 class GPSLookupHelper;
+
 
 //! @class StelLocationMgr
 //! Manage the list of available location.
+//!
+//! @note You can finetune the amount of GPS-related messages in the logfile by configuring the logging category stel.GPS.
+//! Likewise, for IP-based location lookup, we use the logging category stel.LocIP.
+//! If your GPS device seems not to work, try to get more log otput by setting environment variable
+//! QT_LOGGING_RULES="*.debug=false;stel.GPS.debug=true;stel.LocIP.info=false;".
+//! This will also silence most output of IP-related location queries.
+//! By default, only Info and more severe messages are displayed.
+
+Q_DECLARE_LOGGING_CATEGORY(GPS)
+Q_DECLARE_LOGGING_CATEGORY(LocIP)
+
 class StelLocationMgr : public QObject
 {
 	Q_OBJECT
@@ -40,7 +64,7 @@ class StelLocationMgr : public QObject
 public:
 	//! Default constructor which loads the list of locations from the base and user location files.
 	StelLocationMgr();
-	~StelLocationMgr();
+	~StelLocationMgr() override;
 
 	//! Construct a StelLocationMgr which uses the locations given instead of loading them from the files.
 	StelLocationMgr(const LocationList& locations);
@@ -58,7 +82,7 @@ public:
 	const StelLocation locationFromCLI() const;
 
 	//! Return a valid location when no valid one was found.
-	const StelLocation& getLastResortLocation() const {return lastResortLocation;}
+	const StelLocation& getLastResortLocation();
 	
 	//! Get whether a location can be permanently added to the list of user locations
 	//! The main constraint is that the small string must be unique
@@ -79,9 +103,39 @@ public:
 	bool deleteUserLocation(const QString& id);
 
 	//! Find list of locations within @param radiusDegrees of selected (usually screen-clicked) coordinates.
-	LocationMap pickLocationsNearby(const QString planetName, const float longitude, const float latitude, const float radiusDegrees);
-	//! Find list of locations in a particular country only.
-	LocationMap pickLocationsInCountry(const QString country);
+	LocationMap pickLocationsNearby(const QString& planetName, const float longitude, const float latitude, const float radiusDegrees);
+	//! Find list of locations in a particular region only.
+	LocationMap pickLocationsInRegion(const QString& region);
+
+	//! return a QStringList of region names by planet (return all list of regions if planet name is empty)
+	QStringList getRegionNames(const QString& planet = "") const;
+
+	//! Pick region name from ISO 3166-1 two-letter country codes
+	static QString pickRegionFromCountryCode(const QString& countryCode);
+	//! Pick region name from country English name
+	static QString pickRegionFromCountry(const QString& country);
+	//! Pick region name from region code
+	static QString pickRegionFromCode(int regionCode);
+
+	//! Compute UTM coordinates including convergence angle from geographic coordinates (WGS84).
+	//! https://en.wikipedia.org/wiki/Universal_Transverse_Mercator_coordinate_system
+	//! @arg longitude geographic longitude from Greenwich, degrees [-180...+180]
+	//! @arg latitude geographic latitude from equator, degrees. UTM defined for [-80...+84]
+	//! @arg zone UTM zone. If 0, compute best-fit zone.
+	//! @return {{E[m], N[m], zone}, {gamma[rad], k}}
+	//! The returned zone contains the input or, if input was 0 (or missing), the best-fitting zone. North or South is not returned but is trivially found from latitude.
+	static QPair<Vec3d,Vec2d> geo2utm(const double longitude, const double latitude, const int zone=0);
+	//! Compute geographical coordinates (WGS84) from UTM
+	//! https://en.wikipedia.org/wiki/Universal_Transverse_Mercator_coordinate_system
+	//! @arg easting (metres). False Easting of Zone meridian = 500000
+	//! @arg northing (metres). For southern latitudes, equator = 10000000
+	//! @arg zone UTM zone (longitudinal).
+	//! @arg north true for N, false for S latitude zones.
+	//! @return {{longitude[deg], latitude[deg], refLong[deg]}, {gamma[rad], k}}
+	static QPair<Vec3d,Vec2d> utm2geo(const double easting, const double northing, const int zone, const bool north);
+	//! Find UTM zone designation. The letters are usually not important for finding the coordinates.
+	//! This works for the whole globe, even for polar zones, and observes the adjusted zones of Svalbard and Norway.
+	static QPair<int, QChar>utmZone(const double longitude, const double latitude);
 
 public slots:
 	//! Return the StelLocation for a given string
@@ -93,6 +147,9 @@ public slots:
 
 	//! return a QStringList of valid timezone names in Stellarium's location database.
 	QStringList getAllTimezoneNames() const;
+
+	//! Retrieve a color from coordinate lookup into the current planet texture (or specialized earth map)
+	QColor getColorForCoordinates(const double lng, const double lat) const;
 
 #ifdef ENABLE_GPS
 	//! Try to get a location from GPS lookup.
@@ -129,11 +186,26 @@ signals:
 private slots:
 	//! Process answer from online lookup of IP address
 	void changeLocationFromNetworkLookup();
+	//! To be connected from StelCore::locationChanged(loc)
+	void changePlanetMapForLocation(StelLocation loc);
 #ifdef ENABLE_GPS
 	void changeLocationFromGPSQuery(const StelLocation& loc);
 	void gpsQueryError(const QString& err);
+	//#ifdef Q_OS_WIN
+	//! uwes-ufo's so-far Windows-only extension of the button
+	void positionUpdated(QGeoPositionInfo gpsPos);
+	//#endif
 #endif
+	/// MAYBE NOT NEEDED AFTER ALL:
+	//! Use QLocation services to get location from OS (via IP, Wifi, ...)
+	//! Needs permissions.
+	void positionUpdatedFromOS(const QGeoPositionInfo &info);
+
 private:
+	void loadRegions();
+	void loadCountries();
+	void doGetLocationFromIP();
+	void locationFromIpOldMethod();
 	void generateBinaryLocationFile(const QString& txtFile, bool isUserLocation, const QString& binFile) const;
 
 	//! Load cities from a file
@@ -152,10 +224,22 @@ private:
 	//! The list has to be maintained based on empirical observations.
 	//! @todo Make it load from a configurable external file.
 	static TimezoneNameMap locationDBToIANAtranslations;
+
+	static QList<GeoRegion> regions;
+	static QMap<QString, QString> countryCodeToRegionMap;
+	static QMap<QString, QString> countryNameToCodeMap;
 	
 	StelLocation lastResortLocation;
 
+	//! Used to sample a color from our current planet's surface map.
+	//! This must be kept in-sync with the map shown in the LocationDialog.
+	QImage planetSurfaceMap;
+	//! Auxiliary to the surface map. This tracks whether we actually have to load a new image.
+	QString planetName;
+
 	GPSLookupHelper *nmeaHelper,*libGpsHelper;
+	// Used in the Location from Network query
+	QGeoPositionInfoSource *qGeoPositionInfoSource;
 };
 
 #endif // STELLOCATIONMGR_HPP

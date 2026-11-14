@@ -26,9 +26,11 @@
 #include <QOpenGLContext>
 #include <QTimer>
 #ifdef OPENGL_DEBUG_LOGGING
-#include <QOpenGLDebugMessage>
+class QOpenGLDebugLogger;
+class QOpenGLDebugMessage;
 #endif
-#include "StelUtils.hpp"
+#include "VecMath.hpp"
+#include "StelApp.hpp"
 
 class StelGLWidget;
 class StelGraphicsScene;
@@ -50,27 +52,44 @@ class StelMainView : public QGraphicsView
 	Q_OBJECT
 	Q_PROPERTY(bool fullScreen                 READ isFullScreen                  WRITE setFullScreen                 NOTIFY fullScreenChanged)
 	Q_PROPERTY(bool flagInvertScreenShotColors READ getFlagInvertScreenShotColors WRITE setFlagInvertScreenShotColors NOTIFY flagInvertScreenShotColorsChanged)
+	Q_PROPERTY(bool flagScreenshotDateFileName READ getFlagScreenshotDateFileName WRITE setFlagScreenshotDateFileName NOTIFY flagScreenshotDateFileNameChanged)
+	Q_PROPERTY(QString screenShotFileMask      READ getScreenshotFileMask         WRITE setScreenshotFileMask         NOTIFY screenshotFileMaskChanged)
 	Q_PROPERTY(bool flagOverwriteScreenshots   READ getFlagOverwriteScreenShots   WRITE setFlagOverwriteScreenShots   NOTIFY flagOverwriteScreenshotsChanged)
 	Q_PROPERTY(bool flagUseCustomScreenshotSize READ getFlagUseCustomScreenshotSize WRITE setFlagUseCustomScreenshotSize NOTIFY flagUseCustomScreenshotSizeChanged)
 	Q_PROPERTY(int  customScreenshotWidth      READ getCustomScreenshotWidth      WRITE setCustomScreenshotWidth      NOTIFY customScreenshotWidthChanged)
 	Q_PROPERTY(int  customScreenshotHeight     READ getCustomScreenshotHeight     WRITE setCustomScreenshotHeight     NOTIFY customScreenshotHeightChanged)
+	Q_PROPERTY(int  screenshotDpi	           READ getScreenshotDpi              WRITE setScreenshotDpi              NOTIFY screenshotDpiChanged)
 	Q_PROPERTY(QString screenShotFormat        READ getScreenshotFormat           WRITE setScreenshotFormat           NOTIFY screenshotFormatChanged)
 	Q_PROPERTY(bool flagCursorTimeout          READ getFlagCursorTimeout          WRITE setFlagCursorTimeout          NOTIFY flagCursorTimeoutChanged)
 	Q_PROPERTY(double cursorTimeout            READ getCursorTimeout              WRITE setCursorTimeout              NOTIFY cursorTimeoutChanged)
 	Q_PROPERTY(Vec3f skyBackgroundColor        READ getSkyBackgroundColor         WRITE setSkyBackgroundColor         NOTIFY skyBackgroundColorChanged)
-
+	Q_PROPERTY(int minFps	                   READ getMinFps                     WRITE setMinFps                     NOTIFY minFpsChanged)
+	Q_PROPERTY(int maxFps	                   READ getMaxFps                     WRITE setMaxFps                     NOTIFY maxFpsChanged)
+	Q_PROPERTY(int minTimeBetweenFrames        READ getMinTimeBetweenFrames       WRITE setMinTimeBetweenFrames       NOTIFY minTimeBetweenFramesChanged)
 public:
+#if QT_CONFIG(opengles2)
+	using PFNGLMINSAMPLESHADINGPROC = PFNGLMINSAMPLESHADINGOESPROC;
+#endif
 	//! Contains some basic info about the OpenGL context used
 	struct GLInfo
 	{
 		QString vendor;
 		QString renderer;
+		QSurface* surface;
 		QOpenGLContext* mainContext;
 		QOpenGLFunctions* functions;
+		PFNGLMINSAMPLESHADINGPROC glMinSampleShading = nullptr;
+		GLint maxAnisotropy = 0;
+		GLint maxTextureSize = 2048;
+		bool supportsLuminanceTextures = false;
+		bool isCoreProfile = false;
+		bool isHighGraphicsMode = false;
+		bool isGLES = false;
+		GLint majorVersion = 0;
 	};
 
 	StelMainView(QSettings* settings);
-	virtual ~StelMainView() Q_DECL_OVERRIDE;
+	~StelMainView() override;
 
 	//! Start the main initialization of Stellarium
 	void init();
@@ -104,10 +123,18 @@ public:
 	void glContextDoneCurrent();
 
 	//! Returns the information about the GL context, this does not require the context to be active.
-	GLInfo getGLInformation() const { return glInfo; }
+	const GLInfo& getGLInformation() const { return glInfo; }
+
+	//! Returns the desired OpenGL format settings.
+	static QSurfaceFormat getDesiredGLFormat(QSettings *configuration);
+
+	//! Set image size in windowed mode. Leaves fullScreen if necessary.
+	//! This is required for externally accessing Stellarium from other programs, do not delete!
+	QRectF setWindowSize(int width, int height);
+
 public slots:
 
-	//! Set whether fullscreen is activated or not
+	//! Set whether fullscreen is activated or not, and shows the window if it's invisible
 	void setFullScreen(bool);
 
 	//! Return focus to the sky item.  To be used when we close a dialog.
@@ -135,28 +162,37 @@ public slots:
 	//! Get whether colors are inverted when saving screenshot
 	bool getFlagInvertScreenShotColors() const {return flagInvertScreenShotColors;}
 	//! Set whether colors should be inverted when saving screenshot
-	void setFlagInvertScreenShotColors(bool b) {flagInvertScreenShotColors=b; emit flagInvertScreenShotColorsChanged(b);}
+	void setFlagInvertScreenShotColors(bool b) {flagInvertScreenShotColors=b; StelApp::immediateSave("main/invert_screenshots_colors", b); emit flagInvertScreenShotColorsChanged(b);}
+
+	//! Get whether date and time should be used for screenshot naming
+	bool getFlagScreenshotDateFileName() const {return flagScreenshotDateFileName;}
+	//! Set whether date and time should be used for screenshot naming
+	void setFlagScreenshotDateFileName(bool b);
+	void setScreenshotFileMask(const QString filemask);
+	QString getScreenshotFileMask() const {return screenShotFileMask;}
 
 	//! Get whether existing files are overwritten when saving screenshot
 	bool getFlagOverwriteScreenShots() const {return flagOverwriteScreenshots;}
-	//! Set whether existing files are overwritten when saving screenshot
+	//! Set whether existing files are overwritten when saving screenshot.
+	//! This flag is available for scripting only and initializes to false. There is no config.ini entry.
 	void setFlagOverwriteScreenShots(bool b) {flagOverwriteScreenshots=b; emit flagOverwriteScreenshotsChanged(b);}
 
 	//! Get whether custom size should be used for screenshots
 	bool getFlagUseCustomScreenshotSize() const {return flagUseCustomScreenshotSize;}
 	//! Set whether custom size should be used for screenshots
-	void setFlagUseCustomScreenshotSize(bool b) {flagUseCustomScreenshotSize=b; emit flagUseCustomScreenshotSizeChanged(b);}
+	void setFlagUseCustomScreenshotSize(bool b) {flagUseCustomScreenshotSize=b; StelApp::immediateSave("main/screenshot_custom_size", b); emit flagUseCustomScreenshotSizeChanged(b);}
 	//! Get custom screenshot width
 	int getCustomScreenshotWidth() const {return customScreenshotWidth;}
-	//! Set whether custom size should be used for screenshots
-	void setCustomScreenshotWidth(int width) {customScreenshotWidth=width; emit customScreenshotWidthChanged(width);}
+	//! Set custom width for screenshots
+	void setCustomScreenshotWidth(int width) {customScreenshotWidth=width; StelApp::immediateSave("main/screenshot_custom_width", width); emit customScreenshotWidthChanged(width);}
 	//! Get custom screenshot height
 	int getCustomScreenshotHeight() const {return customScreenshotHeight;}
-	//! Set whether custom size should be used for screenshots
-	void setCustomScreenshotHeight(int height) {customScreenshotHeight=height; emit customScreenshotHeightChanged(height);}
-	//! Get screenshot magnification. This should be used by StarMgr, text drawing and other elements which may
-	//! want to enlarge their output in screenshots to keep them visible.
-	float getCustomScreenshotMagnification() const {return customScreenshotMagnification;}
+	//! Set custom height for screenshots
+	void setCustomScreenshotHeight(int height) {customScreenshotHeight=height; StelApp::immediateSave("main/screenshot_custom_height", height); emit customScreenshotHeightChanged(height);}
+	//! Get screenshot DPI. This is only an entry in the screenshot image metadata. The raster content is not influenced.
+	int getScreenshotDpi() const {return screenshotDpi;}
+	//! Set screenshot DPI. This is only an entry in the screenshot image metadata. The raster content is not influenced.
+	void setScreenshotDpi(int dpi);
 	//! Get the state of the mouse cursor timeout flag
 	bool getFlagCursorTimeout() const {return flagCursorTimeout;}
 	//! Set the state of the mouse cursor timeout flag
@@ -164,21 +200,27 @@ public slots:
 	//! Get the mouse cursor timeout in seconds
 	double getCursorTimeout() const {return cursorTimeoutTimer->interval() / 1000.0;}
 	//! Set the mouse cursor timeout in seconds
-	void setCursorTimeout(double t) {cursorTimeoutTimer->setInterval(static_cast<int>(t * 1000)); emit cursorTimeoutChanged(t);}
+	void setCursorTimeout(double t) {cursorTimeoutTimer->setInterval(static_cast<int>(t * 1000)); StelApp::immediateSave("gui/mouse_cursor_timeout", t); emit cursorTimeoutChanged(t);}
 
 	//! Set the minimum frames per second. Usually this minimum will be switched to after there are no
 	//! user events for some seconds to save power. However, if can be useful to set this to a high
 	//! value to improve playing smoothness in scripts.
 	//! @param m the new minimum fps setting.
-	void setMinFps(float m) {minfps=m;}
+	void setMinFps(float m) {minfps=qMin(m, maxfps); StelApp::immediateSave("video/minimum_fps", m); emit minFpsChanged(minfps);}
 	//! Get the current minimum frames per second.
 	float getMinFps() const {return minfps;}
 	//! Set the maximum frames per second.
 	//! @param m the new maximum fps setting.
-	//! @todo this setting currently does nothing
-	void setMaxFps(float m) {maxfps = m;}
+	void setMaxFps(float m) {maxfps = qMax(m, minfps); StelApp::immediateSave("video/maximum_fps", m); emit maxFpsChanged(maxfps);}
 	//! Get the current maximum frames per second.
 	float getMaxFps() const {return maxfps;}
+	//! Get the desired frame rate: a number in [minfps, maxfps]
+	float getDesiredFps() const { return needsMaxFPS() ? maxfps : minfps; }
+	//! Set the minimum time between frames (in milliseconds).
+	//! @param m the new setting.
+	void setMinTimeBetweenFrames(int m) {minTimeBetweenFrames = qMax(0, m); StelApp::immediateSave("video/min_time_between_frames", minTimeBetweenFrames); emit minTimeBetweenFramesChanged(minTimeBetweenFrames);}
+	//! Get the current minimum time between frames.
+	int getMinTimeBetweenFrames() const {return minTimeBetweenFrames;}
 
 	//! Notify that an event was handled by the program and therefore the
 	//! FPS should be maximized for a couple of seconds.
@@ -197,17 +239,19 @@ public slots:
 protected:
 	//! Hack to determine current monitor pixel ratio
 	//! @todo Find a better way to handle this
-	virtual void moveEvent(QMoveEvent* event) Q_DECL_OVERRIDE;
+	void moveEvent(QMoveEvent* event) override;
 	//! Handle window closed event, calling StelApp::quit()
-	virtual void closeEvent(QCloseEvent* event) Q_DECL_OVERRIDE;
+	void closeEvent(QCloseEvent* event) override;
 	//! Handle window resized events, and change the size of the underlying
 	//! QGraphicsScene to be the same
-	virtual void resizeEvent(QResizeEvent* event) Q_DECL_OVERRIDE;
+	void resizeEvent(QResizeEvent* event) override;
 	//! Wake up mouse cursor (if it was hidden)
-	virtual void mouseMoveEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
+	void mouseMoveEvent(QMouseEvent *event) override;
 
 	bool eventFilter(QObject *obj, QEvent *event) override;
 signals:
+	//! emitted when window size has changed
+	void sizeChanged(const QSize &sz);
 	//! emitted when saveScreenShot is requested with saveScreenShot().
 	//! doScreenshot() does the actual work (it has to do it in the main
 	//! thread, where as saveScreenShot() might get called from another one.
@@ -215,7 +259,7 @@ signals:
 	//! @remark FS: is threaded access here even a possibility anymore, or a remnant of older code?
 	void screenshotRequested(void);
 	void fullScreenChanged(bool b);
-	//! Emitted when the "Reload shaders" action is perfomed
+	//! Emitted when the "Reload shaders" action is performed
 	//! Interested objects should subscribe to this signal and reload their shaders
 	//! when this is emitted
 	void reloadShadersRequested();
@@ -224,14 +268,22 @@ signals:
 	void flagInvertScreenShotColorsChanged(bool b);
 	void flagOverwriteScreenshotsChanged(bool b);
 	void flagUseCustomScreenshotSizeChanged(bool use);
+	void flagScreenshotDateFileNameChanged(bool flag);
 	void customScreenshotWidthChanged(int width);
 	void customScreenshotHeightChanged(int height);
+	void screenshotDpiChanged(int dpi);
 	void screenshotFormatChanged(QString format);
+	void screenshotFileMaskChanged(QString format);
 
 	void skyBackgroundColorChanged(Vec3f color);
 
 	void flagCursorTimeoutChanged(bool b);
 	void cursorTimeoutChanged(double t);
+	void minFpsChanged(int fps);
+	void maxFpsChanged(int fps);
+	void minTimeBetweenFramesChanged(int tbf);
+
+	void frameFinished();
 
 private slots:
 	// Do the actual screenshot generation in the main thread with this method.
@@ -239,6 +291,15 @@ private slots:
 
 	void fpsTimerUpdate();
 	void hideCursor();
+
+	//! Set inhibiting triggering screensaver/power save on entering fullscreen mode.
+	//! Connected via QTimer.
+	//! Activate via CLI flag --no-screensaver (or -F)
+	//! @note This is currently available on Windows only.
+	void disableScreensaver(bool fullscreen);
+	//! send OS signal to inhibit triggering screensaver/power save. (Connected via QTimer.)
+	//! @note This is currently working on Windows only.
+	void bumpScreensaver();
 
 #ifdef OPENGL_DEBUG_LOGGING
 	void logGLMessage(const QOpenGLDebugMessage& debugMessage);
@@ -251,15 +312,13 @@ private slots:
 private:
 	//! The graphics scene notifies us when a draw finished, so that we can queue the next one
 	void drawEnded();
-	//! Returns the desired OpenGL format settings,
-	//! on desktop this corresponds to a GL 2.1 context,
-	//! with 32bit RGBA buffer and 24/8 depth/stencil buffer
-	QSurfaceFormat getDesiredGLFormat() const;
 	//! provide extended OpenGL diagnostics in logfile.
 	void dumpOpenGLdiagnostics() const;
 	//! Startup diagnostics, providing test for various circumstances of bad OS/OpenGL driver combinations
 	//! to provide feedback to the user about bad OpenGL drivers.
 	void processOpenGLdiagnosticsAndWarnings(QSettings *conf, QOpenGLContext* context) const;
+	//! Get physical dimensions given the virtual dimensions for the screen where this window is located.
+	QRectF getPhysicalSize(const QRectF& virtualRect) const;	
 
 	//! The StelMainView singleton
 	static StelMainView* singleton;
@@ -283,13 +342,15 @@ private:
 
 	bool updateQueued;
 	bool flagInvertScreenShotColors;
+	bool flagScreenshotDateFileName; //! if set to true, screenshot is named by date and time format
 	bool flagOverwriteScreenshots; //! if set to true, screenshot is named exactly screenShotPrefix.png and overwrites existing file
 	bool flagUseCustomScreenshotSize; //! if true, the next 2 values are observed for screenshots.
 	int customScreenshotWidth;            //! used when flagCustomResolutionScreenshots==true
 	int customScreenshotHeight;           //! used when flagCustomResolutionScreenshots==true
-	float customScreenshotMagnification;  //! tracks the magnification factor customScreenshotHeight/NormalWindowHeight
+	int screenshotDpi;                //! Image metadata entry for DPI. This does not influence the screenshot raster image content in any way, but some workflows like to have a configurable entry.
 	QString screenShotPrefix;
 	QString screenShotFormat; //! file type like "png" or "jpg".
+	QString screenShotFileMask;
 	QString screenShotDir;
 
 	bool flagCursorTimeout;
@@ -302,7 +363,12 @@ private:
 	float minfps;
 	//! The maximum desired frame rate in frame per second.
 	float maxfps;
+	//! The minimum desired time between frames, in milliseconds.
+	int minTimeBetweenFrames;
 	QTimer* fpsTimer;
+
+	//! A timer that resets the screensaver when CLI option --no-screensaver (or -F) is given.
+	QTimer* screensaverInhibitorTimer;
 
 #ifdef OPENGL_DEBUG_LOGGING
 	QOpenGLDebugLogger* glLogger;

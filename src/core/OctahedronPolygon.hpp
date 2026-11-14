@@ -28,15 +28,15 @@
 #include <QVarLengthArray>
 
 //! @struct EdgeVertex
-//! Describe a vertex composing polygon contours, and whether it belong to an edge or not.
+//! @brief Describe a vertex composing polygon contours, and whether it belongs to an edge or not.
 struct EdgeVertex
 {
-	EdgeVertex() : edgeFlag(false) {;}
-	EdgeVertex(bool b) : edgeFlag(b) {;}
-	EdgeVertex(const Vec3d& v, bool b) : vertex(v), edgeFlag(b) {;}
+	EdgeVertex() : edgeFlag(false) {}
+	EdgeVertex(bool b) : edgeFlag(b) {}
+	EdgeVertex(const Vec3d& v, bool b) : vertex(v), edgeFlag(b) {}
 	//! The normalized vertex direction.
 	Vec3d vertex;
-	//! Set to true if the vertex is part of at least one edge segment, i.e. it lays on the boundary of the polygon.
+	//! Set to true if the vertex is part of at least one edge segment, i.e. it lies on the boundary of the polygon.
 	bool edgeFlag;
 };
 
@@ -50,15 +50,15 @@ class SubContour : public QVector<EdgeVertex>
 public:
 	// Create a SubContour from a list of vertices
 	SubContour(const QVector<Vec3d>& vertices, bool closed=true);
-	SubContour() {;}
-	SubContour(int size, const EdgeVertex& v) : QVector<EdgeVertex>(size, v) {;}
+	SubContour() {}
+	SubContour(int size, const EdgeVertex& v) : QVector<EdgeVertex>(size, v) {}
 	SubContour reversed() const;
 	QString toJSON() const;
 };
 
 //! @class OctahedronPolygon
-//! Manage a non-convex polygon which can extends on more than 180 deg.
-//! The contours defining the polygon are splitted and projected on the 8 sides of an Octahedron to enable 2D geometry
+//! Manage a non-convex polygon which can extend on more than 180 deg.
+//! The contours defining the polygon are split and projected on the 8 sides of an Octahedron to enable 2D geometry
 //! algorithms to be used.
 class OctahedronPolygon
 {
@@ -133,7 +133,7 @@ private:
 
 	bool sideContains2D(const Vec3d& p, int sideNb) const;
 
-	//! Tesselate the contours per side, producing (in @var sides) a list of triangles subcontours according to the given rule.
+	//! Tesselate the contours per side, producing (in #sides) a list of triangles subcontours according to the given rule.
 	void tesselate(TessWindingRule rule);
 
 	QVector<SubContour> tesselateOneSideLineLoop(struct GLUEStesselator* tess, int sidenb) const;

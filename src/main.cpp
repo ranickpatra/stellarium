@@ -22,6 +22,7 @@
 #include "StelSplashScreen.hpp"
 #include "StelTranslator.hpp"
 #include "StelLogger.hpp"
+#include "StelSystemInfo.hpp"
 #include "StelFileMgr.hpp"
 #include "CLIProcessor.hpp"
 #include "StelIniParser.hpp"
@@ -32,16 +33,13 @@
 
 #include <QDebug>
 
-#ifndef USE_QUICKVIEW
-	#include <QApplication>
-	#include <QMessageBox>
-	#include <QStyleFactory>
-#else
-	#include <QGuiApplication>
-#endif
+#include <QApplication>
+#include <QMessageBox>
+#include <QStyleFactory>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QScreen>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QGuiApplication>
@@ -52,6 +50,20 @@
 #include <QTranslator>
 #include <QNetworkDiskCache>
 #include <QThread>
+#include <QThreadPool>
+
+
+#ifdef Q_OS_MACOS
+#include <QEvent>
+#include <QFileOpenEvent>
+#endif
+
+#ifdef Q_OS_ANDROID
+#include <QJniObject>
+#include <QJniEnvironment>
+#include <QtCore/private/qjnihelpers_p.h>
+#include <QtCore/private/qandroidextras_p.h>
+#endif
 
 #include <clocale>
 
@@ -60,25 +72,6 @@
 	//we use WIN32_LEAN_AND_MEAN so this needs to be included
 	//to use timeBeginPeriod/timeEndPeriod
 	#include <mmsystem.h>
-
-	// Default to High Performance Mode on machines with hybrid graphics
-	// Details: https://stackoverflow.com/questions/44174859/how-to-give-an-option-to-select-graphics-adapter-in-a-directx-11-application
-	extern "C"
-	{
-	#ifdef _MSC_VER
-		__declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
-		__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 0x00000001;
-	#else
-		__attribute__((dllexport)) DWORD NvOptimusEnablement = 0x00000001;
-		__attribute__((dllexport)) int AmdPowerXpressRequestHighPerformance = 0x00000001;
-	#endif
-	}
-#else
-	extern "C"
-	{
-		int NvOptimusEnablement = 1;
-		int AmdPowerXpressRequestHighPerformance = 1;
-	}
 #endif //Q_OS_WIN
 
 //! @class CustomQTranslator
@@ -87,19 +80,43 @@ class CustomQTranslator : public QTranslator
 {
 	using QTranslator::translate;
 public:
-	virtual bool isEmpty() const { return false; }
+	bool isEmpty() const override { return false; }
 
 	//! Overrides QTranslator::translate().
 	//! Calls StelTranslator::qtranslate().
 	//! @param context Qt context string - IGNORED.
 	//! @param sourceText the source message.
 	//! @param comment optional parameter
-	virtual QString translate(const char *context, const char *sourceText, const char *disambiguation = Q_NULLPTR, int n = -1) const
+	QString translate(const char *context, const char *sourceText, const char *disambiguation = Q_NULLPTR, int n = -1) const override
 	{
-		Q_UNUSED(context);
-		Q_UNUSED(n);
+		Q_UNUSED(context)
+		Q_UNUSED(n)
 		return StelTranslator::globalTranslator->qtranslate(sourceText, disambiguation);
 	}
+};
+
+class StelApplication : public QApplication
+{
+public:
+	StelApplication(int &argc, char **argv)
+		: QApplication(argc, argv)
+	{
+	}
+
+	#ifdef Q_OS_MACOS
+	bool event(QEvent *event) override
+	{
+		if (event->type() == QEvent::FileOpen)
+		{
+			QFileOpenEvent *openEvent = static_cast<QFileOpenEvent *>(event);
+			QString script = openEvent->file();
+			if (script.endsWith(".ssc"))
+				qApp->setProperty("onetime_startup_script", script);
+		}
+
+		return QApplication::event(event);
+	}
+	#endif
 };
 
 
@@ -131,8 +148,20 @@ void clearCache()
 // Main stellarium procedure
 int main(int argc, char **argv)
 {
+#ifdef Q_OS_ANDROID
+	// adb logcat output already contains timestamps and log level, no need to add them to our emitted string
+	qSetMessagePattern("%{if-category}[%{category}] %{endif}%{message}");
+#else
+	qSetMessagePattern("[%{time process}][%{if-debug}DBG %{endif}"
+	                                     "%{if-info}INFO%{endif}"
+	                                     "%{if-warning}WARN%{endif}"
+	                                     "%{if-critical}CRIT%{endif}"
+	                                     "%{if-fatal}FATAL%{endif}]%{if-category} [%{category}]%{endif} %{message}");
+#endif
 	Q_INIT_RESOURCE(mainRes);
+#ifndef NO_GUI
 	Q_INIT_RESOURCE(guiRes);
+#endif
 
 	// Log command line arguments.
 	QString argStr;
@@ -156,21 +185,26 @@ int main(int argc, char **argv)
 	}
 #endif
 
-	// Seed the PRNG
-	qsrand(QDateTime::currentMSecsSinceEpoch());
+	// Fix for ugly display some glyphs in Qt 6.9+
+	// See https://github.com/Stellarium/stellarium/issues/4284
+	qputenv("QT_DISABLE_EMOJI_SEGMENTER", "1");
 
 	QCoreApplication::setApplicationName("stellarium");
-	QCoreApplication::setApplicationVersion(StelUtils::getApplicationVersion());
+	QCoreApplication::setApplicationVersion(StelUtils::getApplicationPublicVersion());
 	QCoreApplication::setOrganizationDomain("stellarium.org");
 	QCoreApplication::setOrganizationName("stellarium");
+	QGuiApplication::setDesktopFileName("org.stellarium.Stellarium");
 
+	QCoreApplication::setAttribute(Qt::AA_CompressHighFrequencyEvents);
 	// Support high DPI pixmaps and fonts
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 	QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps, true);
 	QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling, true);
+#endif
 	if (argList.contains("--scale-gui")) // Variable QT_SCALE_FACTOR should be defined before app will be created!
 		qputenv("QT_SCALE_FACTOR", CLIProcessor::argsGetOptionWithArg(argList, "", "--scale-gui", "").toString().toLatin1());
 
-	#if defined(Q_OS_MAC)
+	#if defined(Q_OS_MACOS)
 	QFileInfo appInfo(QString::fromUtf8(argv[0]));
 	QDir appDir(appInfo.absolutePath());
 	appDir.cdUp();
@@ -180,15 +214,22 @@ int main(int argc, char **argv)
 	QCoreApplication::addLibraryPath(appInfo.absolutePath());
 	#endif	
 
-	QGuiApplication::setDesktopSettingsAware(false);
+	StelApplication::setDesktopSettingsAware(false);
 
-#ifndef USE_QUICKVIEW
-	QApplication::setStyle(QStyleFactory::create("Fusion"));
+	// This must be run before QGuiApplication, otherwise it'll have no effect.
+	CLIProcessor::parseCLIArgsPreQApp(argList);
+
+	StelApplication::setStyle(QStyleFactory::create("Fusion"));
 	// The QApplication MUST be created before the StelFileMgr is initialized.
-	QApplication app(argc, argv);
-#else
-	QGuiApplication::setDesktopSettingsAware(false);
-	QGuiApplication app(argc, argv);
+	StelApplication app(argc, argv);
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+	// Follow vague hint from https://stackoverflow.com/questions/70152818/no-space-between-letters-in-text
+	// For some absurd reason, Qt6 needs some initialisation kick so that the font engine starts working.
+	// Else all characters are squashed together.
+	QSize absurdInitBugSize=QFontMetrics(qApp->font()).size(Qt::TextSingleLine, "A really absurd bug!");
+	Q_ASSERT(absurdInitBugSize.width()>0);
+	Q_UNUSED(absurdInitBugSize)
 #endif
 
 	// QApplication sets current locale, but
@@ -196,17 +237,27 @@ int main(int argc, char **argv)
 	// otherwise configuration/INI file parsing will be erroneous.
 	setlocale(LC_NUMERIC, "C");
 
-	// Solution for bug: https://bugs.launchpad.net/stellarium/+bug/1498616
-	qputenv("QT_HARFBUZZ", "old");
+#ifdef Q_OS_ANDROID
+	if (!QJniObject::callStaticMethod<jboolean>("android/os/Environment", "isExternalStorageManager"))
+	{
+		QJniEnvironment env;
+		QJniObject activity = QtAndroidPrivate::activity();
+		jclass android_content_Context =env->GetObjectClass(activity.object());
+		jmethodID midGetPackageName = env->GetMethodID(android_content_Context,"getPackageName", "()Ljava/lang/String;");
+		QJniObject packageName= env->CallObjectMethod(activity.object(), midGetPackageName);
+		QJniObject filepermit = QJniObject::getStaticObjectField( "android/provider/Settings", "ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION","Ljava/lang/String;" );
+		QJniObject parsedUri  = QJniObject::callStaticObjectMethod("android/net/Uri", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", QJniObject::fromString("package:"+packageName.toString()).object());
+		QJniObject intent("android/content/Intent", "(Ljava/lang/String;Landroid/net/Uri;)V", filepermit.object<jstring>(), parsedUri.object());
+		QtAndroidPrivate::startActivity(intent, 0);
+	}
+#endif
 
 	// Init the file manager
 	StelFileMgr::init();
 
-	SplashScreen::present();
-
 	// add contents of STEL_OPTS environment variable.
 	QString envStelOpts(qgetenv("STEL_OPTS").constData());
-	if (envStelOpts.length()>0)
+	if (!envStelOpts.isEmpty())
 	{
 		argList+= envStelOpts.split(" ");
 		argStr += " " + envStelOpts;
@@ -216,38 +267,57 @@ int main(int argc, char **argv)
 
 	// Parse for first set of CLI arguments - stuff we want to process before other
 	// output, such as --help and --version
-	CLIProcessor::parseCLIArgsPreConfig(argList);
-
 	#ifdef Q_OS_WIN
-	if (qApp->property("onetime_angle_mode").isValid())
+	if (argList.contains("--help") || argList.contains("--version") || argList.contains("--list-landscapes"))
 	{
-		app.setAttribute(Qt::AA_UseOpenGLES, true);
-	}
-	if (qApp->property("onetime_mesa_mode").isValid())
-	{
-		app.setAttribute(Qt::AA_UseSoftwareOpenGL, true);
+		// attach console of parent process and redirect output stream
+		AttachConsole(ATTACH_PARENT_PROCESS);
+		freopen("CONOUT$", "w", stdout);
 	}
 	#endif
+	CLIProcessor::parseCLIArgsPreConfig(argList);
 
 	// Start logging.
-	StelLogger::init(StelFileMgr::getUserDir()+"/log.txt");
+	QString logName = StelFileMgr::getUserDir()+ "/log.txt"; // Default file path and file name
+	try
+	{
+		// Expected: absolute file path or empty string (default file path and file name)
+		QString logFileName = CLIProcessor::argsGetOptionWithArg(argList, "-l", "--log-file", "").toString();
+		if (!logFileName.isEmpty())
+		{
+			if (logFileName.contains("/") || logFileName.contains("\\"))
+			{
+				QFileInfo fi(logFileName);
+				logName = fi.absoluteFilePath();
+			}
+			else
+				logName = StelFileMgr::getUserDir()+ "/" + logFileName; // just a file name - let's use User Directory
+		}
+	}
+	catch (std::runtime_error& e)
+	{
+		qWarning() << "While processing --log-file option: " << e.what() << ". Using \"log.txt\"";
+		logName = StelFileMgr::getUserDir()+ "/log.txt"; // Back to default value
+	}
+	StelLogger::init(logName);
 	StelLogger::writeLog(argStr);
 
 	// OK we start the full program.
 	// Print the console splash and get on with loading the program
-	QString versionLine = QString("This is %1 - %2").arg(StelUtils::getApplicationName(), STELLARIUM_URL);
-	QString copyrightLine = QString("Copyright (C) %1 Fabien Chereau et al.").arg(COPYRIGHT_YEARS);
+	QString versionLine = QString("This is %1 (v%2) - %3").arg(StelUtils::getApplicationName(), StelUtils::getApplicationVersion(), STELLARIUM_URL);
+	QString copyrightLine = STELLARIUM_COPYRIGHT;
 	int maxLength = qMax(versionLine.size(), copyrightLine.size());
-	qDebug() << qPrintable(QString(" %1").arg(QString().fill('-', maxLength+2)));
-	qDebug() << qPrintable(QString("[ %1 ]").arg(versionLine.leftJustified(maxLength, ' ')));
-	qDebug() << qPrintable(QString("[ %1 ]").arg(copyrightLine.leftJustified(maxLength, ' ')));
-	qDebug() << qPrintable(QString(" %1").arg(QString().fill('-', maxLength+2)));
-	qDebug() << "Writing log file to:" << QDir::toNativeSeparators(StelLogger::getLogFileName());
-	qDebug() << "File search paths:";
+	qInfo() << qPrintable(QString(" %1").arg(QString().fill('-', maxLength+2)));
+	qInfo() << qPrintable(QString("[ %1 ]").arg(versionLine.leftJustified(maxLength, ' ')));
+	qInfo() << qPrintable(QString("[ %1 ]").arg(copyrightLine.leftJustified(maxLength, ' ')));
+	qInfo() << qPrintable(QString(" %1").arg(QString().fill('-', maxLength+2)));
+	printSystemInfo();
+	qInfo().noquote() << "Writing log file to:" << QDir::toNativeSeparators(StelLogger::getLogFileName());
+	qInfo() << "File search paths:";
 	int n=0;
 	for (const auto& i : StelFileMgr::getSearchPaths())
 	{
-		qDebug() << " " << n << ". " << QDir::toNativeSeparators(i);
+		qInfo().noquote().nospace() << "- [" << n << "]: " << QDir::toNativeSeparators(i);
 		++n;
 	}
 
@@ -259,7 +329,7 @@ int main(int argc, char **argv)
 	}
 	catch (std::runtime_error& e)
 	{
-		qWarning() << "WARNING: while looking for --config-file option: " << e.what() << ". Using \"config.ini\"";
+		qWarning().noquote() << "While looking for --config-file option:" << e.what() << ". Using \"config.ini\"";
 		configName = "config.ini";
 	}
 
@@ -285,7 +355,7 @@ int main(int argc, char **argv)
 		if (!restoreDefaultConfigFile)
 		{
 			QString version = confSettings->value("main/version", "0.0.0").toString();
-			if (version!=QString(PACKAGE_VERSION))
+			if (version!=QString(STELLARIUM_PUBLIC_VERSION))
 			{
 				QTextStream istr(&version);
 				char tmp;
@@ -295,8 +365,8 @@ int main(int argc, char **argv)
 				// Config versions less than 0.6.0 are not supported, otherwise we will try to use it
 				if (v1==0 && v2<6)
 				{
-					// The config file is too old to try an importation
-					qDebug() << "The current config file is from a version too old for parameters to be imported ("
+					// The config file is too old to try an import
+					qDebug().noquote() << "The current config file is from a version too old for parameters to be imported ("
 							 << (version.isEmpty() ? "<0.6.0" : version) << ").\n"
 							 << "It will be replaced by the default config file.";
 					restoreDefaultConfigFile = true;
@@ -304,9 +374,9 @@ int main(int argc, char **argv)
 				else
 				{
 					qDebug() << "Attempting to use an existing older config file.";
-					confSettings->setValue("main/version", QString(PACKAGE_VERSION)); // Upgrade version of config.ini
+					confSettings->setValue("main/version", QString(STELLARIUM_PUBLIC_VERSION)); // Upgrade version of config.ini
 					clearCache();
-					qDebug() << "Clear cache and update config.ini...";
+					qDebug() << "Cleared cache and updated config.ini...";
 				}
 			}
 		}
@@ -317,25 +387,27 @@ int main(int argc, char **argv)
 				delete confSettings;
 
 			QString backupFile(configFileFullPath.left(configFileFullPath.length()-3) + QString("old"));
-			if (QFileInfo(backupFile).exists())
+			if (QFileInfo::exists(backupFile))
 				QFile(backupFile).remove();
 
 			QFile(configFileFullPath).rename(backupFile);
 			copyDefaultConfigFile(configFileFullPath);
 			confSettings = new QSettings(configFileFullPath, StelIniFormat);
-			qWarning() << "Resetting defaults config file. Previous config file was backed up in " << QDir::toNativeSeparators(backupFile);
+			qWarning().noquote() << "Resetting defaults config file. Previous config file was backed up in" << QDir::toNativeSeparators(backupFile);
 			clearCache();
 		}
 	}
 	else
 	{
-		qDebug() << "Config file " << QDir::toNativeSeparators(configFileFullPath) << " does not exist. Copying the default file.";
+		qDebug().noquote() << "Config file" << QDir::toNativeSeparators(configFileFullPath) << "does not exist. Copying the default file.";
 		copyDefaultConfigFile(configFileFullPath);
 		confSettings = new QSettings(configFileFullPath, StelIniFormat);
 	}
 
 	Q_ASSERT(confSettings);
-	qDebug() << "Config file is: " << QDir::toNativeSeparators(configFileFullPath);
+	qInfo().noquote() << "Config file:" << QDir::toNativeSeparators(configFileFullPath);
+
+	QSurfaceFormat::setDefaultFormat(StelMainView::getDesiredGLFormat(confSettings));
 
 	#ifdef ENABLE_SCRIPTING
 	QString outputFile = StelFileMgr::getUserDir()+"/output.txt";
@@ -347,10 +419,16 @@ int main(int argc, char **argv)
 	// Override config file values from CLI.
 	CLIProcessor::parseCLIArgsPostConfig(argList, confSettings);
 
-	// Add the DejaVu font that we use everywhere in the program
-	const QString& fName = StelFileMgr::findFile("data/DejaVuSans.ttf");
-	if (!fName.isEmpty())
-		QFontDatabase::addApplicationFont(fName);
+	StelFileMgr::setObsListDir(confSettings->value("main/observinglists_dir", StelFileMgr::getUserDir()).toString());
+
+	// Add the Noto & DejaVu fonts that we use everywhere in the program
+	const QStringList customFonts = { "NotoSans-Regular.ttf", "NotoSansMono-Regular.ttf", "NotoSansSC-Regular.otf", "DejaVuSans.ttf", "DejaVuSansMono.ttf" };
+	for (auto &font: std::as_const(customFonts))
+	{
+		QString customFont = StelFileMgr::findFile(QString("data/%1").arg(font));
+		if (!customFont.isEmpty())
+			QFontDatabase::addApplicationFont(customFont);
+	}
 	
 	QString fileFont = confSettings->value("gui/base_font_file", "").toString();
 	if (!fileFont.isEmpty())
@@ -359,34 +437,87 @@ int main(int argc, char **argv)
 		if (!afName.isEmpty() && !afName.contains("file not found"))
 			QFontDatabase::addApplicationFont(afName);
 		else
-			qWarning() << "ERROR while loading custom font " << QDir::toNativeSeparators(fileFont);
+			qWarning().noquote() << "ERROR while loading custom font:" << QDir::toNativeSeparators(fileFont);
 	}
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+	// Set OS-dependent fallback fonts to retrieve missing glyphs if the main font does not provide them
+#ifdef Q_OS_WIN
+	QFontDatabase::addApplicationFallbackFontFamily(QChar::Script_Cuneiform, "Segoe UI Historic");
+	QFontDatabase::addApplicationFallbackFontFamily(QChar::Script_EgyptianHieroglyphs, "Segoe UI Historic");
+	QFontDatabase::addApplicationFallbackFontFamily(QChar::Script_Mongolian, "Mongolian Baiti");
+#endif
+#endif
 
 	// Set the default application font and font size.
 	// Note that style sheet will possibly override this setting.
-#ifdef Q_OS_WIN
-	// Let's try avoid ugly font rendering on Windows.
-	// Details: https://sourceforge.net/p/stellarium/discussion/278769/thread/810a1e5c/
-	QString baseFont = confSettings->value("gui/base_font_name", "Verdana").toString();
+	QString baseFont = confSettings->value("gui/base_font_name", "Noto Sans").toString();
 	QFont tmpFont(baseFont);
-	tmpFont.setStyleHint(QFont::AnyStyle, QFont::OpenGLCompatible);
-#else
-	QString baseFont = confSettings->value("gui/base_font_name", "DejaVu Sans").toString();
-	QFont tmpFont(baseFont);
-#endif
-	tmpFont.setPixelSize(confSettings->value("gui/gui_font_size", 13).toInt());
+	tmpFont.setPixelSize(confSettings->value("gui/gui_font_size", DEFAULT_FONT_SIZE).toInt());
 	QGuiApplication::setFont(tmpFont);
 
+	if (qApp->property("onetime_fontinfo").toBool())
+	{
+		qInfo() << "=======================================================================";
+		StelApp::getInstance().dumpFontInfo();
+		qInfo() << "=======================================================================";
+	}
+
 	// Initialize translator feature
-	StelTranslator::init(StelFileMgr::getInstallationDir() + "/data/iso639-1.utf8");
+	StelTranslator::init(StelFileMgr::getInstallationDir() + "/data/languages.tab");
 	
 	// Use our custom translator for Qt translations as well
 	CustomQTranslator trans;
 	app.installTranslator(&trans);
 
 	StelMainView mainWin(confSettings);
-	mainWin.show();
+
+	int screen = confSettings->value("video/screen_number", 0).toInt();
+	if (screen < 0 || screen >= qApp->screens().count())
+	{
+		qWarning().noquote() << "Screen" << screen << "not found";
+		screen = 0;
+	}
+	const auto qscreen = qApp->screens().at(screen);
+	const QRect screenGeom = qscreen->geometry();
+
+	const auto virtSize = QSize(confSettings->value("video/screen_w", screenGeom.width()).toInt(),
+								confSettings->value("video/screen_h", screenGeom.height()).toInt());
+	const auto pixelRatio = qscreen->devicePixelRatio();
+	const auto size = QSize(std::lround(virtSize.width()/pixelRatio),
+				    std::lround(virtSize.height()/pixelRatio));
+	mainWin.resize(size);
+
+	const bool fullscreen = confSettings->value("video/fullscreen", true).toBool();
+	if (fullscreen)
+	{
+		// The "+1" below is to work around Linux/Gnome problem with mouse focus.
+		mainWin.move(screenGeom.x()+1, screenGeom.y()+1);
+		// The fullscreen window appears on screen where is the majority of
+		// the normal window. Therefore we crop the normal window to the
+		// screen area to ensure that the majority is not on another screen.
+		mainWin.setGeometry(mainWin.geometry() & screenGeom);
+		// This shows the window. Don't call mainWin.show() after this, or
+		// it will replace fullscreen with the platform default, which is
+		// "maximized" on Android, not "fullscreen".
+		// A notable difference is that in maximized state the notification
+		// bar overlap the app screen, absorbing taps and making it impossible
+		// to drag windows from there or select stars.
+		mainWin.setFullScreen(true);
+	}
+	else
+	{
+		const int x = confSettings->value("video/screen_x", 0).toInt();
+		const int y = confSettings->value("video/screen_y", 0).toInt();
+		mainWin.move(screenGeom.x() + x/pixelRatio,
+			     screenGeom.y() + y/pixelRatio);
+		mainWin.show();
+	}
+
 	SplashScreen::finish(&mainWin);
+	qDebug() << "Max thread count (Global Pool): " << QThreadPool::globalInstance()->maxThreadCount();
+	// Share available cores with the TextureLoader and other jobs
+	//QThreadPool::globalInstance()->setMaxThreadCount(qMax(1,QThread::idealThreadCount()/2-1));
 	app.exec();
 	mainWin.deinit();
 

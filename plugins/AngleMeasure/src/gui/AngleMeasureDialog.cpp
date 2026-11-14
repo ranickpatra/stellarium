@@ -21,8 +21,9 @@
 #include "AngleMeasureDialog.hpp"
 #include "ui_angleMeasureDialog.h"
 
+#include "StelGui.hpp"
+#include "StelTranslator.hpp"
 #include "StelApp.hpp"
-#include "StelLocaleMgr.hpp"
 #include "StelModule.hpp"
 #include "StelModuleMgr.hpp"
 
@@ -54,12 +55,13 @@ void AngleMeasureDialog::createDialogContent()
 	kineticScrollingList << ui->aboutTextBrowser;
 	StelGui* gui= static_cast<StelGui*>(StelApp::getInstance().getGui());
 	enableKineticScrolling(gui->getFlagUseKineticScrolling());
-	connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+	connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &AngleMeasureDialog::enableKineticScrolling);
 
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &AngleMeasureDialog::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
+	connectBoolProperty(ui->panAndSelectCheckBox,			"AngleMeasure.flagPanAndSelect");
 	connectBoolProperty(ui->followCursorCheckBox, 			"AngleMeasure.flagFollowCursor");
 	connectBoolProperty(ui->useDmsFormatCheckBox, 			"AngleMeasure.dmsFormat");
 	connectBoolProperty(ui->showPositionAngleCheckBox, 		"AngleMeasure.flagShowEquatorialPA");
@@ -69,12 +71,12 @@ void AngleMeasureDialog::createDialogContent()
 	connectBoolProperty(ui->azAltStartOnSkyCheckBox,		"AngleMeasure.flagShowHorizontalStartSkylinked");
 	connectBoolProperty(ui->azAltEndOnSkyCheckBox,			"AngleMeasure.flagShowHorizontalEndSkylinked");
 
-	connectColorButton(ui->equatorialLineColorToolButton,	"AngleMeasure.equatorialLineColor", "AngleMeasure/line_color");
-	connectColorButton(ui->equatorialTextColorToolButton,	"AngleMeasure.equatorialTextColor", "AngleMeasure/text_color");
-	connectColorButton(ui->horizontalLineColorToolButton,	"AngleMeasure.horizontalLineColor", "AngleMeasure/line_color_horizontal");
-	connectColorButton(ui->horizontalTextColorToolButton,	"AngleMeasure.horizontalTextColor", "AngleMeasure/text_color_horizontal");
+	ui->equatorialLineColorToolButton->setup("AngleMeasure.equatorialLineColor", "AngleMeasure/line_color");
+	ui->equatorialTextColorToolButton->setup("AngleMeasure.equatorialTextColor", "AngleMeasure/text_color");
+	ui->horizontalLineColorToolButton->setup("AngleMeasure.horizontalLineColor", "AngleMeasure/line_color_horizontal");
+	ui->horizontalTextColorToolButton->setup("AngleMeasure.horizontalTextColor", "AngleMeasure/text_color_horizontal");
 
-	connect(ui->restoreDefaultsButton, SIGNAL(clicked()), this, SLOT(restoreDefaults()));
+	connect(ui->restoreDefaultsButton, &QPushButton::clicked, this, &AngleMeasureDialog::restoreDefaults);
 
 	setAboutHtml();
 }
@@ -92,16 +94,13 @@ void AngleMeasureDialog::restoreDefaults()
 
 void AngleMeasureDialog::setAboutHtml(void)
 {
-	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
-
 	QString html = "<html><head></head><body>";
-	html += "<h2>" + q_("Angle Measure Plug-in") + "</h2><table width=\"90%\">";
+	html += "<h2>" + q_("Angle Measure Plug-in") + "</h2><table class='layout' width=\"90%\">";
 	html += "<tr width=\"30%\"><td><strong>" + q_("Version") + ":</strong></td><td>" + ANGLEMEASURE_PLUGIN_VERSION + "</td></tr>";
 	html += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + ANGLEMEASURE_PLUGIN_LICENSE + "</td></tr>";
 	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Matthew Gates</td></tr>";
 	html += "<tr><td rowspan=3><strong>" + q_("Contributors") + ":</strong></td><td>Bogdan Marinov</td></tr>";
-	html += "<tr><td>Alexander Wolf &lt;alex.v.wolf@gmail.com&gt;</td></tr>";
+	html += "<tr><td>Alexander Wolf</td></tr>";
 	html += "<tr><td>Georg Zotti</td></tr>";
 	html += "</table>";
 

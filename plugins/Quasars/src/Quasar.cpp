@@ -17,16 +17,14 @@
  */
 
 #include "Quasar.hpp"
-#include "Quasars.hpp"
 #include "StelObject.hpp"
 #include "StelPainter.hpp"
-#include "StelApp.hpp"
 #include "StelCore.hpp"
 #include "StelTexture.hpp"
 #include "StelUtils.hpp"
 #include "StelTranslator.hpp"
-#include "StelModuleMgr.hpp"
 #include "StelSkyDrawer.hpp"
+#include "Planet.hpp"
 
 #include <QTextStream>
 #include <QDebug>
@@ -124,7 +122,7 @@ QString Quasar::getInfoString(const StelCore* core, const InfoStringGroup& flags
 		oss << "<h2>" << designation << "</h2>";
 
 	if (flags&ObjectType)
-		oss << QString("%1: <b>%2</b>").arg(q_("Type"), q_("quasar")) << "<br />";
+		oss << QString("%1: <b>%2</b>").arg(q_("Type"), getObjectTypeI18n()) << "<br />";
 
 	if (flags&Magnitude && VMagnitude>-99.f)
 		oss << getMagnitudeInfoString(core, flags, 2);
@@ -152,6 +150,7 @@ QString Quasar::getInfoString(const StelCore* core, const InfoStringGroup& flags
 			oss << QString("%1: %2 %3").arg(q_("Radio flux density around 1.4GHz (21cm)"), QString::number(f20, 'f', 3), sfd) << "<br />";
 	}
 
+	oss << getSolarLunarInfoString(core, flags);
 	postProcessInfoString(str, flags);
 	return str;
 }
@@ -170,20 +169,10 @@ QVariantMap Quasar::getInfoMap(const StelCore *core) const
 	return map;
 }
 
-Vec3f Quasar::getInfoColor(void) const
-{
-	return Vec3f(1.f, 1.f, 1.f);
-}
-
 float Quasar::getVMagnitude(const StelCore* core) const
 {
-	Q_UNUSED(core);
+	Q_UNUSED(core)
 	return VMagnitude;
-}
-
-double Quasar::getAngularSize(const StelCore*) const
-{
-	return 0.00001;
 }
 
 float Quasar::getSelectPriority(const StelCore* core) const
@@ -198,11 +187,6 @@ float Quasar::getSelectPriority(const StelCore* core) const
 	return mag;
 }
 
-void Quasar::update(double deltaTime)
-{
-	labelsFader.update(static_cast<int>(deltaTime*1000));
-}
-
 void Quasar::draw(StelCore* core, StelPainter& painter)
 {
 	Vec3d win;
@@ -212,6 +196,7 @@ void Quasar::draw(StelCore* core, StelPainter& painter)
 
 	StelSkyDrawer* sd = core->getSkyDrawer();
 	const float mlimit = sd->getLimitMagnitude();
+	const float shift = 8.f;
 	float mag = getVMagnitudeWithExtinction(core);
 	if (useMarkers)
 		mag -= shiftVisibility;
@@ -221,22 +206,18 @@ void Quasar::draw(StelCore* core, StelPainter& painter)
 
 	if (mag <= mlimit)
 	{
-		float size, shift=0;
 		if (distributionMode || useMarkers)
 		{
 			painter.setBlending(true, GL_ONE, GL_ONE);
-			painter.setColor(markerColor[0], markerColor[1], markerColor[2], 1);
+			painter.setColor(markerColor, 1);
 
 			Quasar::markerTexture->bind();
-			size = getAngularSize(Q_NULLPTR)*M_PI/180.*painter.getProjector()->getPixelPerRadAtCenter();
-			shift = 5.f + size/1.6f;
-
-			painter.drawSprite2dMode(XYZ, distributionMode ? 4.f : 5.f);
+			painter.drawSprite2dMode(getJ2000EquatorialPos(core), distributionMode ? 4.f : 5.f);
 		}
 		else
 		{
 			Vec3f color = sd->indexToColor(BvToColorIndex(bV))*0.75f; // see ZoneArray.cpp:L490
-			Vec3f vf(XYZ.toVec3f());
+			Vec3f vf(getJ2000EquatorialPos(core).toVec3f());
 			Vec3f altAz(vf);
 			altAz.normalize();
 			core->j2000ToAltAzInPlaceNoRefraction(&altAz);
@@ -244,15 +225,13 @@ void Quasar::draw(StelCore* core, StelPainter& painter)
 			sd->preDrawPointSource(&painter);
 			sd->computeRCMag(mag, &rcMag);
 			// allow height-dependent twinkle and suppress twinkling in higher altitudes. Keep 0.1 twinkle amount in zenith.
-			sd->drawPointSource(&painter, vf, rcMag, sd->indexToColor(BvToColorIndex(bV)), true, qMin(1.0f, 1.0f-0.9f*altAz[2]));
+			sd->drawPointSource(&painter, vf.toVec3d(), rcMag, sd->indexToColor(BvToColorIndex(bV)), true, qMin(1.0f, 1.0f-0.9f*altAz[2]));
 			sd->postDrawPointSource(&painter);
-			painter.setColor(color[0], color[1], color[2], 1);
-			size = getAngularSize(Q_NULLPTR)*M_PI_180f*painter.getProjector()->getPixelPerRadAtCenter();
-			shift = 6.f + size/1.8f;
+			painter.setColor(color, 1);
 		}
 
-		if (labelsFader.getInterstate()<=0.f && !distributionMode && (mag+2.f)<mlimit)
-			painter.drawText(XYZ, designation, 0, shift, shift, false);
+		if (!distributionMode && (mag+2.f)<mlimit)
+			painter.drawText(getJ2000EquatorialPos(core), designation, 0, shift, shift, false);
 	}
 }
 
@@ -261,5 +240,20 @@ unsigned char Quasar::BvToColorIndex(float b_v)
 	if (b_v<-98.f)
 		b_v = 0.f;
 	double dBV = qBound(-500., static_cast<double>(b_v)*1000., 3499.);
-	return static_cast<unsigned char>(floor(0.5+127.0*((500.0+dBV)/4000.0)));
+	return static_cast<unsigned char>(std::floor(0.5+127.0*((500.0+dBV)/4000.0)));
+}
+
+Vec3d Quasar::getJ2000EquatorialPos(const StelCore* core) const
+{
+	if ((core) && (core->getUseAberration()) && (core->getCurrentPlanet()))
+	{
+		const Vec3d vel = core->getAberrationVec(core->getJDE());
+		Vec3d pos=XYZ+vel;
+		pos.normalize();
+		return pos;
+	}
+	else
+	{
+		return XYZ;
+	}
 }

@@ -3,14 +3,19 @@
 # This file is distributed under the same license as the PACKAGE package.
 # FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
 # 
+# Translators:
+# cardinot <mcardinot@gmail.com>, 2022
+# Alexander V. Wolf <alex.v.wolf@gmail.com>, 2022
+# 
 #, fuzzy
 msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: stellarium@googlegroups.com\n"
-"POT-Creation-Date: 2021-06-15 22:33+0700\n"
-"PO-Revision-Date: 2019-01-19 14:25+0000\n"
-"Language-Team: Vietnamese (https://www.transifex.com/stellarium/teams/80998/vi/)\n"
+"POT-Creation-Date: 2025-12-01 14:32+0700\n"
+"PO-Revision-Date: 2022-10-05 14:25+0000\n"
+"Last-Translator: Alexander V. Wolf <alex.v.wolf@gmail.com>, 2022\n"
+"Language-Team: Vietnamese (https://app.transifex.com/stellarium/teams/80998/vi/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -48,7 +53,7 @@ msgstr ""
 
 #: scripts/best_ngc.ssc:26
 msgid "Best objects in the New General Catalog"
-msgstr ""
+msgstr "Những vật thể tốt nhất trong Danh mục Chung Mới"
 
 #: scripts/best_ngc.ssc:42
 msgid "Object #"
@@ -92,7 +97,7 @@ msgstr ""
 
 #: scripts/binocular_highlights.ssc:18
 msgid "The Pleiades"
-msgstr ""
+msgstr "Nhóm Thất Tinh"
 
 #: scripts/binocular_highlights.ssc:19
 msgid "Corralling the Hyades"
@@ -590,7 +595,7 @@ msgstr ""
 
 #: scripts/binocular_highlights.ssc:125
 msgid "Binocular Highlights"
-msgstr ""
+msgstr "Những điều nổi bật qua đôi mắt"
 
 #: scripts/binocular_highlights.ssc:126
 msgid "Look through the Meade 10x50 TravelView Binocular"
@@ -598,7 +603,7 @@ msgstr ""
 
 #: scripts/binosky.ssc:19
 msgid "Binosky: Deep Sky Objects for Binoculars"
-msgstr ""
+msgstr "Binosky: Những thiên thể xa cho ống nhòm"
 
 #: scripts/double_stars.ssc:28
 msgid "Asterope (21 Tauri and 22 Tauri)"
@@ -707,7 +712,7 @@ msgstr ""
 
 #: scripts/double_stars.ssc:37
 msgid "Zubenelgenubi"
-msgstr ""
+msgstr "Zubenelgenubi"
 
 #: scripts/double_stars.ssc:37
 msgid "3.83 arcminutes (NW)"
@@ -807,7 +812,7 @@ msgstr ""
 
 #: scripts/double_stars.ssc:47
 msgid "Algedi"
-msgstr ""
+msgstr "Algedi"
 
 #: scripts/double_stars.ssc:47
 msgid "6.3 arcminutes (WNW)"
@@ -862,7 +867,7 @@ msgstr ""
 #: scripts/morsels_1.ssc:78 scripts/morsels_2.ssc:99 scripts/morsels_3.ssc:63
 #: scripts/morsels_4.ssc:82
 msgid "Date:"
-msgstr ""
+msgstr "Ngày tháng:"
 
 #: scripts/morsels_1.ssc:79
 msgid "Time:"
@@ -1070,7 +1075,7 @@ msgstr ""
 
 #: scripts/largest_known_stars.ssc:29
 msgid "Betelgeuse"
-msgstr ""
+msgstr "Betelgeuse"
 
 #: scripts/largest_known_stars.ssc:30
 msgid "Ninth brightest star in the night sky."
@@ -1226,8 +1231,8 @@ msgstr ""
 msgid "Solar radii"
 msgstr ""
 
-#: scripts/constellations_tour.ssc:19
-#: scripts/western_constellations_tour.ssc:22
+#: scripts/constellations_tour.ssc:32
+#: scripts/modern_constellations_tour.ssc:32
 msgid "Press Ctrl+T to un-hide the toolbar"
 msgstr ""
 
@@ -1285,7 +1290,7 @@ msgstr ""
 
 #: scripts/saturnian_analemma.ssc:42 scripts/uranian_analemma.ssc:42
 msgid "Solar day"
-msgstr ""
+msgstr "ngày mặt trời"
 
 #: scripts/uranian_analemma.ssc:17
 msgid "Uranian analemma"

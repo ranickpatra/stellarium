@@ -21,10 +21,8 @@
 
 #include "StelObjectModule.hpp"
 #include "StelObject.hpp"
-#include "StelFader.hpp"
 #include "StelTextureTypes.hpp"
 #include "Exoplanet.hpp"
-#include <QFont>
 #include <QVariantMap>
 #include <QDateTime>
 #include <QList>
@@ -70,22 +68,16 @@ typedef QSharedPointer<Exoplanet> ExoplanetP;
 class Exoplanets : public StelObjectModule
 {
 	Q_OBJECT
-	Q_ENUMS(TemperatureScale)
-	Q_PROPERTY(bool showExoplanets
-		   READ getFlagShowExoplanets
-		   WRITE setFlagShowExoplanets
-		   NOTIFY flagExoplanetsVisibilityChanged
-		   )
-	Q_PROPERTY(Vec3f markerColor
-		   READ getMarkerColor
-		   WRITE setMarkerColor
-		   NOTIFY markerColorChanged
-		   )
-	Q_PROPERTY(Vec3f habitableColor
-		   READ getHabitableColor
-		   WRITE setHabitableColor
-		   NOTIFY habitableColorChanged
-		   )
+	Q_PROPERTY(bool showExoplanets    READ getFlagShowExoplanets   WRITE setFlagShowExoplanets NOTIFY flagExoplanetsVisibilityChanged)
+	Q_PROPERTY(Vec3f markerColor      READ getMarkerColor          WRITE setMarkerColor        NOTIFY markerColorChanged)
+	Q_PROPERTY(Vec3f habitableColor   READ getHabitableColor       WRITE setHabitableColor     NOTIFY habitableColorChanged)
+
+	Q_PROPERTY(bool flagDisplayMode   READ getDisplayMode          WRITE setDisplayMode        NOTIFY displayModeChanged)
+	Q_PROPERTY(bool flagTimelineMode  READ getTimelineMode         WRITE setTimelineMode       NOTIFY timelineModeChanged)
+	Q_PROPERTY(bool flagHabitableMode READ getHabitableMode        WRITE setHabitableMode      NOTIFY habitableModeChanged)
+	Q_PROPERTY(bool flagShowExoplanetsDesignations READ getFlagShowExoplanetsDesignations WRITE setFlagShowExoplanetsDesignations NOTIFY flagShowExoplanetsDesignationsChanged)
+	Q_PROPERTY(bool flagShowExoplanetsNumbers READ getFlagShowExoplanetsNumbers WRITE setFlagShowExoplanetsNumbers NOTIFY flagShowExoplanetsNumbersChanged)
+
 public:	
 	//! @enum UpdateState
 	//! Used for keeping for track of the download/update status
@@ -96,6 +88,7 @@ public:
 		DownloadError,			//!< Error during download phase
 		OtherError				//!< Other error
 	};
+	Q_ENUM(UpdateState)
 	//! @enum TemperatureScale
 	//! Available temperature scales
 	enum TemperatureScale
@@ -104,18 +97,19 @@ public:
 		Celsius		= 1,
 		Fahrenheit	= 2
 	};
-	
+	Q_ENUM(TemperatureScale)
+
 	Exoplanets();
-	virtual ~Exoplanets();
+	~Exoplanets() override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in the StelModule class
-	virtual void init();
-	virtual void deinit();
-	virtual void update(double deltaTime);
-	virtual void draw(StelCore* core);
+	void init() override;
+	void deinit() override;
+	void update(double deltaTime) override;
+	void draw(StelCore* core) override;
 	virtual void drawPointer(StelCore* core, StelPainter& painter);
-	virtual double getCallOrder(StelModuleActionName actionName) const;
+	double getCallOrder(StelModuleActionName actionName) const override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in StelObjectModule class
@@ -124,38 +118,38 @@ public:
 	//! @param limitFov the field of view around the position v in which to search for exoplanets.
 	//! @param core the StelCore to use for computations.
 	//! @return a list containing the exoplanets located inside the limitFov circle around position v.
-	virtual QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const;
+	QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const override;
 
 	//! Return the matching exoplanet system object's pointer if exists or Q_NULLPTR.
 	//! @param nameI18n The case in-sensitive localized exoplanet system name
-	virtual StelObjectP searchByNameI18n(const QString& nameI18n) const;
+	StelObjectP searchByNameI18n(const QString& nameI18n) const override;
 
 	//! Return the matching exoplanet system if exists or Q_NULLPTR.
 	//! @param name The case in-sensitive english exoplanet system name
-	virtual StelObjectP searchByName(const QString& name) const;
+	StelObjectP searchByName(const QString& name) const override;
 
 	//! Return the matching exoplanet system if exists or Q_NULLPTR.
 	//! @param id The exoplanet system id
-	virtual StelObjectP searchByID(const QString &id) const;
+	StelObjectP searchByID(const QString &id) const override;
 
 	//! Find and return the list of at most maxNbItem objects auto-completing the passed object name.
 	//! @param objPrefix the case insensitive first letters of the searched object
 	//! @param maxNbItem the maximum number of returned object names
 	//! @param useStartOfWords the autofill mode for returned objects names
 	//! @return a list of matching object name by order of relevance, or an empty list if nothing match
-	virtual QStringList listMatchingObjects(const QString& objPrefix, int maxNbItem=5, bool useStartOfWords=false) const;
+	QVector<QPair<QString,StelObjectP>> listMatchingObjects(const QString& objPrefix, int maxNbItem=5, bool useStartOfWords=false) const override;
 
-	virtual QStringList listAllObjects(bool inEnglish) const;
+	QVector<QPair<QString,StelObjectP>> listAllObjects(bool inEnglish) const override;
 
-	virtual QString getName() const { return "Exoplanets"; }
-	virtual QString getStelObjectType() const { return Exoplanet::EXOPLANET_TYPE; }
+	QString getName() const override { return "Exoplanets"; }
+	QString getStelObjectType() const override { return Exoplanet::EXOPLANET_TYPE; }
 
 	//! get a exoplanet object by identifier
 	ExoplanetP getByID(const QString& id) const;
 
 	//! Implement this to tell the main Stellarium GUI that there is a GUI element to configure this
 	//! plugin.
-	virtual bool configureGui(bool show=true);
+	bool configureGui(bool show=true) override;
 
 	//! Set up the plugin with default values.  This means clearing out the Exoplanets section in the
 	//! main config.ini (if one already exists), and populating it with default values.  It also
@@ -242,9 +236,14 @@ signals:
 	void flagExoplanetsVisibilityChanged(bool b);
 	void markerColorChanged(Vec3f);
 	void habitableColorChanged(Vec3f);
+	void displayModeChanged(bool);
+	void timelineModeChanged(bool);
+	void habitableModeChanged(bool);
+	void flagShowExoplanetsDesignationsChanged(bool);
+	void flagShowExoplanetsNumbersChanged(bool);
 
 public slots:
-	//! Download JSON from web recources described in the module section of the
+	//! Download JSON from web resources described in the module section of the
 	//! module.ini file and update the local JSON file.
 	void updateJSON(void);
 
@@ -261,6 +260,13 @@ public slots:
 	//! Get status to display of designations of exoplanetary systems
 	//! @return true if it's visible
 	bool getFlagShowExoplanetsDesignations(void) const;
+
+	//! Enable/disable display of number of exoplanets in exoplanetary system
+	//! @param b boolean flag
+	void setFlagShowExoplanetsNumbers(bool b);
+	//! Get status to display of designations of exoplanets in exoplanetary system
+	//! @return true if it's visible
+	bool getFlagShowExoplanetsNumbers(void) const;
 
 	//! Define whether the button toggling exoplanets should be visible
 	void setFlagShowExoplanetsButton(bool b);
@@ -295,8 +301,9 @@ public slots:
 	//! @param c color
 	//! @param h set true if you want set color for potentially habitable exoplanets
 	//! @code
-	//! // example of usage in scripts
-	//! Exoplanets.setMarkerColor(Vec3f(1.0,0.0,0.0), true);
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! Exoplanets.setMarkerColor(c.toVec3f(), true);
 	//! @endcode
 	void setMarkerColor(const Vec3f& c);
 
@@ -308,8 +315,9 @@ public slots:
 	//! @param c color
 	//! @param h set true if you want set color for potentially habitable exoplanets
 	//! @code
-	//! // example of usage in scripts
-	//! Exoplanets.setHabitableColor(Vec3f(1.0,0.0,0.0), true);
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! Exoplanets.setHabitableColor(c.toVec3f(), true);
 	//! @endcode
 	void setHabitableColor(const Vec3f& c);
 
@@ -335,25 +343,26 @@ public slots:
 	}
 
 	//! Set the temperature scale
-	void setCurrentTemperatureScale(TemperatureScale tscale)
+	void setCurrentTemperatureScale(Exoplanets::TemperatureScale tscale)
 	{
 		Exoplanet::temperatureScaleID = static_cast<int>(tscale);
 	}
 	//! Get the current temperature scale
-	TemperatureScale getCurrentTemperatureScale() const
+	Exoplanets::TemperatureScale getCurrentTemperatureScale() const
 	{
 		return static_cast<TemperatureScale>(Exoplanet::temperatureScaleID);
 	}
 	//! Get the key of current temperature scale
 	QString getCurrentTemperatureScaleKey(void) const;
 	//! Set the temperature scale from its key
-	void setCurrentTemperatureScaleKey(QString key);
+	void setCurrentTemperatureScaleKey(const QString &key);
 
 	//! Connect this to StelApp font size.
-	void setFontSize(int s){font.setPixelSize(s);}
+	void setFontSize(int s){fontSize = s;}
+
 private:
 	// Font used for displaying our text
-	QFont font;
+	int fontSize;
 
 	// if existing, delete Satellites section in main config.ini, then create with default values
 	void resetConfiguration(void);
@@ -417,17 +426,19 @@ private:
 	int updateFrequencyHours;	
 	bool enableAtStartup;
 
-	void startDownload(QString url);
+	void startDownload(const QString &url);
 	void deleteDownloadProgressBar();
 
 	QSettings* conf;
 
-	// GUI
-	ExoplanetsDialog* exoplanetsConfigDialog;
 	bool flagShowExoplanets;
 	bool flagShowExoplanetsButton;
-	StelButton* toolbarButton;
+
+#ifndef NO_GUI
+	ExoplanetsDialog* exoplanetsConfigDialog;
 	class StelProgressController* progressBar;
+	StelButton* toolbarButton;
+#endif
 
 private slots:
 	//! check to see if an update is required.  This is called periodically by a timer
@@ -439,11 +450,13 @@ private slots:
 	void downloadComplete(QNetworkReply * reply);
 
 	//! Display a message. This is used for plugin-specific warnings and such
-	void displayMessage(const QString& message, const QString hexColor="#999999");
+	void displayMessage(const QString& message, const QString &hexColor="#999999");
 
 	void reloadCatalog(void);
 	//! Call when button "Save settings" in main GUI are pressed
 	void 	saveSettings() { saveConfiguration(); }
+
+	void setFlagSyncShowLabels(bool b) { Exoplanet::syncShowLabels = b; }
 };
 
 
@@ -458,9 +471,9 @@ class ExoplanetsStelPluginInterface : public QObject, public StelPluginInterface
 	Q_PLUGIN_METADATA(IID StelPluginInterface_iid)
 	Q_INTERFACES(StelPluginInterface)
 public:
-	virtual StelModule* getStelModule() const;
-	virtual StelPluginInfo getPluginInfo() const;
-	virtual QObjectList getExtensionList() const { return QObjectList(); }
+	StelModule* getStelModule() const override;
+	StelPluginInfo getPluginInfo() const override;
+	//QObjectList getExtensionList() const override { return QObjectList(); }
 };
 
 #endif /* EXOPLANETS_HPP */

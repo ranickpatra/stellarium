@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Stellarium
  * Copyright (C) 2008 Guillaume Chereau
  *
@@ -20,6 +20,7 @@
 #ifndef SEARCHDIALOG_HPP
 #define SEARCHDIALOG_HPP
 
+#include <tuple>
 #include <QObject>
 #include <QStringListModel>
 #include <QStandardItemModel>
@@ -28,6 +29,8 @@
 #include <QHash>
 #include <QDialog>
 #include "StelDialog.hpp"
+#include "StelObjectType.hpp"
+#include "SimbadSearcher.hpp"
 #include "VecMath.hpp"
 
 // pre declaration of the ui class
@@ -35,20 +38,48 @@ class Ui_searchDialogForm;
 class QSortFilterProxyModel;
 class QStringListModel;
 
-struct stringLengthCompare
+struct ObjectFound
 {
-	bool operator()(const QString &s1, const QString &s2) const
+	QString name;
+	QString searchableType;   // returned by StelObject::getType()
+	QString userVisibleType;  // returned by StelObject::getObjectTypeI18n()
+	Vec3d position = {0,0,0}; // SIMBAD-only
+	bool isSimbad = false;
+
+	ObjectFound() = default;
+	ObjectFound(const QString name, const QString& searchableType, const QString& userVisibleType)
+		: name(name)
+		, searchableType(searchableType)
+		, userVisibleType(userVisibleType)
+		, position(0,0,0)
+		, isSimbad(false)
 	{
-		return s1.length() < s2.length();
+	}
+	ObjectFound(const QString name, const QString& searchableType, const QString& userVisibleType, const Vec3d& simbadPosition)
+		: name(name)
+		, searchableType(searchableType)
+		, userVisibleType(userVisibleType)
+		, position(simbadPosition)
+		, isSimbad(true)
+	{
+	}
+	// Comparators for set, map and similar containers
+	bool operator==(const ObjectFound& rhs) const
+	{
+		return name == rhs.name &&
+		       searchableType == rhs.searchableType &&
+		       userVisibleType == rhs.userVisibleType &&
+		       isSimbad == rhs.isSimbad &&
+		       position == rhs.position;
+	}
+	bool operator<(const ObjectFound& rhs) const
+	{
+		return std::tie(name, searchableType, userVisibleType, isSimbad, position[0], position[1], position[2])
+		                                                  <
+		       std::tie(rhs.name, rhs.searchableType, rhs.userVisibleType, rhs.isSimbad, rhs.position[0], rhs.position[1], rhs.position[2]);
 	}
 };
-
-struct recentObjectSearches
-{
-	int maxSize = 20;
-	QStringList recentList;
-};
-Q_DECLARE_METATYPE(recentObjectSearches)
+Q_DECLARE_METATYPE(ObjectFound)
 
 //! @class CompletionListModel
 //! Display a list of results matching the search string, and allow to
@@ -60,21 +91,22 @@ class CompletionListModel : public QStringListModel
 public:
 	CompletionListModel(QObject* parent=Q_NULLPTR);
 	CompletionListModel(const QStringList & strings, QObject* parent =Q_NULLPTR);
-	~CompletionListModel() Q_DECL_OVERRIDE;
+	~CompletionListModel() override;
 
-	QString getSelected(void) const;
-	void setValues(const QStringList&, const QStringList&);
+	ObjectFound getSelected(void) const;
+	void setValues(const QVector<ObjectFound>& values, const QVector<ObjectFound>& recents);
 	bool isEmpty() const {return values.isEmpty();}
-	void appendValues(const QStringList&);
-	void appendRecentValues(const QStringList&);
+	void appendValues(const QVector<ObjectFound>&);
+	void appendRecentValues(const QVector<ObjectFound>&);
 	void clearValues();
+	void setObjectMgr(class StelObjectMgr* mgr) { objectMgr = mgr; }
 
-	QStringList getValues(void) { return values; }
-	QStringList getRecentValues(void) { return recentValues; }
+	QVector<ObjectFound> getValues(void) { return values; }
+	QVector<ObjectFound> getRecentValues(void) { return recentValues; }
 	int getSelectedIdx() { return selectedIdx; }
 
-	// Bold recent objects
-	QVariant data(const QModelIndex &index, int role) const Q_DECL_OVERRIDE;
+	// Bold recent objects and display module info as object type
+	QVariant data(const QModelIndex &index, int role) const override;
 
 public slots:
 	void selectNext();
@@ -84,8 +116,15 @@ public slots:
 private:
 	void updateText();
 	int selectedIdx;
-	QStringList values;
-	QStringList recentValues;
+	QVector<ObjectFound> values;
+	QVector<ObjectFound> recentValues;
+	class StelObjectMgr* objectMgr = nullptr; // For lazy module lookups
+};
+
+struct RecentObjectSearches
+{
+	int maxSize = 20;
+	QVector<ObjectFound> recentList;
 };
 
 QT_FORWARD_DECLARE_CLASS(QListWidgetItem)
@@ -104,8 +143,6 @@ class SearchDialog : public StelDialog
 	Q_PROPERTY(bool simbadGetTypes  READ getSimbadGetsTypes  WRITE setSimbadGetsTypes  NOTIFY simbadGetsTypesChanged)
 	Q_PROPERTY(bool simbadGetDims   READ getSimbadGetsDims   WRITE setSimbadGetsDims   NOTIFY simbadGetsDimsChanged)
 
-	Q_ENUMS(CoordinateSystem)
-
 public:
 	//! Available coordinate systems
 	enum CoordinateSystem
@@ -118,17 +155,13 @@ public:
 		ecliptic,
 		eclipticJ2000
 	};
+	Q_ENUM(CoordinateSystem)
 
 	SearchDialog(QObject* parent);
-	virtual ~SearchDialog() Q_DECL_OVERRIDE;
-	virtual bool eventFilter(QObject *object, QEvent *event) Q_DECL_OVERRIDE;
+	~SearchDialog() override;
+	bool eventFilter(QObject *object, QEvent *event) override;
 
-	//! Replaces all occurences of substrings describing Greek letters (i.e. "alpha", "beta", ...)
-	//! with the actual Greek unicode characters.
-	static QString substituteGreek(const QString& keyString);
-	//! Returns the Greek unicode character for the specified letter string (i.e. "alpha", "beta", ...)
-	static QString getGreekLetterByName(const QString& potentialGreekLetterName);
-	//! URL of the default SIMBAD server (Strasbourg).
+	////! URL of the default SIMBAD server (Strasbourg).
 	static const char* DEF_SIMBAD_URL;
 
 signals:
@@ -142,41 +175,44 @@ signals:
 	void simbadGetsTypesChanged(bool b);
 	void simbadGetsDimsChanged(bool b);
 
-
 public slots:
-	virtual void retranslate() Q_DECL_OVERRIDE;
+	void retranslate() override;
+	//! On the first call with "true" populates the window contents. Also sets focus to entry line.
+	void setVisible(bool v) override;
 	//! This style only displays the text search field and the search button
 	void setSimpleStyle();
 
 	//! Set the current coordinate system
-	void setCurrentCoordinateSystem(CoordinateSystem cs)
+	void setCurrentCoordinateSystem(SearchDialog::CoordinateSystem cs)
 	{
 		currentCoordinateSystem = cs;
 	}
-	//! Get the current coordinate system
-	CoordinateSystem getCurrentCoordinateSystem() const
-	{
-		return currentCoordinateSystem;
-	}
-	//! Get the current coordinate system key
-	QString getCurrentCoordinateSystemKey(void) const;
 	//! Set the current coordinate system from its key
 	void setCurrentCoordinateSystemKey(QString key);
+	//! Called when user wants to change recent search list size
+	void setRecentSearchSize(int maxSize);
 
 	void setCoordinateSystem(int csID);
 	void populateCoordinateSystemsList();
-	void populateCoordinateAxis();
+	void populateCoordinateAxis(); // Called when axes data is changed
+	void populateCoordinateData(); // Called when axes data and values are changed
 	void populateRecentSearch();
 
+public:
+	//! Get the current coordinate system
+	SearchDialog::CoordinateSystem getCurrentCoordinateSystem() const
+	{
+	    return currentCoordinateSystem;
+	}
+	//! Get the current coordinate system key
+	QString getCurrentCoordinateSystemKey(void) const;
 	//! Returns current max size of recent search list
 	int  getRecentSearchSize () const { return recentObjectSearchesData.maxSize;}
-	//! Called when user wants to change recent search list size
-	void setRecentSearchSize(int maxSize);
 
 protected:
 	Ui_searchDialogForm* ui;
 	//! Initialize the dialog widgets and connect the signals/slots
-	virtual void createDialogContent() Q_DECL_OVERRIDE;
+	void createDialogContent() override;
 
 private slots:
 	void greekLetterClicked();
@@ -190,24 +226,31 @@ private slots:
 	void onSearchTextChanged(const QString& text);
 
 	void gotoObject();
-	void gotoObject(const QString& nameI18n);
+	void gotoObject(const ObjectFound& obj);
 	// for going from list views
-	void gotoObject(const QModelIndex &modelIndex);
+	void gotoObjectFromSearchResults(const QModelIndex &modelIndex);
+	void gotoObjectFromObjectsList(const QModelIndex &modelIndex);
 
 	void searchListClear();
+	void refreshFocus(bool state);
 
 	//! Called when the user edit the manual position controls
 	void manualPositionChanged();
 
 	//! Whether to use SIMBAD for searches or not.
 	void enableSimbadSearch(bool enable);
-	bool simbadSearchEnabled() const {return useSimbad;}
 
 	//! Whether to use autofill for start of words or not.
 	void enableStartOfWordsAutofill(bool enable);
 
+	//! Whether to use sorting by string length or not
+	void enableSortingByLength(bool enable);
+
 	//! Whether to use lock position when coordinates are used or not.
 	void enableLockPosition(bool enable);
+
+        //! Whether to use automatic closing dialog when search element is selected.
+        void enableAutoClosing(bool enable);
 
 	//! Whether to show FOV center marker when coordinates are used or not.
 	void enableFOVCenterMarker(bool enable);
@@ -230,14 +273,6 @@ private slots:
 
 	void changeTab(int index);
 
-	int  getSimbadQueryDist () const { return simbadDist;}
-	int  getSimbadQueryCount() const { return simbadCount;}
-	bool getSimbadGetsIds   () const { return simbadGetIds;}
-	bool getSimbadGetsSpec  () const { return simbadGetSpec;}
-	bool getSimbadGetsMorpho() const { return simbadGetMorpho;}
-	bool getSimbadGetsTypes () const { return simbadGetTypes;}
-	bool getSimbadGetsDims  () const { return simbadGetDims;}
-
 	void setSimbadQueryDist(int dist);
 	void setSimbadQueryCount(int count);
 	void setSimbadGetsIds(bool b);
@@ -252,50 +287,22 @@ private slots:
 	//! Clear recent list's data
 	void recentSearchClearDataClicked();
 
+	//! Setting coordinates of the center of screen in spinboxes (following axes of current coordinate system)
+	void setCenterOfScreenCoordinates();
+
 private:
-	class SearchDialogStaticData
-	{
-	public:
-		//! Greek letters and strings
-		QHash<QString, QString> greekLetters;
-
-		SearchDialogStaticData()
-		{
-			greekLetters.insert("alpha", QString(QChar(0x03B1)));
-			greekLetters.insert("beta", QString(QChar(0x03B2)));
-			greekLetters.insert("gamma", QString(QChar(0x03B3)));
-			greekLetters.insert("delta", QString(QChar(0x03B4)));
-			greekLetters.insert("epsilon", QString(QChar(0x03B5)));
-
-			greekLetters.insert("zeta", QString(QChar(0x03B6)));
-			greekLetters.insert("eta", QString(QChar(0x03B7)));
-			greekLetters.insert("theta", QString(QChar(0x03B8)));
-			greekLetters.insert("iota", QString(QChar(0x03B9)));
-			greekLetters.insert("kappa", QString(QChar(0x03BA)));
-
-			greekLetters.insert("lambda", QString(QChar(0x03BB)));
-			greekLetters.insert("mu", QString(QChar(0x03BC)));
-			greekLetters.insert("nu", QString(QChar(0x03BD)));
-			greekLetters.insert("xi", QString(QChar(0x03BE)));
-			greekLetters.insert("omicron", QString(QChar(0x03BF)));
-
-			greekLetters.insert("pi", QString(QChar(0x03C0)));
-			greekLetters.insert("rho", QString(QChar(0x03C1)));
-			greekLetters.insert("sigma", QString(QChar(0x03C3))); // second lower-case sigma shouldn't affect anything
-			greekLetters.insert("tau", QString(QChar(0x03C4)));
-			greekLetters.insert("upsilon", QString(QChar(0x03C5)));
-
-			greekLetters.insert("phi", QString(QChar(0x03C6)));
-			greekLetters.insert("chi", QString(QChar(0x03C7)));
-			greekLetters.insert("psi", QString(QChar(0x03C8)));
-			greekLetters.insert("omega", QString(QChar(0x03C9)));
-		}
-	};
-	static SearchDialogStaticData staticData;
+	bool simbadSearchEnabled() const {return useSimbad;}
+	int  getSimbadQueryDist () const { return simbadDist;}
+	int  getSimbadQueryCount() const { return simbadCount;}
+	bool getSimbadGetsIds   () const { return simbadGetIds;}
+	bool getSimbadGetsSpec  () const { return simbadGetSpec;}
+	bool getSimbadGetsMorpho() const { return simbadGetMorpho;}
+	bool getSimbadGetsTypes () const { return simbadGetTypes;}
+	bool getSimbadGetsDims  () const { return simbadGetDims;}
 
 	class SimbadSearcher* simbadSearcher;
 	class SimbadLookupReply* simbadReply;
-	QMap<QString, Vec3d> simbadResults;
+	std::set<SimbadSearcher::Result> simbadResults; //! Simbad object name, type, and J2000.0 coordinates
 	class StelObjectMgr* objectMgr;
 	class QSettings* conf;
 	QStringListModel* listModel;
@@ -304,22 +311,24 @@ private:
 	//! Used when substituting text with a Greek letter.
 	bool flagHasSelectedText;
 
-	bool useStartOfWords;
-	bool useLockPosition;
-	bool useSimbad;
-	bool useFOVCenterMarker;
+	bool useStartOfWords = false;
+	bool useLengthSorting = false;
+	bool useLockPosition = true;
+	bool useSimbad = true;
+	bool useFOVCenterMarker = true;
 	bool fovCenterMarkerState;
+	bool useAutoClosing = true;
 	//! URL of the server used for SIMBAD queries.
 	QString simbadServerUrl;
 
 	//! Properties for SIMBAD position query
-	int  simbadDist;      //!< Distance from queried coordinates
-	int  simbadCount;     //!< At max, retrieve so many results
-	bool simbadGetIds;    //!< get all IDs for object
-	bool simbadGetSpec;   //!< get spectral data
-	bool simbadGetMorpho; //!< get morphological description
-	bool simbadGetTypes;  //!< get object types
-	bool simbadGetDims;   //!< get dimensions
+	int  simbadDist = 30;      //!< Distance from queried coordinates
+	int  simbadCount = 3;     //!< At max, retrieve so many results
+	bool simbadGetIds = true;    //!< get all IDs for object
+	bool simbadGetSpec = false;   //!< get spectral data
+	bool simbadGetMorpho = false; //!< get morphological description
+	bool simbadGetTypes = false;  //!< get object types
+	bool simbadGetDims = false;   //!< get dimensions
 
 	bool shiftPressed;   //!< follow Shift button status
 
@@ -330,11 +339,11 @@ private:
 
 	// Properties for "recent object searches"
 	CompletionListModel* searchListModel;
-	recentObjectSearches recentObjectSearchesData;
+	RecentObjectSearches recentObjectSearchesData;
 	QString recentObjectSearchesJsonPath;
 
 	//! Add to list: called from gotoObject(const QString& nameI18n)
-	void updateRecentSearchList(const QString &nameI18n);
+	void updateRecentSearchList(const ObjectFound& obj);
 
 	//! Get data from previous session
 	void loadRecentSearches();
@@ -343,9 +352,9 @@ private:
 	//! Shrink list if needed
 	void adjustRecentList(int maxSize);
 	//! Display search per user preference
-	void adjustMatchesResult(QStringList &allMatches, QStringList& recentMatches, QStringList& matches, int maxNbItem);
+	QVector<ObjectFound> combineMatches(QVector<ObjectFound>& recentMatches, QVector<ObjectFound>& matches, const int maxItemCount) const;
 	//! Update searches result display and reset selectedIdx = 0
-	void resetSearchResultDisplay(QStringList allMatches, QStringList recentMatches);
+	void resetSearchResultDisplay(const QVector<ObjectFound>& allMatches, const QVector<ObjectFound>& recentMatches);
 	//! Decide if push button should be enabled
 	void setPushButtonGotoSearch();
 	//! Default maxNbItem when matching objects
@@ -360,8 +369,7 @@ public:
 	//! @param maxNbItem the maximum number of returned object names.
 	//! @param useStartOfWords the autofill mode for returned objects names
 	//! @return a list of matching object names by order of recent searches, or an empty list if nothing match
-	QStringList listMatchingRecentObjects(const QString& objPrefix, int maxNbItem=20, bool useStartOfWords=false) const;
+	QVector<ObjectFound> listMatchingRecentObjects(const QString& objPrefix, int maxNbItem=20, bool useStartOfWords=false) const;
 };
 
 #endif // _SEARCHDIALOG_HPP
-

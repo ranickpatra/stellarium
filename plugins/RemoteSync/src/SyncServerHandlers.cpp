@@ -18,6 +18,7 @@
  */
 
 #include "SyncServerHandlers.hpp"
+#include "SyncMessages.hpp"
 #include "SyncServer.hpp"
 
 using namespace SyncProtocol;
@@ -31,7 +32,7 @@ bool ServerErrorHandler::handleMessage(QDataStream &stream, SyncProtocol::tPaylo
 {
 	ErrorMessage msg;
 	bool ok = msg.deserialize(stream,dataSize);
-	peerData.peerLog("Received error message from client: " + msg.message);
+	peerData.peerLog(QtWarningMsg, "Received error message from client: " + msg.message);
 
 	//we don't drop the connection here, we let the remote end do that
 	return ok;
@@ -50,14 +51,14 @@ bool ServerAuthHandler::handleMessage(QDataStream &stream, SyncProtocol::tPayloa
 
 	if(!ok)
 	{
-		peer.peerLog("invalid challenge response received");
+		peer.peerLog(QtCriticalMsg, "invalid challenge response received");
 		return false;
 	}
 
 	//check if ID is valid
 	if(msg.clientId != peer.id)
 	{
-		peer.peerLog("invalid ID in challenge response");
+		peer.peerLog(QtCriticalMsg, "invalid ID in challenge response");
 		peer.writeError("invalid id sent");
 		return true;
 	}
@@ -69,7 +70,7 @@ bool ServerAuthHandler::handleMessage(QDataStream &stream, SyncProtocol::tPayloa
 	if(expectedPluginVersion != msg.remoteSyncVersion)
 	{
 		QString str("RemoteSync plugin version mismatch! Expected: 0x%1, Got: 0x%2");
-		peer.peerLog(str.arg(expectedPluginVersion,0,16).arg(msg.remoteSyncVersion,0,16));
+		peer.peerLog(QtWarningMsg, str.arg(expectedPluginVersion,0,16).arg(msg.remoteSyncVersion,0,16));
 		if(!allowDivergingAppVersions)
 		{
 			peer.writeError("plugin version mismatch not allowed");
@@ -80,7 +81,7 @@ bool ServerAuthHandler::handleMessage(QDataStream &stream, SyncProtocol::tPayloa
 	{
 		//This is only a warning here
 		QString str("Stellarium version mismatch! Expected: 0x%1, Got: 0x%2");
-		peer.peerLog(str.arg(expectedStellariumVersion,0,16).arg(msg.stellariumVersion,0,16));
+		peer.peerLog(QtWarningMsg, str.arg(expectedStellariumVersion,0,16).arg(msg.stellariumVersion,0,16));
 		if(!allowDivergingAppVersions)
 		{
 			peer.writeError("app version mismatch not allowed");
@@ -88,7 +89,7 @@ bool ServerAuthHandler::handleMessage(QDataStream &stream, SyncProtocol::tPayloa
 		}
 	}
 
-	peer.peerLog("Authenticated client");
+	peer.peerLog(QtDebugMsg, "Authenticated client");
 
 	//if we got here, peer is successfully authenticated!
 	peer.authenticated = true;

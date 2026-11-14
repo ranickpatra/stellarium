@@ -25,40 +25,84 @@
 #include <QFile>
 #include <QTimer>
 #include <QEventLoop>
+#include <QKeyEvent>
 #include <QMap>
 #include <QPair>
 #include <QSet>
 
-// class StelMainScriptAPI;
-#include "StelMainScriptAPI.hpp"
-
+#ifdef ENABLE_SCRIPT_QML
+#include <QMutex>
+#include <QJSValue>
+#include "V3d.hpp"
+class QJSEngine;
+#else
 class StelScriptEngineAgent;
 class QScriptEngine;
+#endif
+
+#include "StelMainScriptAPI.hpp"
 
 #ifdef ENABLE_SCRIPT_CONSOLE
 class ScriptConsole;
 #endif
 
+// Event filter to detect keypress for waitForKeypress()
+class KeypressFilter : public QObject {
+	QEventLoop* loop;
+public:
+	KeypressFilter(QEventLoop* l) : loop(l) {}
+	bool eventFilter(QObject* obj, QEvent* event) override {
+		// A presenter's clicker device sends PgUp/PgDn events as ShortcutOverride.
+		if((event->type() == QEvent::KeyRelease) || (event->type() == QEvent::ShortcutOverride))
+		{
+			QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
+			if (QList<Qt::Key>({Qt::Key::Key_Space, Qt::Key::Key_PageDown, Qt::Key::Key_PageUp}).contains(static_cast<Qt::Key>(keyEvent->key())))
+			{
+				loop->quit();
+				keyEvent->accept();
+				return true;
+			}
+		}
+		return QObject::eventFilter(obj, event);
+	}
+};
+
 //! Manage scripting in Stellarium
+//! Notes on migration from QtScript to QJSEngine
+//! - The old engine had isEvaluating(). We must use a mutex for the same idea.
+//! - There is no script.pause() function. We can only stop a running script.
+//!
+//! @note You can finetune the amount of scripting-related messages in the logfile by configuring the logging category stel.Scripting.
+//! For this, e.g. set environment variable QT_LOGGING_RULES="*.debug=false;stel.Scripting.debug=true;".
+//! By default, only Info and more severe messages are displayed.
+
 class StelScriptMgr : public QObject
 {
 	Q_OBJECT
 
 	Q_PROPERTY(QString runningScriptId READ runningScriptId NOTIFY runningScriptIdChanged)
-		
+	// CAVEAT: Do not convert this class to a StelModule: The Qt properties (esp. the following 2) should not be available in the StelProperty system (and the object should not be scriptable)!
+	Q_PROPERTY(bool flagAllowExternalScreenshotDir READ getFlagAllowExternalScreenshotDir WRITE setFlagAllowExternalScreenshotDir NOTIFY flagAllowExternalScreenshotDirChanged)
+	Q_PROPERTY(bool flagAllowWriteAbsolutePaths READ getFlagAllowWriteAbsolutePaths WRITE setFlagAllowWriteAbsolutePaths NOTIFY flagAllowWriteAbsolutePathsChanged)
+	Q_PROPERTY(bool flagShowContinueMessage     READ getFlagShowContinueMessage     WRITE setFlagShowContinueMessage     NOTIFY flagShowContinueMessageChanged)
+
 #ifdef ENABLE_SCRIPT_CONSOLE
 friend class ScriptConsole;
 #endif
 
 public:
 	StelScriptMgr(QObject *parent=Q_NULLPTR);
-	~StelScriptMgr();
+	~StelScriptMgr() override;
 
 	QStringList getScriptList() const;
 
 	//! Find out if a script is running
 	//! @return true if a script is running, else false
+	#ifdef ENABLE_SCRIPT_QML
+	bool scriptIsRunning();
+	#else
 	bool scriptIsRunning() const;
+	#endif
 	//! Get the ID (usually filename) of the currently running script
 	//! @return Empty string if no script is running, else the 
 	//! ID of the script which is running.
@@ -66,7 +110,7 @@ public:
 
 	// Pre-processor functions
 	//! Preprocess script, esp. process include instructions.
-	//! if the command line option --verbose has been given,
+	//! If logging level is set to stel.Scripting.debug,
 	//! this dumps the preprocessed script with line numbers attached to log.
 	//! This helps to understand the line number given by the usual error message.
 	bool preprocessScript(const QString fileName, const QString& input, QString& output, const QString& scriptDir, int &errLoc);
@@ -75,21 +119,30 @@ public:
 	//! Add all the StelModules into the script engine
 	void addModules();
 
-    //! Define JS classes Vec3f, Vec3d
+	//! Add a single QObject as scripting object
+	//! The object must have set a name by QObject::setObjectName().
+	//! @note use this sparingly and with caution, and only add one object per class!
+	void addObject(QObject *obj);
+
+	//! Define JS classes Vec3f, Vec3d
+	#ifdef ENABLE_SCRIPT_QML
+	static void defVecClasses(QJSEngine *engine);
+	#else
 	static void defVecClasses(QScriptEngine *engine);
+	#endif
 
-    //! Permit access to StelScriptMainAPI's methods
-	const QMetaObject * getMetaOfStelMainScriptAPI(){ return mainAPI->metaObject(); }
+	//! Permit access to StelScriptMainAPI's methods
+	const QMetaObject * getMetaOfStelMainScriptAPI() const { return mainAPI->metaObject(); }
 
-    //! Accessor to QEventLoop
-    QEventLoop* getWaitEventLoop(){ return waitEventLoop; }
+	//! Accessor to QEventLoop
+	QEventLoop* getWaitEventLoop() const { return waitEventLoop; }
 
 public slots:
 	//! Returns a HTML description of the specified script.
 	//! Includes name, author, description...
 	//! @param s the file name of the script whose HTML description is to be returned.
 	//! @param generateDocumentTags if true, the main wrapping document tags (\<html\>\<body\>...\</body\>\</html\>) are also generated
-	QString getHtmlDescription(const QString& s, bool generateDocumentTags=true) const;
+	QString getHtmlDescription(const QString& s, bool generateDocumentTags=true);
 
 	//! Gets a single line name of the script. 
 	//! @param s the file name of the script whose name is to be returned.
@@ -97,7 +150,7 @@ public slots:
 	//! such comment is found, the file name will be returned.  If the file
 	//! is not found or cannot be opened for some reason, an Empty string
 	//! will be returned.
-	QString getName(const QString& s) const;
+	QString getName(const QString& s);
 
 	//! Gets the name of the script Author
 	//! @param s the file name of the script whose name is to be returned.
@@ -105,7 +158,7 @@ public slots:
 	//! such comment is found, "" is returned.  If the file
 	//! is not found or cannot be opened for some reason, an Empty string
 	//! will be returned.
-	QString getAuthor(const QString& s) const;
+	QString getAuthor(const QString& s);
 
 	//! Gets the licensing terms for the script
 	//! @param s the file name of the script whose name is to be returned.
@@ -113,7 +166,7 @@ public slots:
 	//! such comment is found, "" is returned.  If the file
 	//! is not found or cannot be opened for some reason, an Empty string
 	//! will be returned.
-	QString getLicense(const QString& s) const;
+	QString getLicense(const QString& s);
 
 	//! Gets the version of the script
 	//! @param s the file name of the script whose name is to be returned.
@@ -121,7 +174,7 @@ public slots:
 	//! such comment is found, "" is returned.  If the file
 	//! is not found or cannot be opened for some reason, an Empty string
 	//! will be returned.
-	QString getVersion(const QString& s) const;
+	QString getVersion(const QString& s);
 
 	//! Gets a description of the script.
 	//! @param s the file name of the script whose name is to be returned.
@@ -130,7 +183,7 @@ public slots:
 	//! is found.  If no such comment is found, QString("") is returned.
 	//! If the file is not found or cannot be opened for some reason, an 
 	//! Empty string will be returned.
-	QString getDescription(const QString& s) const;
+	QString getDescription(const QString& s);
 
 	//! Gets the default shortcut of the script.
 	//! @param s the file name of the script whose name is to be returned.
@@ -138,7 +191,7 @@ public slots:
 	//! If no such comment is found, QString("") is returned.
 	//! If the file is not found or cannot be opened for some reason, an
 	//! Empty string will be returned.
-	QString getShortcut(const QString& s) const;
+	QString getShortcut(const QString& s);
 
 	//! Run the script located in the given file. In essence, this calls prepareScript and runPreprocessedScript.
 	//! @note This is a blocking call! The event queue is held up by calls of QCoreApplication::processEvents().
@@ -161,6 +214,10 @@ public slots:
 	//! script directories are used (script/ in both user and install directory). Otherwise, the given directory is used.
 	//! @return false if the named script code could not be prepared or run, true otherwise
 	bool runScriptDirect(const QString scriptId, const QString& scriptCode, int &errLoc, const QString &includePath = QString());
+
+	//! Convenience method similar to runScriptDirect(const QString scriptId, const QString& scriptCode, int &errLoc, const QString &includePath = QString());
+	//! when scriptId and errLoc are not relevant. (Required e.g. in RemoteControl)
+	bool runScriptDirect(const QString& scriptCode, const QString &includePath = QString());
 
 	//! Runs preprocessed script code which has been generated using runPreprocessedScript().
 	//! In general, you do not want to use this method, use runScript() or runScriptDirect() instead.
@@ -216,10 +273,27 @@ public slots:
 	void saveOutputAs(const QString &filename);
 
 	//! Pause a running script.
+	//! @note This method only works with the Qt5-based scripting engine.
 	void pauseScript();
 
 	//! Resume a paused script.
+	//! @note This method only works with the Qt5-based scripting engine.
 	void resumeScript();
+
+	//! Ensure that users must actively enable storing screenshots to directories configured in scripts.
+	//! If this is false, a directory dir given in StelMainScriptAPI::screenshot(prefix, invert, dir, ...) is ignored.
+	bool getFlagAllowExternalScreenshotDir() const {return flagAllowExternalScreenshotDir;}
+	void setFlagAllowExternalScreenshotDir(bool flag);
+
+	//! Ensure that users must actively enable writing to absolute paths configured in scripts.
+	//! If this is false, the output file is just stored to the user data directory
+	bool getFlagAllowWriteAbsolutePaths() const {return flagAllowWriteAbsolutePaths;}
+	void setFlagAllowWriteAbsolutePaths(bool flag);
+
+	//! Flag setter/getter for deciding whether to show the continue message in WaitForKey()
+	bool getFlagShowContinueMessage() const {return flagShowContinueMessage;}
+	void setFlagShowContinueMessage(bool flag);
+
 
 private slots:
 	//! Called at the end of the running threa
@@ -234,14 +308,20 @@ signals:
 	//! Notification when a script has stopped running 
 	void scriptStopped();
 	//! Notification of a script event - warnings, current execution line etc.
-	void scriptDebug(const QString&) const;
+	void scriptDebug(const QString&);
 	//! Notification of a script event - output line.
-	void scriptOutput(const QString&) const;
+	void scriptOutput(const QString&);
+	//! Notification that screenshots to script-defined directories are allowed
+	void flagAllowExternalScreenshotDirChanged(bool flag);
+	//! Notification that flag to allow scripts to write to absolute paths changed
+	void flagAllowWriteAbsolutePathsChanged(bool flag);
+	//! Notification that the "press key to continue" has been toggled
+	void flagShowContinueMessageChanged(bool flag);
 
 private:
-	// Utility functions for preprocessor
-	QMap<QString, QString> mappify(const QStringList& args, bool lowerKey=false);
-	bool strToBool(const QString& str);
+	// Utility functions for preprocessor. DEAD CODE!
+	//QMap<QString, QString> mappify(const QStringList& args, bool lowerKey=false);
+	static bool strToBool(const QString& str);
 	// The recursive preprocessing workhorse.
 	void expand(const QString fileName, const QString &input, QString &output, const QString &scriptDir, int &errLoc);
 
@@ -255,19 +335,29 @@ private:
 	//! @param notFoundText the text to be returned if the key is not found
 	//! @return the text following the id and : on a comment line near the top of 
 	//! the script file (i.e. before there is a non-comment line).
-	QString getHeaderSingleLineCommentText(const QString& s, const QString& id, const QString& notFoundText="") const;
+	QString getHeaderSingleLineCommentText(const QString& s, const QString& id, const QString& notFoundText="");
+
+#ifdef ENABLE_SCRIPT_QML
+	QJSEngine *engine;
+	QMutex mutex; // we need to lock this while a script is running.
+	QJSValue result;
+#else
 	QScriptEngine* engine;
-	
+	//Script engine agent
+	StelScriptEngineAgent *agent;
+#endif
 	//! The thread in which scripts are run
 	StelMainScriptAPI *mainAPI;
 
 	//! The QEventLoop for wait and waitFor
-    QEventLoop* waitEventLoop;
-	
+	QEventLoop* waitEventLoop;
+
+	//! Event filter to detect keypress for waitForKeypress()
+	QObject* keypressEventFilter;
+	bool flagShowContinueMessage; // property flag deciding whether to show the continue... message in waitForKeypress()
+
 	QString scriptFileName;
 	
-	//Script engine agent
-	StelScriptEngineAgent *agent;
 
 	// Map line numbers of output to <path>:<line>
 	int outline;
@@ -276,6 +366,13 @@ private:
 
 	// Registry for include files
 	QSet<QString> includeSet;
+
+	//! Ensure that users must actively allow storing screenshots to directories configured in scripts.
+	//! If this is false, a directory dir given in StelMainScriptAPI::screenshot(prefix, invert, dir, ...) is ignored.
+	bool flagAllowExternalScreenshotDir;
+	//! Ensure that users must actively allow storing output data to absolute paths.
+	//! If this is false, the output file is stored to the user data directory.
+	bool flagAllowWriteAbsolutePaths;
 };
 
 #endif // STELSCRIPTMGR_HPP

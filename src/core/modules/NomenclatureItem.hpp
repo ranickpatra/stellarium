@@ -23,22 +23,26 @@
 #include <QVariant>
 #include <QString>
 #include <QStringList>
-#include <QFont>
 #include <QList>
 
 #include "StelObject.hpp"
-#include "StelTextureTypes.hpp"
 #include "StelFader.hpp"
 #include "StelTranslator.hpp"
-#include "Planet.hpp"
 #include "SolarSystem.hpp"
 
 class StelPainter;
 
+//! Class which contains data about one Nomenclature entry from the IAU database at https://planetarynames.wr.usgs.gov/
+//! There is a confusing variety of planetographic vs. planetocentric coordinate systems,
+//! counting longitudes in eastern or western direction, or counting from 0...360 degrees or from -180...+180 degrees.
+//! The actual data were taken from https://planetarynames.wr.usgs.gov/GIS_Downloads
+//! and include eastward-positive planetocentric coordinates, i.a. all bodies are treated as spheres. However, according to
+//! https://planetarynames.wr.usgs.gov/TargetCoordinates on some objects at least the longitudes should be counted west-positive,
+//! a convention which we should follow closely. Note that for Mars the traditional west-positive counting has recently been inverted,
+//! and longitudes are now counted east-positive like on earth.
 class NomenclatureItem : public StelObject
 {
 	friend class NomenclatureMgr;
-	Q_ENUMS(NomenclatureItemType)
 public:
 	static const QString NOMENCLATURE_TYPE;
 
@@ -102,87 +106,165 @@ public:
 		niReticulum		= 54, // type="reticulum"
 		niSatelliteFeature	= 55, // type="satellite feature"
 		niTessera		= 56, // type="tessera"
-		niSaxum			= 57  // type="saxum"
+		niSaxum			= 57, // type="saxum"
+		niSpecialPointPole	= 100,// North and South Poles; special type
+		niSpecialPointEast	= 101,// East point; special type
+		niSpecialPointWest	= 102,// West point; special type
+		niSpecialPointCenter    = 103,// Central point; special type
+		niSpecialPointSubSolar	= 104 // Subsolar point; special type
 	};
+	Q_ENUM(NomenclatureItemType)
 
-	NomenclatureItem(PlanetP nPlanet, int nId, const QString& nName, const QString& nContext, NomenclatureItemType nItemType, float nLatitude, float nLongitude, float nSize);
-	virtual ~NomenclatureItem();
+	// Describes the orientation of the given feature coordinates
+	enum PlanetCoordinateOrientation
+	{
+		pcoPlanetographicWest360 = 0x000,
+		pcoPlanetographicWest180 = 0x001,
+		pcoPlanetographicEast360 = 0x010,
+		pcoPlanetographicEast180 = 0x011,
+		pcoPlanetocentricWest360 = 0x100,
+		pcoPlanetocentricWest180 = 0x101,
+		pcoPlanetocentricEast360 = 0x110,
+		pcoPlanetocentricEast180 = 0x111
+	};
+	Q_ENUM(PlanetCoordinateOrientation)
+
+	NomenclatureItem(PlanetP nPlanet, int nId, const QString& nName, const QString& nContext, const QString& nOrigin, NomenclatureItemType nItemType, double nLatitude, double nLongitude, double nSize);
+	~NomenclatureItem() override;
 
 	//! Get the type of object
-	virtual QString getType(void) const
+	QString getType(void) const override
 	{
 		return NOMENCLATURE_TYPE;
 	}
+	QString getObjectType(void) const override
+	{
+		return getNomenclatureTypeLatinString(nType);
+	}
+	QString getObjectTypeI18n(void) const override
+	{
+		return getNomenclatureTypeString(nType);
+	}
 
-	virtual QString getID(void) const
+	QString getID(void) const override
 	{
 		return QString("%1").arg(identificator);
 	}
 
-	virtual float getSelectPriority(const StelCore* core) const;
+	float getSelectPriority(const StelCore* core) const override;
 
 	//! Get an HTML string to describe the object
 	//! @param core A pointer to the core
-	//! @flags a set of flags with information types to include.
-	virtual QString getInfoString(const StelCore* core, const InfoStringGroup& flags) const;
-	virtual Vec3f getInfoColor(void) const;
-	virtual Vec3d getJ2000EquatorialPos(const StelCore*) const;
-	//! Get the visual magnitude of a nomenclature item. Dummy method, returns 99.
-	virtual float getVMagnitude(const StelCore* core) const;
-	//! Get the angular size of nomenclature item.
-	virtual double getAngularSize(const StelCore* core) const;
+	//! @param flags a set of flags with information types to include.
+	QString getInfoString(const StelCore* core, const InfoStringGroup& flags) const override;
+	//! Get a textual narration to describe the object, ready for text to speech output
+	//! @param core A pointer to the core
+	//! @param flags a set of flags with information types to include.
+	QString getNarration(const StelCore* core, const InfoStringGroup& flags) const override;
+	Vec3f getInfoColor(void) const override;
+	Vec3d getJ2000EquatorialPos(const StelCore*) const override;
+	//! Return the angular radius of a circle containing the feature as seen from the observer
+	//! with the circle center assumed to be at getJ2000EquatorialPos().
+	//! @return radius in degree. This value is half of the apparent angular size of the object, and is independent of the current FOV.
+	double getAngularRadius(const StelCore* core) const override;
 	//! Get the localized name of nomenclature item.
-	virtual QString getNameI18n(void) const;
+	QString getNameI18n(void) const override;
 	//! Get the english name of nomenclature item.
-	virtual QString getEnglishName(void) const;
+	QString getEnglishName(void) const override;
 
 	///////////////////////////////////////////////////////////////////////////
-	//! Translate planet name using the passed translator
+	//! Translate feature name using the passed translator
 	virtual void translateName(const StelTranslator &trans);
 
-	void draw(StelCore* core, StelPainter *painter);
-	NomenclatureItemType getNomenclatureType() const { return nType;}
-	void update(double deltaTime);
+	//! Compute times of nearest rise, transit and set of the item's current Planet.
+	//! @param core the currently active StelCore object
+	//! @param altitude (optional; default=0) altitude of the object, degrees.
+	//! @return Vec4d - time of rise, transit and set closest to current time; JD.
+	//! @note The fourth element flags particular conditions:
+	//!       *  +100. for circumpolar objects. Rise and set give lower culmination times.
+	//!       *  -100. for objects never rising. Rise and set give transit times.
+	//!       * -1000. is used as "invalid" value. The result should then not be used.
+	Vec4d getRTSTime(const StelCore* core, const double altitude=0.) const override;
 
-	void setFlagLabels(bool b){ labelsFader = b; }
-	bool getFlagLabels(void) const { return labelsFader==true;}
+	void draw(StelCore* core, StelPainter *painter, const float fov) const;
+	NomenclatureItemType getNomenclatureType() const { return nType;}
+
+	static void setFlagLabels(bool b){ labelsFader = b; }
+	static bool getFlagLabels(void){ return labelsFader;}
 	void setFlagHideLocalNomenclature(bool b) { hideLocalNomenclature=b; }
 	bool getFlagHideLocalNomenclature() const { return hideLocalNomenclature; }
+	void setFlagShowSpecialNomenclatureOnly(bool b) { showSpecialNomenclatureOnly=b; }
+	bool getFlagShowSpecialNomenclatureOnly() const { return showSpecialNomenclatureOnly; }
 	//QString getEnglishPlanetName(void) const {return planet->getEnglishName();}
 	PlanetP getPlanet(void) const { return planet;}
 	//! get latitude [degrees]
-	float getLatitude(void) const {return latitude;}
+	float getLatitude(void) const {return static_cast<float>(latitude);}
 	//! get longitude [degrees]
-	float getLongitude(void) const {return longitude;}
+	float getLongitude(void) const {return static_cast<float>(longitude);}
 	//! return solar altitude in degrees (Meeus, Astr.Alg.1998 53.3)
 	double getSolarAltitude(const StelCore *core) const;
 
 protected:
 	//! returns a type enum for a given 2-letter code
-	static NomenclatureItemType getNomenclatureItemType(const QString abbrev);
+	static NomenclatureItemType getNomenclatureItemType(const QString &abbrev);
 	//! Should be triggered once at start and then whenever program language setting changes.
 	static void createNameLists();
 
 private:
-	Vec3d XYZpc;                         // holds planetocentric position (from longitude/latitude)
-	mutable Vec3d XYZ;                   // holds J2000 position
-	mutable double jde;                  // jde time of XYZ value
+	mutable Vec3d XYZpc;   // holds planetocentric direction vector (unit length, from longitude/latitude). One-time conversion for fixed features, but mutable for special points.
+	mutable Vec3d XYZ;     // holds J2000 position in space (i.e. including planet position, offset from planetocenter)
+	mutable double jde;    // jde time of XYZ value
 	static Vec3f color;
+	static bool flagOutlineCraters; // draw craters and satellite features as ellipses?
 	static bool hideLocalNomenclature;
+	static bool showTerminatorZoneOnly;
+	static int terminatorMinAltitude;
+	static int terminatorMaxAltitude;
+	static bool showSpecialNomenclatureOnly;
 
+	// ratio of angular size of feature to the FOV
+	float getAngularDiameterRatio(const StelCore *core, const float fov) const;
+
+	//! geological scientific term for nType, like crater, dorsum, ... but english "landing site" or "Point".
 	static QString getNomenclatureTypeLatinString(NomenclatureItemType nType);
+	//! User-language term for nType.
 	static QString getNomenclatureTypeString(NomenclatureItemType nType);
-	static QString getNomenclatureTypeDescription(NomenclatureItemType nType, QString englishName);
+	//! Retrieve clear-language description of an item type based on @param englishName of the planet/moon
+	static QString getNomenclatureTypeDescription(NomenclatureItemType nType, const QString &englishName);
+	//! Returns the description of the feature coordinates where available, or pcoPlanetographicWest360.
+	//! The default value ensures valid central meridian data for the gas giants.
+	static PlanetCoordinateOrientation getPlanetCoordinateOrientation(const QString &planetName);
+	PlanetCoordinateOrientation getPlanetCoordinateOrientation() const;
+	//! return whether counting sense of the coordinates is positive towards the east
+	static bool isEastPositive(PlanetCoordinateOrientation pco);
+	//! return whether coordinates are planetocentric (and not planetographic)
+	//! Given that the source data are planetocentric, this returns always true.
+	static bool isPlanetocentric(PlanetCoordinateOrientation pco);
+	//! return whether longitudes shall be counted from -180 to +180 degrees (and not 0...360 degrees)
+	static bool is180(PlanetCoordinateOrientation pco);
+	//! return whether counting sense of the coordinates is positive towards the east
+	bool isEastPositive() const;
+	//! return whether coordinates are planetocentric (and not planetographic).
+	//! Given that the source data are planetocentric, this returns always true.
+	bool isPlanetocentric() const;
+	//! return whether longitudes shall be counted from -180 to +180 degrees (and not 0...360 degrees)
+	bool is180() const;
 	static QMap<NomenclatureItemType, QString>niTypeStringMap;
 	static QMap<NomenclatureItemType, QString>niTypeDescriptionMap;
 
 	PlanetP planet;
 	int identificator;
-	QString englishName, context, nameI18n;
-	NomenclatureItemType nType;       // Type of nomenclature item
-	float latitude, longitude, size;  // degrees, degrees, km
+	QString englishName, context, nameI18n; // Name for display
+	QString origin, originI18n; // explanation about name patron or other name origin
+	NomenclatureItemType nType; // Type of nomenclature item
+	mutable double latitude;    // degrees
+	mutable double longitude;   // degrees. Declared mutable to allow change in otherwise const methods (for special points)
+	double size;                //  km
 
-	LinearFader labelsFader;
+	static LinearFader labelsFader;
+	// Flag to be set by our friend class NomenclatureMgr.
+	// Usually drawing avoids recomputation when time is frozen. However, changing location then needs a redraw. (GH#3706)
+	static bool forceItems;
 };
 
 #endif // NOMENCLATUREITEM_HPP

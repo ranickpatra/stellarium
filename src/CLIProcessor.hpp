@@ -79,8 +79,8 @@ public:
 	//! @exception runtime_error("optarg_type") the expected argument to
 	//! the option could not be converted. The longOpt value is appended
 	//! in parenthesis.
-	//! @return 1 if the argument to the specified opion is "yes", "y",
-	//! "true", "on" or 1; 0 if the argument to the specified opion is "no",
+	//! @return 1 if the argument to the specified option is "yes", "y",
+	//! "true", "on" or 1; 0 if the argument to the specified option is "no",
 	//! "n", "false", "off" or 0; the value of the defaultValue parameter if
 	//! the option was not found in the argument list before an element which
 	//! has the value "--".
@@ -91,6 +91,11 @@ public:
 	//! in the sub-class of the StelApp, as the sub-class may want to manage the
 	//! argument list, as is the case with the StelMainWindow version.
 	static void parseCLIArgsPreConfig(const QStringList& argList);
+
+	//! Processing of command-line options which must be processed before QGuiApplication is created.
+	//! This includes the options that set environment variables like QT_OPENGL
+	//! that are read in the constructor of QGuiApplication.
+	static void parseCLIArgsPreQApp(const QStringList argList);
 
 	//! Processing of command line options which is to be done after the config file is
 	//! read.  This gives us the chance to over-ride settings which are in the configuration

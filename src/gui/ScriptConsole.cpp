@@ -38,10 +38,11 @@
 #include <QDateTime>
 #include <QSyntaxHighlighter>
 #include <QTextDocumentFragment>
+#include <QRegularExpression>
 
 ScriptConsole::ScriptConsole(QObject *parent)
 	: StelDialog("ScriptConsole", parent)
-	, highlighter(Q_NULLPTR)
+	, highlighter(nullptr)
 	, useUserDir(false)
 	, hideWindowAtScriptRun(false)
 	, clearOutput(false)	
@@ -55,7 +56,7 @@ ScriptConsole::ScriptConsole(QObject *parent)
 ScriptConsole::~ScriptConsole()
 {
 	delete ui;
-	delete highlighter; highlighter = Q_NULLPTR;
+	delete highlighter; highlighter = nullptr;
 }
 
 void ScriptConsole::retranslate()
@@ -67,8 +68,9 @@ void ScriptConsole::retranslate()
 	}
 }
 
-void ScriptConsole::styleChanged()
+void ScriptConsole::styleChanged(const QString &style)
 {
+	StelDialog::styleChanged(style);
 	if (highlighter)
 	{ 
 		highlighter->setFormats();
@@ -94,36 +96,36 @@ void ScriptConsole::populateQuickRunList()
 void ScriptConsole::createDialogContent()
 {
 	ui->setupUi(dialog);
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &ScriptConsole::retranslate);
 
 	highlighter = new StelScriptSyntaxHighlighter(ui->scriptEdit->document());
 	ui->includeEdit->setText(StelFileMgr::getInstallationDir() + "/scripts");
 
 	populateQuickRunList();
 
-	connect(ui->scriptEdit, SIGNAL(cursorPositionChanged()), this, SLOT(rowColumnChanged()));
-	connect(ui->scriptEdit, SIGNAL(textChanged()), this, SLOT(setDirty()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
-	connect(ui->loadButton, SIGNAL(clicked()), this, SLOT(loadScript()));
-	connect(ui->saveButton, SIGNAL(clicked()), this, SLOT(saveScript()));
-	connect(ui->clearButton, SIGNAL(clicked()), this, SLOT(clearButtonPressed()));
-	connect(ui->preprocessSSCButton, SIGNAL(clicked()), this, SLOT(preprocessScript()));
-	connect(ui->runButton, SIGNAL(clicked()), this, SLOT(runScript()));
-	connect(ui->stopButton, SIGNAL(clicked()), &StelApp::getInstance().getScriptMgr(), SLOT(stopScript()));
-	connect(ui->includeBrowseButton, SIGNAL(clicked()), this, SLOT(includeBrowse()));
-	connect(ui->quickrunCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(quickRun(int)));
-	connect(&StelApp::getInstance().getScriptMgr(), SIGNAL(scriptRunning()), this, SLOT(scriptStarted()));
-	connect(&StelApp::getInstance().getScriptMgr(), SIGNAL(scriptStopped()), this, SLOT(scriptEnded()));
-	connect(&StelApp::getInstance().getScriptMgr(), SIGNAL(scriptDebug(const QString&)), this, SLOT(appendLogLine(const QString&)));
-	connect(&StelApp::getInstance().getScriptMgr(), SIGNAL(scriptOutput(const QString&)), this, SLOT(appendOutputLine(const QString&)));
+	connect(ui->scriptEdit, &QPlainTextEdit::cursorPositionChanged, this, &ScriptConsole::rowColumnChanged);
+	connect(ui->scriptEdit, &QPlainTextEdit::textChanged, this, &ScriptConsole::setDirty);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &ScriptConsole::handleMovedTo);
+	connect(ui->loadButton, &QToolButton::clicked, this, &ScriptConsole::loadScript);
+	connect(ui->saveButton, &QToolButton::clicked, this, &ScriptConsole::saveScript);
+	connect(ui->clearButton, &QToolButton::clicked, this, &ScriptConsole::clearButtonPressed);
+	connect(ui->preprocessSSCButton, &QPushButton::clicked, this, &ScriptConsole::preprocessScript);
+	connect(ui->runButton, &QToolButton::clicked, this, &ScriptConsole::runScript);
+	connect(ui->stopButton, &QToolButton::clicked, &StelApp::getInstance().getScriptMgr(), &StelScriptMgr::stopScript);
+	connect(ui->includeBrowseButton, &QToolButton::clicked, this, &ScriptConsole::includeBrowse);
+	connect(ui->quickrunCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &ScriptConsole::quickRun);
+	connect(&StelApp::getInstance().getScriptMgr(), &StelScriptMgr::scriptRunning, this, &ScriptConsole::scriptStarted);
+	connect(&StelApp::getInstance().getScriptMgr(), &StelScriptMgr::scriptStopped, this, &ScriptConsole::scriptEnded);
+	connect(&StelApp::getInstance().getScriptMgr(), &StelScriptMgr::scriptDebug, this, &ScriptConsole::appendLogLine);
+	connect(&StelApp::getInstance().getScriptMgr(), &StelScriptMgr::scriptOutput, this, &ScriptConsole::appendOutputLine);
 	ui->tabs->setCurrentIndex(0);
 
 	// get decent indentation
 	QFont font = ui->scriptEdit->font();
 	QFontMetrics fontMetrics = QFontMetrics(font);
-	int width = fontMetrics.width("0");
-	ui->scriptEdit->setTabStopWidth(4*width); // 4 characters
+	int width = fontMetrics.boundingRect("0").width();
+	ui->scriptEdit->setTabStopDistance(4*width); // 4 characters
 	ui->scriptEdit->setFocus();
 
 	QSettings* conf = StelApp::getInstance().getSettings();
@@ -133,13 +135,19 @@ void ScriptConsole::createDialogContent()
 	ui->closeWindowAtScriptRunCheckbox->setChecked(hideWindowAtScriptRun);
 	clearOutput = conf->value("gui/flag_scripts_clear_output", false).toBool();
 	ui->clearOutputCheckbox->setChecked(clearOutput);
-	connect(ui->useUserDirCheckBox, SIGNAL(toggled(bool)), this, SLOT(setFlagUserDir(bool)));
-	connect(ui->closeWindowAtScriptRunCheckbox, SIGNAL(toggled(bool)), this, SLOT(setFlagHideWindow(bool)));
-	connect(ui->clearOutputCheckbox, SIGNAL(toggled(bool)), this, SLOT(setFlagClearOutput(bool)));
+	connect(ui->useUserDirCheckBox, &QCheckBox::toggled, this, &ScriptConsole::setFlagUserDir);
+	connect(ui->closeWindowAtScriptRunCheckbox, &QCheckBox::toggled, this, &ScriptConsole::setFlagHideWindow);
+	connect(ui->clearOutputCheckbox, &QCheckBox::toggled, this, &ScriptConsole::setFlagClearOutput);
 
-	// Let's improve visibility of the text
-	QString style = "QLabel { color: rgb(238, 238, 238); }";
-	ui->quickrunLabel->setStyleSheet(style);
+	ui->allowScreenshotDirCheckBox->setChecked(StelApp::getInstance().getScriptMgr().getFlagAllowExternalScreenshotDir());
+	connect(ui->allowScreenshotDirCheckBox, &QCheckBox::clicked, &StelApp::getInstance().getScriptMgr(), &StelScriptMgr::setFlagAllowExternalScreenshotDir);
+
+	ui->allowStoreAbsoluteCheckBox->setChecked(StelApp::getInstance().getScriptMgr().getFlagAllowWriteAbsolutePaths());
+	connect(ui->allowStoreAbsoluteCheckBox, &QCheckBox::clicked, &StelApp::getInstance().getScriptMgr(), &StelScriptMgr::setFlagAllowWriteAbsolutePaths);
+
+	ui->showWaitMessageCheckBox->setChecked(StelApp::getInstance().getScriptMgr().getFlagShowContinueMessage());
+	connect(ui->showWaitMessageCheckBox, &QCheckBox::clicked, &StelApp::getInstance().getScriptMgr(), &StelScriptMgr::setFlagShowContinueMessage);
+
 	dirty = false;
 }
 
@@ -192,7 +200,7 @@ void ScriptConsole::loadScript()
 	QString filter = q_("Stellarium Script Files");
 	filter.append(" (*.ssc *.inc);;");
 	filter.append(getFileMask());
-	QString aFile = QFileDialog::getOpenFileName(Q_NULLPTR, q_("Load Script"), openDir, filter);
+	QString aFile = QFileDialog::getOpenFileName(&StelMainView::getInstance(), q_("Load Script"), openDir, filter);
 	if (aFile.isNull())
 		return;
 	scriptFileName = aFile;
@@ -213,11 +221,12 @@ void ScriptConsole::saveScript()
 	if (saveDir.isEmpty())
 		saveDir = StelFileMgr::getUserDir();
 
-	QString defaultFilter("(*.ssc)");
-	// Let's ask file name, when file is new and overwrite him in other case	
+	QString defaultFilter = q_("Stellarium Script");
+	defaultFilter.append(" (*.ssc)");
+	// Let's ask file name, when file is new and overwrite it in other case
 	if (scriptFileName.isEmpty())
 	{
-		QString aFile = QFileDialog::getSaveFileName(Q_NULLPTR, q_("Save Script"), saveDir + "/myscript.ssc", getFileMask(), &defaultFilter);
+		QString aFile = QFileDialog::getSaveFileName(&StelMainView::getInstance(), q_("Save Script"), saveDir + "/myscript.ssc", getFileMask(), &defaultFilter);
 		if (aFile.isNull())
 			return;
 		scriptFileName = aFile;
@@ -232,7 +241,11 @@ void ScriptConsole::saveScript()
 	if (file.open(QIODevice::WriteOnly))
 	{
 		QTextStream out(&file);
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+		out.setEncoding(QStringConverter::Utf8);
+#else
 		out.setCodec("UTF-8");
+#endif
 		out << ui->scriptEdit->toPlainText();
 		file.close();
 		dirty = false;
@@ -271,7 +284,7 @@ void ScriptConsole::preprocessScript()
 		StelApp::getInstance().getScriptMgr().preprocessScript( scriptFileName, src, dest, ui->includeEdit->text(), errLoc );
 	}
 	else
-		qDebug() << "[ScriptConsole] WARNING - unknown preprocessor type";
+		qWarning() << "[ScriptConsole] Unknown preprocessor type";
 
 	ui->scriptEdit->setPlainText(dest);
 	scriptFileName = ""; // OK, it's a new file!
@@ -309,7 +322,7 @@ void ScriptConsole::runScript()
 
 void ScriptConsole::scriptStarted()
 {
-	//prevent strating of scripts while any script is running
+	//prevent starting of scripts while any script is running
 	ui->quickrunCombo->setEnabled(false);
 	ui->runButton->setEnabled(false);
 	ui->stopButton->setEnabled(true);
@@ -330,8 +343,9 @@ void ScriptConsole::scriptEnded()
 
 void ScriptConsole::appendLogLine(const QString& s)
 {
+	static const QRegularExpression whitespaceExp("^\\s+");
 	QString html = ui->logBrowser->toHtml();
-	html.replace(QRegExp("^\\s+"), "");
+	html.replace(whitespaceExp, "");
 	html += s;
 	ui->logBrowser->setHtml(html);
 }
@@ -344,8 +358,9 @@ void ScriptConsole::appendOutputLine(const QString& s)
 	}
 	else
 	{
+		static const QRegularExpression whitespaceExp("^\\s+");
 		QString html = ui->outputBrowser->toHtml();
-		html.replace(QRegExp("^\\s+"), "");
+		html.replace(whitespaceExp, "");
 		html += s;
 		ui->outputBrowser->setHtml(html);
 	}
@@ -353,7 +368,7 @@ void ScriptConsole::appendOutputLine(const QString& s)
 
 void ScriptConsole::includeBrowse()
 {
-	QString aDir = QFileDialog::getExistingDirectory(Q_NULLPTR, q_("Select Script Include Directory"), StelFileMgr::getInstallationDir() + "/scripts");
+	QString aDir = QFileDialog::getExistingDirectory(&StelMainView::getInstance(), q_("Select Script Include Directory"), StelFileMgr::getInstallationDir() + "/scripts");
 	if (!aDir.isNull())
 		ui->includeEdit->setText(aDir);
 }
@@ -375,6 +390,8 @@ void ScriptConsole::quickRun(int idx)
 
 	if (!scriptText.isEmpty())
 	{
+		if(clearOutput)
+			ui->outputBrowser->clear();
 		appendLogLine(QString("Running: %1").arg(scriptText));
 		int errLoc;
 		StelApp::getInstance().getScriptMgr().runScriptDirect( "<>", scriptText, errLoc );

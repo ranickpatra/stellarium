@@ -20,12 +20,9 @@
 #ifndef REMOTECONTROL_HPP
 #define REMOTECONTROL_HPP
 
-#include <QFont>
 #include <QKeyEvent>
 
-#include "VecMath.hpp"
 #include "StelModule.hpp"
-#include "StelFader.hpp"
 #include "StelCore.hpp"
 
 class QTimer;
@@ -59,25 +56,37 @@ class RemoteControl : public StelModule
 		   READ getFlagUsePassword
 		   WRITE setFlagUsePassword
 		   NOTIFY flagUsePasswordChanged)
+	Q_PROPERTY(int port
+                  READ getPort
+                  WRITE setPort
+                  NOTIFY portChanged)
 	Q_PROPERTY(bool enableCors
 		   READ getFlagEnableCors
 		   WRITE setFlagEnableCors
 		   NOTIFY flagEnableCorsChanged)
+	Q_PROPERTY(int maxRequestSize
+                  READ getMaxRequestSize
+                  WRITE setMaxRequestSize
+                  NOTIFY maxRequestSizeChanged)
+	Q_PROPERTY(int maxMultipartSize
+                  READ getMaxMultipartSize
+                  WRITE setMaxMultipartSize
+                  NOTIFY maxMultipartSizeChanged)
 public:
 	RemoteControl();
-	virtual ~RemoteControl();
+	~RemoteControl() override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in the StelModule class
-	virtual void init();
-	virtual void update(double deltaTime);
-	virtual void draw(StelCore* core);
-	virtual double getCallOrder(StelModuleActionName actionName) const;
-	virtual void handleKeys(QKeyEvent* event){event->setAccepted(false);}
+	void init() override;
+	void update(double deltaTime) override;
+	void draw(StelCore* core) override;
+	double getCallOrder(StelModuleActionName actionName) const override;
+	void handleKeys(QKeyEvent* event) override {event->setAccepted(false);}
 
 	//virtual void handleMouseClicks(class QMouseEvent* event);
 	//virtual bool handleMouseMoves(int x, int y, Qt::MouseButtons b);
-	virtual bool configureGui(bool show=true);
+	bool configureGui(bool show=true) override;
 	///////////////////////////////////////////////////////////////////////////
 	// Property getters
 	bool getFlagEnabled() const {return enabled;}
@@ -138,6 +147,11 @@ public slots:
 	//! Stops the HTTP server gracefully
 	void stopServer();
 
+	int getMaxRequestSize() const { return maxRequestSize; }
+	int getMaxMultipartSize() const { return maxMultipartSize; }
+	void setMaxRequestSize(const int size);
+	void setMaxMultipartSize(const int size);
+
 signals:
 	//property notifiers
 	void flagEnabledChanged(bool val);
@@ -148,7 +162,8 @@ signals:
 	void portChanged(int val);
 	void passwordChanged(const QString& val);
 	void corsOriginChanged(const QString& val);
-
+	void maxRequestSizeChanged(int val);
+	void maxMultipartSizeChanged(int val);
 
 private:
 	//the http server
@@ -166,7 +181,8 @@ private:
 	int port;
 	int minThreads;
 	int maxThreads;
-
+	int maxRequestSize; // allow configuring mostly for sending scripts in 'direct' mode.
+	int maxMultipartSize;
 	StelButton* toolbarButton;
 
 	QSettings* conf;
@@ -188,9 +204,9 @@ class RemoteControlStelPluginInterface : public QObject, public StelPluginInterf
 	Q_PLUGIN_METADATA(IID StelPluginInterface_iid)
 	Q_INTERFACES(StelPluginInterface)
 public:
-	virtual StelModule* getStelModule() const;
-	virtual StelPluginInfo getPluginInfo() const;
-	virtual QObjectList getExtensionList() const { return QObjectList(); }
+	StelModule* getStelModule() const override;
+	StelPluginInfo getPluginInfo() const override;
+	//QObjectList getExtensionList() const override { return QObjectList(); }
 };
 
 #endif /*REMOTECONTROL_HPP*/

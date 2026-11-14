@@ -28,16 +28,17 @@ class TelescopeClientINDI : public TelescopeClient
 	Q_OBJECT
 
 public:
-	TelescopeClientINDI(const QString &name = "INDI", const QString& params = QString());
-	~TelescopeClientINDI();
+	TelescopeClientINDI(const QString &name = "INDI", const QString &params = QString(), int slot = 0);
+	~TelescopeClientINDI() override;
 
 	Vec3d getJ2000EquatorialPos(const StelCore *core) const override;
 	void move(double angle, double speed) override;
 	void telescopeGoto(const Vec3d &j2000Pos, StelObjectP selectObject) override;
 	void telescopeSync(const Vec3d &j2000Pos, StelObjectP selectObject) override;
+	bool isTelescopeSyncSupported() const override {return true;}
 	bool isConnected() const override;
 	bool hasKnownPosition() const override;
-	QWidget *createControlWidget(QSharedPointer<TelescopeClient> telescope, QWidget* parent = Q_NULLPTR) const override;
+	QWidget *createControlWidget(QSharedPointer<TelescopeClient> telescope, QWidget* parent = nullptr) const override;
 
 private:
 	int toINDISpeed(double speed) const;

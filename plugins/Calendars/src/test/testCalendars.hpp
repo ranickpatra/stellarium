@@ -37,9 +37,11 @@ private slots:
 	void testIslamic();
 	void testHebrew();
 	void testPersian();
+	void testBahai();
 	void testBalinesePawukon();
 	void testOldHindu();
+	void testNewHindu();
+	void testTibetan();
 };
 
 #endif // _TESTCALENDARS_HPP
-

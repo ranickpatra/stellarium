@@ -21,14 +21,21 @@
   This is the fragment shader for solar system object rendering
  */
 
-varying mediump vec2 texc; //texture coord
-varying highp vec3 P; //original vertex pos in model space
+VARYING mediump vec2 texc; //texture coord
+VARYING highp vec3 P; //original vertex pos in model space
+
+const highp float PI = 3.14159265;
 
 uniform sampler2D tex;
-uniform mediump vec3 ambientLight;
-uniform mediump vec3 diffuseLight;
+uniform mediump vec2 poleLat; //latitudes of pole caps, in terms of texture coordinate. x>0...north, y<1...south. 
+uniform mediump vec3 ambientLight; // Must be in linear sRGB, without OETF application
+uniform mediump vec3 diffuseLight; // Must be in linear sRGB, without OETF application
 uniform highp vec4 sunInfo;
 uniform mediump float skyBrightness;
+uniform bool hasAtmosphere;
+uniform bool hasNormalMap;
+uniform bool hasHorizonMap;
+uniform bool texCoordsFromFragment;
 
 uniform int shadowCount;
 uniform highp mat4 shadowData;
@@ -48,13 +55,13 @@ uniform bool isRing;
 
 #ifdef SHADOWMAP
 uniform highp sampler2D shadowTex;
-varying highp vec4 shadowCoord;
+VARYING highp vec4 shadowCoord;
 #endif
 
+//light direction in model space, pre-normalized
+uniform highp vec3 lightDirection;
 #if defined(IS_OBJ) || defined(IS_MOON)
     #define OREN_NAYAR 1
-    //light direction in model space, pre-normalized
-    uniform highp vec3 lightDirection;  
     //x = A, y = B, z = scaling factor (rho/pi * E0), w roughness
     uniform mediump vec4 orenNayarParameters;
 #endif
@@ -62,13 +69,13 @@ varying highp vec4 shadowCoord;
     uniform sampler2D earthShadow;
     uniform mediump float eclipsePush;
     uniform sampler2D normalMap;
+    uniform sampler2D horizonMap;
 
-    varying highp vec3 normalX;
-    varying highp vec3 normalY;
-    varying highp vec3 normalZ;
+    VARYING highp vec3 normalX;
+    VARYING highp vec3 normalY;
+    VARYING highp vec3 normalZ;
 #else
-    varying mediump float lambertIllum;
-    varying mediump vec3 normalVS; //pre-calculated normals or spherical normals in model space
+    VARYING mediump vec3 normalVS; //pre-calculated normals or spherical normals in model space
 #endif
 
 const highp float M_PI=3.1415926535897932384626433832795;
@@ -82,13 +89,13 @@ lowp float offset_lookup(in highp sampler2D sTex, in highp vec4 loc, in highp ve
     const mediump vec2 texmapscale=vec2(1.0/float(SM_SIZE));
     //"simulates" textureProjOffset for use in GLSL < 130
     highp vec4 coords = vec4(loc.xy + (offset * texmapscale * loc.w), loc.z, loc.w);
-    
+
     //for some reason, when not adding a LOD bias, the result is wrong in my VM (Ubuntu 16.04)
     //even if the texture has NO mipmaps and the lookup filter is GL_NEAREST???
     //I'm 99% certain this is some bug in the GL driver, 
     //because adding ANY bias here makes it work correctly
     //It should have no effect on platforms which don't have this bug
-    highp float texVal = texture2DProj(sTex, coords, -1000.0).r;
+    highp float texVal = texture2DProj_3(sTex, coords, -1000.0).r;
     //perform shadow comparison
     return texVal > (loc.z-zbias)/loc.w ? 1.0 : 0.0;
 }
@@ -101,10 +108,10 @@ mediump float random(in mediump vec4 seed4)
 }
 
 lowp float sampleShadowMap(in highp sampler2D sTex, in highp vec4 coord, in highp float zbias)
-{   
+{
     //uncomment for a single sample
     //return offset_lookup(sTex,coord, vec2(0.0),zbias);
- 
+
     // for some reason > 5 samples do not seem to work on my Ubuntu VM 
     // (no matter if ES2 or GL 2.1)
     // everything gets shadowed, but no errors?!
@@ -119,7 +126,7 @@ lowp float sampleShadowMap(in highp sampler2D sTex, in highp vec4 coord, in high
         int index = int(mod( 64.0*random(vec4(gl_FragCoord.xyy,i)), 64.0));
         sum += offset_lookup(sTex, coord, poissonDisk[index], zbias);
     }
-    
+
     return clamp(sum / float(SAMPLE_COUNT),0.0,1.0);
 }
 #endif
@@ -132,6 +139,9 @@ mediump float orenNayar(in mediump vec3 normal, in highp vec3 lightDir, in highp
 {
     mediump float cosAngleLightNormal = dot(normal, lightDir);  //cos theta_i
     mediump float cosAngleEyeNormal = dot(normal, viewDir); //cos theta_r
+    if(cosAngleLightNormal < 0.) return 0.;
+    if(cosAngleEyeNormal < 0.)
+        cosAngleEyeNormal = 0.;
     //acos can be quite expensive, can we avoid it?
     mediump float angleLightNormal = acos(cosAngleLightNormal); //theta_i
     mediump float angleEyeNormal = acos(cosAngleEyeNormal); //theta_r
@@ -139,26 +149,17 @@ mediump float orenNayar(in mediump vec3 normal, in highp vec3 lightDir, in highp
     mediump float beta = min(angleEyeNormal, angleLightNormal); //beta = min(theta_i, theta_r)
     mediump float gamma = dot(viewDir - normal * cosAngleEyeNormal, lightDir - normal * cosAngleLightNormal); // cos(phi_r-phi_i)
     mediump float C = sin(alpha) * tan(beta);
-	mediump float ON = max(0.0, cosAngleLightNormal) * ((A + B * max(0.0, gamma) * C) * scale); // Qualitative model done.
+    mediump float ON = A + B * max(0.0, gamma) * C; // Qualitative model done.
     // Now add third term:
     mediump float C3_2 = (4.0*alpha*beta)/(M_PI*M_PI);
     mediump float C3=0.125*roughSq/(roughSq+0.09)*C3_2*C3_2;
-    mediump float third=(1.0-abs(gamma))*C3*tan(0.5*(alpha+beta))*max(0.0, cosAngleLightNormal)*scale;
+    mediump float third=(1.0-abs(gamma))*C3*tan(0.5*(alpha+beta));
     ON += third;
     // Add the intereflection term:
     mediump float betaterm = 2.0*beta/M_PI;
-    mediump float ONir = max(0.0, cosAngleLightNormal) * ((1.0-gamma*betaterm*betaterm)*0.17*scale*roughSq/(roughSq+0.13));
+    mediump float ONir = (1.0-gamma*betaterm*betaterm)*0.17*roughSq/(roughSq+0.13);
     ON += ONir;
-    // This clamp gives an ugly pseudo edge visible in rapid animation.
-    //return clamp(ON, 0.0, 1.0);
-    // Better use GLSL's smoothstep. However, this is N/A in GLSL1.20/GLES. Workaround from https://www.khronos.org/registry/OpenGL-Refpages/gl4/html/smoothstep.xhtml
-    if (ON>0.8)
-    {
-        mediump float t = clamp((ON - 0.8) / (1.0 - 0.8), 0.0, 1.0);
-        return 0.8 + 0.2*(t * t * (3.0 - 2.0 * t));
-    }
-    else
-    return clamp(ON, 0.0, 1.0);
+    return ON * cosAngleLightNormal * scale;
 }
 #endif
 
@@ -171,13 +172,49 @@ lowp float outgasFactor(in mediump vec3 normal, in highp vec3 lightDir, in mediu
     return opac;
 }
 
+vec4 sampleTexDxDy(sampler2D sampler, vec2 texCoord, vec2 texDx, vec2 texDy)
+{
+#ifdef textureGrad_SUPPORTED
+    if(texCoordsFromFragment)
+        return textureGrad(sampler, texCoord, texDx, texDy);
+#endif
+    return texture2D(sampler, texCoord);
+}
+
 void main()
 {
+#ifndef IS_MOON
+    if(sunInfo.w==0.)
+    {
+        // We are drawing the Sun
+        vec4 texColor = texture2D(tex, texc);
+        texColor.rgb = texSampleToLinear(texColor.rgb * sunInfo.rgb);
+        // Reference: chapter 14.7 "Limb Darkening" in "Allen’s Astrophysical Quantities",
+        //            A.N.Cox (ed.), 4th edition, New York: Springer-Verlag, 2002.
+        //            DOI 10.1007/978-1-4612-1186-0
+        // The values for u2 and v2 for wavelengths 400nm-800nm were taken, linearly
+        // interpolated, and integrated against CIE 1931 color matching functions.
+        // The results were transformed from XYZ to linear sRGB color space.
+        // We call the results for u2 "a1", and for v2 "a2".
+        const vec3 a2 = vec3(-0.226988526315793, -0.232934589453355, -0.153026433664999);
+        const vec3 a1 = vec3(0.848380336865573, 0.937696820066542, 0.981762186155682);
+        const vec3 a0 = vec3(1) - a1 - a2;
+        float cosTheta = dot(eyeDirection, normalize(normalVS));
+        cosTheta = max(0., cosTheta); // Rounding errors sometimes lead to negative value
+        float cosTheta2 = cosTheta*cosTheta;
+        vec3 limbDarkeningCoef = a0 + a1*cosTheta + a2*cosTheta2;
+        vec3 color = texColor.rgb * limbDarkeningCoef;
+        FRAG_COLOR = vec4(linearColorToFramebuffer(color), texColor.a);
+        return;
+    }
+#endif
     mediump float final_illumination = 1.0;
 #ifdef OREN_NAYAR
     mediump float lum = 1.;
 #else
-    mediump float lum = lambertIllum;
+    //simple Lambert illumination
+    mediump float c = dot(lightDirection, normalize(normalVS));
+    mediump float lum = clamp(c, 0.0, 1.0);
 #endif
 #ifdef RINGS_SUPPORT
     if(isRing)
@@ -195,12 +232,14 @@ void main()
             if(u > 0.0 && u < 1e10)
             {
                 mediump float ring_radius = length(P + u * ray);
+                mediump float s = (ring_radius - innerRadius) / (outerRadius - innerRadius);
+                lowp float ringAlpha = texture2D(ringS, vec2(s, 0.5)).w;
+
+                // FIXME: this compensates for too much transparency in the texture (see e.g. Saturn)
+                ringAlpha = pow(ringAlpha, 1./2.2);
+
                 if(ring_radius > innerRadius && ring_radius < outerRadius)
-                {
-                    ring_radius = (ring_radius - innerRadius) / (outerRadius - innerRadius);
-                    lowp float ringAlpha = texture2D(ringS, vec2(ring_radius, 0.5)).w;
                     final_illumination = 1.0 - ringAlpha;
-                }
             }
         }
 #endif
@@ -259,9 +298,89 @@ void main()
     }
 
 #ifdef IS_MOON
-    mediump vec3 normal = texture2D(normalMap, texc).rgb-vec3(0.5, 0.5, 0);
+    mediump vec2 moonTexCoord = texc;
+    mediump vec2 texDx = vec2(0), texDy = vec2(0);
+    if(texCoordsFromFragment)
+    {
+        moonTexCoord = vec2(atan(normalZ.x, -normalZ.y)/(2.*PI)+0.5, asin(normalize(normalZ).z)/PI+0.5);
+
+#ifdef textureGrad_SUPPORTED
+        // The usual automatic computation of derivatives of texture coordinates
+        // breaks down at the discontinuity of atan, resulting in choosing the most
+        // minified mip level instead of the correct one, which looks as a seam on
+        // the screen. Thus, we need to compute them in a custom way, treating atan
+        // as a (continuous) multivalued function. We differentiate
+        // atan(normalZ.x(x,y), -normalZ.y(x,y)) with respect to x and y and yield
+        // gradLongitude vector.
+        vec2 gradNormalZX = vec2(dFdx(normalZ.x), dFdy(normalZ.x));
+        vec2 gradNormalZY = vec2(dFdx(-normalZ.y), dFdy(-normalZ.y));
+        vec2 gradLongitude = vec2(-normalZ.y*gradNormalZX.s-normalZ.x*gradNormalZY.s,
+                                  -normalZ.y*gradNormalZX.t-normalZ.x*gradNormalZY.t)
+                                                       /
+                                             dot(normalZ, normalZ);
+        float texTdx = dFdx(moonTexCoord.t);
+        float texTdy = dFdy(moonTexCoord.t);
+        texDx = vec2(gradLongitude.s/(2.*PI), texTdx);
+        texDy = vec2(gradLongitude.t/(2.*PI), texTdy);
+#endif
+    }
+
+    mediump vec3 normal;
+    if(hasNormalMap)
+        normal = sampleTexDxDy(normalMap, moonTexCoord, texDx, texDy).rgb-vec3(0.5);
+    else
+        normal = vec3(0,0,1);
+
     normal = normalize(normalX*normal.x+normalY*normal.y+normalZ*normal.z);
     // normal now contains the real surface normal taking normal map into account
+
+    mediump float horizonShadowCoefficient = 1.;
+    if(hasHorizonMap)
+    {
+        // Check whether the fragment is in the shadow of surrounding mountains or the horizon
+        mediump vec3 lonDir = normalX;
+        mediump vec3 northDir = normalY;
+        mediump vec3 zenith = normalZ;
+        mediump float sunAzimuth = atan(dot(lightDirection,lonDir), dot(lightDirection,northDir));
+        mediump float sinSunElevation = dot(zenith, lightDirection);
+        mediump vec4 horizonElevSample = (sampleTexDxDy(horizonMap, moonTexCoord, texDx, texDy) - 0.5) * 2.;
+        mediump vec4 sinHorizElevs = sign(horizonElevSample) * horizonElevSample * horizonElevSample;
+        mediump float sinHorizElevLeft, sinHorizElevRight;
+        mediump float alpha;
+        if(sunAzimuth >= PI/2.)
+        {
+            // Sun is between East and South
+            sinHorizElevLeft = sinHorizElevs[1];
+            sinHorizElevRight = sinHorizElevs[2];
+            alpha = (sunAzimuth - PI/2.) / (PI/2.);
+        }
+        else if(sunAzimuth >= 0.)
+        {
+            // Sun is between North and East
+            sinHorizElevLeft = sinHorizElevs[0];
+            sinHorizElevRight = sinHorizElevs[1];
+            alpha = sunAzimuth / (PI/2.);
+        }
+        else if(sunAzimuth <= -PI/2.)
+        {
+            // Sun is between South and West
+            sinHorizElevLeft = sinHorizElevs[2];
+            sinHorizElevRight = sinHorizElevs[3];
+            alpha = (sunAzimuth + PI) / (PI/2.);
+        }
+        else
+        {
+            // Sun is between West and North
+            sinHorizElevLeft = sinHorizElevs[3];
+            sinHorizElevRight = sinHorizElevs[0];
+            alpha = (sunAzimuth + PI/2.) / (PI/2.);
+        }
+        mediump float horizElevLeft = asin(sinHorizElevLeft);
+        mediump float horizElevRight = asin(sinHorizElevRight);
+        mediump float horizElev = horizElevLeft + (horizElevRight-horizElevLeft)*alpha;
+        if(sinSunElevation < sin(horizElev))
+            horizonShadowCoefficient = 0.;
+    }
 #else
     // important to normalize here again
     mediump vec3 normal = normalize(normalVS);
@@ -271,13 +390,16 @@ void main()
     // Ref: http://content.gpwiki.org/index.php/D3DBook:(Lighting)_Oren-Nayar
     lum = orenNayar(normal, lightDirection, eyeDirection, orenNayarParameters.x, orenNayarParameters.y, orenNayarParameters.z, orenNayarParameters.w);
 #endif
+#ifdef IS_MOON
+    lum *= horizonShadowCoefficient;
+#endif
     //calculate pseudo-outgassing/rim-lighting effect
     lowp float outgas = 0.0;
     if(outgasParameters.x > 0.0)
     {
         outgas = outgasParameters.x * outgasFactor(normal, eyeDirection, outgasParameters.y);
     }
-//Reduce lum if sky is bright, to avoid burnt-out look in daylight sky.
+    //Reduce lum if sky is bright, to avoid burnt-out look in daylight sky.
     //lum *= (1.0-0.4*skyBrightness);
     lum *= clamp((0.9-0.05*log(skyBrightness)), 0.1, 0.9);
 #ifdef SHADOWMAP
@@ -291,32 +413,79 @@ void main()
     lum*=shadow;
 #endif
 
+    if(hasAtmosphere)
+    {
+        // Planets with atmosphere don't have such a sharp terminator as we get with
+        // Oren-Nayar model. The following is a hack to make the terminator smoother.
+        // TODO: replace it with the correct BRDF (possibly different for different planets).
+        lum *= lum;
+    }
     //final lighting color
     mediump vec4 litColor = vec4(lum * final_illumination * diffuseLight + ambientLight, 1.0);
 
     //apply texture-colored rimlight
     //litColor.xyz = clamp( litColor.xyz + vec3(outgas), 0.0, 1.0);
 
-    lowp vec4 texColor = texture2D(tex, texc);
+    lowp vec4 texColor;
+#ifdef IS_MOON
+    texColor = sampleTexDxDy(tex, moonTexCoord, texDx, texDy);
+#else
+# ifdef RINGS_SUPPORT
+    if(isRing)
+    {
+        float radius = length(texc);
+        float s = (radius - innerRadius) / (outerRadius - innerRadius);
+        vec2 texCoord = vec2(s, 0.5);
+        texColor = texture2D(tex, texCoord);
+        // Guard against poor quality mipmap filtering (e.g. Mesa with NPOT textures).
+        if(radius > outerRadius)
+            texColor = vec4(0);
+    }
+    else
+# endif // RINGS_SUPPORT
+    {
+        texColor = texture2D(tex, texc);
+    }
+#endif // IS_MOON
+
+    texColor.rgb = texSampleToLinear(texColor.rgb);
+
     mediump vec4 finalColor = texColor;
+    // apply (currently only Martian) pole caps. texc.t=0 at south pole, 1 at north pole. 
+    if (texc.t>poleLat.x-0.01+0.001*sin(texc.s*18.*M_PI)) {	// North pole near t=1
+        mediump float mixfactor=1.;
+        if (texc.t<poleLat.x+0.01+0.001*sin(texc.s*18.*M_PI))
+            mixfactor=(texc.t-poleLat.x+0.01-0.001*sin(texc.s*18.*M_PI))/0.02;
+        //finalColor.xyz=mix(vec3(1., 1., 1.), finalColor.xyz, 1.-mixfactor); 
+        finalColor.xyz=mix(vec3(1., 1., 1.), finalColor.xyz, smoothstep(0., 1., 1.-mixfactor)); 
+    }
+    if (texc.t<poleLat.y+0.01+0.001*sin(texc.s*18.*M_PI)) {	// South pole near texc.t~0
+        mediump float mixfactor=1.;
+        if (texc.t>poleLat.y-0.01+0.001*sin(texc.s*18.*M_PI))
+            mixfactor=(poleLat.y+0.01-texc.t-0.001*sin(texc.s*18.*M_PI))/0.02;
+        //finalColor.xyz=mix(vec3(1., 1., 1.), finalColor.xyz, 1.-mixfactor); 
+        finalColor.xyz=mix(vec3(1., 1., 1.), finalColor.xyz, smoothstep(0., 1., 1.-mixfactor)); 
+    }
+    finalColor *= litColor;
 #ifdef IS_MOON
     if(final_illumination < 0.9999)
     {
         lowp vec4 shadowColor = texture2D(earthShadow, vec2(final_illumination, 0.5));
-        finalColor =
-		eclipsePush*(1.0-0.75*shadowColor.a)*
-		mix(finalColor * litColor, shadowColor, clamp(shadowColor.a, 0.0, 0.7)); // clamp alpha to allow some maria detail.
+        // FIXME: this should be calculated properly in linear space as
+        // extinction of sunlight, and with subsequent tone mapping.
+        // Current implementation is a legacy from older times.
+        // shadowColor is passed as a GL_RGBA texture, so the sample is sRGB-encoded
+        lowp vec4 color = vec4(linearToSRGB(finalColor.rgb), finalColor.a);
+        lowp float alpha = clamp(shadowColor.a, 0.0, 0.7); // clamp alpha to allow some maria detail
+        finalColor = eclipsePush * (1.0-0.75*shadowColor.a) * mix(color, shadowColor, alpha);
+        finalColor.rgb = srgbToLinear(finalColor.rgb);
     }
-    else
 #endif
-    {
-        finalColor *= litColor;
-    }
 
     //apply white rimlight
     finalColor.xyz = clamp( finalColor.xyz + vec3(outgas), 0.0, 1.0);
 
-    gl_FragColor = finalColor;
+    FRAG_COLOR = vec4(linearColorToFramebuffer(finalColor.rgb), finalColor.a);
     //to debug texture issues, uncomment and reload shader
-    //gl_FragColor = texColor;
+    //FRAG_COLOR = texColor;
 }

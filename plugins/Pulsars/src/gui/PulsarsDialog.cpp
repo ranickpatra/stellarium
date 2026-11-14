@@ -26,17 +26,12 @@
 #include <QColorDialog>
 
 #include "StelApp.hpp"
-#include "StelCore.hpp"
 #include "ui_pulsarsDialog.h"
 #include "PulsarsDialog.hpp"
 #include "Pulsars.hpp"
 #include "StelModuleMgr.hpp"
-#include "StelObjectMgr.hpp"
-#include "StelMovementMgr.hpp"
 #include "StelStyle.hpp"
 #include "StelGui.hpp"
-#include "StelMainView.hpp"
-#include "StelFileMgr.hpp"
 #include "StelTranslator.hpp"
 
 PulsarsDialog::PulsarsDialog()
@@ -74,8 +69,7 @@ void PulsarsDialog::createDialogContent()
 	psr = GETSTELMODULE(Pulsars);
 	ui->setupUi(dialog);
 	ui->tabs->setCurrentIndex(0);	
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()),
-		this, SLOT(retranslate()));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &PulsarsDialog::retranslate);
 
 	// Kinetic scrolling
 	kineticScrollingList << ui->aboutTextBrowser;
@@ -83,43 +77,43 @@ void PulsarsDialog::createDialogContent()
 	if (gui)
 	{
 		enableKineticScrolling(gui->getFlagUseKineticScrolling());
-		connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+		connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &PulsarsDialog::enableKineticScrolling);
 	}
 
 	// Settings tab / updates group
 	ui->displayModeCheckBox->setChecked(psr->getDisplayMode());
-	connect(ui->displayModeCheckBox, SIGNAL(stateChanged(int)), this, SLOT(setDistributionEnabled(int)));
+	connect(ui->displayModeCheckBox, &QCheckBox::stateChanged, this, &PulsarsDialog::setDistributionEnabled);
 	ui->displayAtStartupCheckBox->setChecked(psr->getEnableAtStartup());
-	connect(ui->displayAtStartupCheckBox, SIGNAL(stateChanged(int)), this, SLOT(setDisplayAtStartupEnabled(int)));
+	connect(ui->displayAtStartupCheckBox, &QCheckBox::stateChanged, this, &PulsarsDialog::setDisplayAtStartupEnabled);
 	ui->displayShowPulsarsButton->setChecked(psr->getFlagShowPulsarsButton());
 	ui->displaySeparateColorsCheckBox->setChecked(psr->getGlitchFlag());
 	ui->displayFilteredPulsarsCheckBox->setChecked(psr->getFilteredMode());
 	ui->mJyDoubleSpinBox->setValue(psr->getFilterValue());
-	connect(ui->displayShowPulsarsButton, SIGNAL(stateChanged(int)), this, SLOT(setDisplayShowPulsarsButton(int)));
-	connect(ui->displaySeparateColorsCheckBox, SIGNAL(stateChanged(int)), this, SLOT(setSeparateColorsFlag(int)));
-	connect(ui->displayFilteredPulsarsCheckBox, SIGNAL(stateChanged(int)), this, SLOT(setFilteringEnabled(int)));
-	connect(ui->mJyDoubleSpinBox, SIGNAL(valueChanged(double)), this, SLOT(setFilterValue(double)));
-	connect(ui->internetUpdatesCheckbox, SIGNAL(stateChanged(int)), this, SLOT(setUpdatesEnabled(int)));
-	connect(ui->updateButton, SIGNAL(clicked()), this, SLOT(updateJSON()));
-	connect(psr, SIGNAL(updateStateChanged(Pulsars::UpdateState)), this, SLOT(updateStateReceiver(Pulsars::UpdateState)));
-	connect(psr, SIGNAL(jsonUpdateComplete(void)), this, SLOT(updateCompleteReceiver(void)));	
-	connect(ui->updateFrequencySpinBox, SIGNAL(valueChanged(int)), this, SLOT(setUpdateValues(int)));
+	connect(ui->displayShowPulsarsButton, &QCheckBox::stateChanged, this, &PulsarsDialog::setDisplayShowPulsarsButton);
+	connect(ui->displaySeparateColorsCheckBox, &QCheckBox::stateChanged, this, &PulsarsDialog::setSeparateColorsFlag);
+	connect(ui->displayFilteredPulsarsCheckBox, &QCheckBox::stateChanged, this, &PulsarsDialog::setFilteringEnabled);
+	connect(ui->mJyDoubleSpinBox, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &PulsarsDialog::setFilterValue);
+	connect(ui->internetUpdatesCheckbox, &QCheckBox::stateChanged, this, &PulsarsDialog::setUpdatesEnabled);
+	connect(ui->updateButton, &QPushButton::clicked, this, &PulsarsDialog::updateJSON);
+	connect(psr, &Pulsars::updateStateChanged, this, &PulsarsDialog::updateStateReceiver);
+	connect(psr, &Pulsars::jsonUpdateComplete, this, &PulsarsDialog::updateCompleteReceiver);
+	connect(ui->updateFrequencySpinBox, qOverload<int>(&QSpinBox::valueChanged), this, &PulsarsDialog::setUpdateValues);
 	refreshUpdateValues(); // fetch values for last updated and so on
 	// if the state didn't change, setUpdatesEnabled will not be called, so we force it
 	setUpdatesEnabled(ui->internetUpdatesCheckbox->checkState());
 
-	connectColorButton(ui->pulsarMarkerColor,         "Pulsars.markerColor", "Pulsars/marker_color");
-	connectColorButton(ui->pulsarGlitchesMarkerColor, "Pulsars.glitchColor", "Pulsars/glitch_color");
+	ui->pulsarMarkerColor        ->setup("Pulsars.markerColor", "Pulsars/marker_color");
+	ui->pulsarGlitchesMarkerColor->setup("Pulsars.glitchColor", "Pulsars/glitch_color");
 
 	updateTimer = new QTimer(this);
-	connect(updateTimer, SIGNAL(timeout()), this, SLOT(refreshUpdateValues()));
+	connect(updateTimer, &QTimer::timeout, this, &PulsarsDialog::refreshUpdateValues);
 	updateTimer->start(7000);
 
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
-	connect(ui->restoreDefaultsButton, SIGNAL(clicked()), this, SLOT(restoreDefaults()));
-	connect(ui->saveSettingsButton, SIGNAL(clicked()), this, SLOT(saveSettings()));
+	connect(ui->restoreDefaultsButton, &QPushButton::clicked, this, &PulsarsDialog::restoreDefaults);
+	connect(ui->saveSettingsButton, &QPushButton::clicked, this, &PulsarsDialog::saveSettings);
 
 	// About tab
 	setAboutHtml();
@@ -131,36 +125,30 @@ void PulsarsDialog::createDialogContent()
 
 void PulsarsDialog::setAboutHtml(void)
 {
-	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
-
 	QString html = "<html><head></head><body>";
-	html += "<h2>" + q_("Pulsars Plug-in") + "</h2><table width=\"90%\">";
+	html += "<h2>" + q_("Pulsars Plug-in") + "</h2><table class='layout' width=\"90%\">";
 	html += "<tr width=\"30%\"><td><strong>" + q_("Version") + ":</strong></td><td>" + PULSARS_PLUGIN_VERSION + "</td></tr>";
 	html += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + PULSARS_PLUGIN_LICENSE + "</td></tr>";
-	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Alexander Wolf &lt;alex.v.wolf@gmail.com&gt;</td></tr>";
+	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Alexander Wolf</td></tr>";
 	html += "</table>";
 
 	html += "<p>" + q_("This plugin plots the position of various pulsars, with object information about each one.") + "</p>";
 	html += "<p>" + QString(q_("Pulsar data is derived from 'The ATNF Pulsar Catalogue'  (Manchester, R. N., Hobbs, G. B., Teoh, A. & Hobbs, M., Astron. J., 129, 1993-2006 (2005) (%1astro-ph/0412641%2))."))
-			.arg("<a href=\"http://arxiv.org/abs/astro-ph/0412641\">")
-			.arg("</a>") + "</p>";
+			.arg("<a href=\"http://arxiv.org/abs/astro-ph/0412641\">", "</a>") + "</p>";
 	html += "<p>" + q_("Current catalog contains info about %1 pulsars.").arg(psr->getCountPulsars()) + "</p>";
-	html += "<p>" + QString("<strong>%1:</strong> %2")
-			.arg(q_("Note"))
-			.arg(q_("pulsar identifiers have the prefix 'PSR'")) + "</p>";
+	html += "<p>" + QString("<strong>%1:</strong> %2").arg(q_("Note"), q_("pulsar identifiers have the prefix 'PSR'")) + "</p>";
 	html += "<h3>" + q_("Acknowledgment") + "</h3>";
 	html += "<p>" + q_("We thank the following people for their contribution and valuable comments:") + "</p><ul>";
-	html += "<li>" + QString("%1 (<a href='%2'>%3</a> %4)")
-			.arg(q_("Vladimir Samodourov"))
-			.arg("http://www.prao.ru/")
-			.arg(q_("Pushchino Radio Astronomy Observatory"))
-			.arg(q_("in Russia")) + "</li>";
-	html += "<li>" + QString("%1 (<a href='%2'>%3</a> %4)")
-			.arg(q_("Maciej Serylak"))
-			.arg("http://www.obs-nancay.fr/")
-			.arg(q_("Nancay Radioastronomical Observatory"))
-			.arg(q_("in France")) + "</li>";
+	html += "<li>" + QString("%1 (<a href='%2'>%3</a> %4)").arg(
+				 q_("Vladimir Samodourov"),
+				 "http://www.prao.ru/",
+				 q_("Pushchino Radio Astronomy Observatory"),
+				 q_("in Russia")) + "</li>";
+	html += "<li>" + QString("%1 (<a href='%2'>%3</a> %4)").arg(
+				 q_("Maciej Serylak"),
+				 "http://www.obs-nancay.fr/",
+				 q_("Nancay Radioastronomical Observatory"),
+				 q_("in France")) + "</li>";
 	html += "</ul>";
 
 	html += StelApp::getInstance().getModuleMgr().getStandardSupportLinksInfo("Pulsars plugin");
@@ -242,7 +230,7 @@ void PulsarsDialog::setFilteringEnabled(int checkState)
 
 void PulsarsDialog::setFilterValue(double v)
 {
-	psr->setFilterValue((float)v);
+	psr->setFilterValue(static_cast<float>(v));
 }
 
 void PulsarsDialog::setDisplayAtStartupEnabled(int checkState)
@@ -282,7 +270,7 @@ void PulsarsDialog::updateCompleteReceiver(void)
 	updateTimer->start();
 	ui->lastUpdateDateTimeEdit->setDateTime(psr->getLastUpdate());
 	QTimer *timer = new QTimer(this);
-	connect(timer, SIGNAL(timeout()), this, SLOT(refreshUpdateValues()));
+	connect(timer, &QTimer::timeout, this, &PulsarsDialog::refreshUpdateValues);
 	setAboutHtml();
 }
 

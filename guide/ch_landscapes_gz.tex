@@ -137,7 +137,7 @@ Where:
 \item[\var{altitude}] Is the altitude of the site of the landscape in meters.
 \item[\var{country}] (optional) Name of the country the location is in.
 \item[\var{state}] (optional) Name of the state the location is in.
-\item[\var{timezone}] (optional) IANA Timezone code \newFeature{v0.18.3}
+\item[\var{timezone}] (optional) IANA Timezone code \newFeature{0.18.3}
 \item[\var{name}] (optional) Name of the location. This may contain
   spaces, but keep it short to have it fully visible in the
   selection box.
@@ -170,7 +170,7 @@ panel. If they are missing, the parameters do not change to defaults.
 \subsection{Polygonal landscape}
 \label{sec:landscapes:Polygonal}
 
-This landscape type has been added \newFeature{v.0.13} to allow
+This landscape type has been added\newFeature{0.13} to allow
 the use of measured horizons. Users of \program{Cartes du
   Ciel}\footnote{SkyChart / Cartes du Ciel planetarium:
   \url{https://www.ap-i.net/skychart/en/start}} will be happy to hear
@@ -183,8 +183,13 @@ present there, it will be used to define object visibility (instead of
 the opacity of the landscape photo textures) and, if
 \var{horizon\_line\_color} is defined, will be plotted.
 
-There are two little caveats:
+There are a few little caveats:
 \begin{itemize}
+\item If you create a polygonal line with vertex azimuths 0, 90, 180, 270 (exactly), 
+the horizon may not show up at all. Add a tiny nonzero value to the global rotation, like 
+\begin{configfile}
+polygonal_angle_rotatez = 0.0000001
+\end{configfile}
 \item Sometimes, there may appear vertical lines
 from some corners towards the zenith or the mathematical horizon,
 e.g.\ if there is a vertex including azimuth 0 or 180. If this
@@ -211,7 +216,6 @@ description = Horizon line of Geneve.
 polygonal_horizon_list = horizon_Geneve.txt
 polygonal_angle_rotatez = 0
 ground_color = .15,.45,.45
-horizon_line_color = .75,.45,.45
 \end{configfile}
 %
 Where:
@@ -237,9 +241,6 @@ Where:
 \item[\var{ground\_color}] (optional, default=\var{0,0,0}, i.e.,
   black) Color for the area below the horizon line. Each R,G,B
   component is a float within 0..1.
-\item[\var{horizon\_line\_color}] (optional, default: invisible) used
-  to draw a polygonal horizon line. Each R,G,B component is a float
-  within 0..1.
 \item[\var{minimal\_brightness}] (optional) Some minimum brightness to
   keep landscape visible. Default=-1, i.e., use
   \var{minimal\_brightness} from the \var{[landscape]} section in the
@@ -253,8 +254,17 @@ Where:
   for high mountain peaks with many negative horizon values this
   should be set to true.
 \end{description}
+No longer used:
+\begin{description}
+\item[\var{horizon\_line\_color}] (optional, default: invisible) used
+  to draw a polygonal horizon line. 
+  %Each R,G,B component is a float within 0..1. 
+  This is now\newFeature{24.4} a global setting, \var{config.ini:landscape/polygon\_color}.
+\end{description}
 
 \subsubsection{Artificial Polygonal Panoramas}
+\label{sec:landscapes:Polygonal:Artificial}
+
 The online service
 \program{HeyWhatsThat}\footnote{\url{https://www.heywhatsthat.com/}}
 allows an SRTM-based analysis of the viewshed (the visible topographic
@@ -267,25 +277,7 @@ landscape. Its package/directory name is
 rename the directory. You may also want to extend the scene
 description in \file{landscape.ini}.
 
-A data download option provides users inclined to do some programming
-with the necessary data to create a polygonal landscape for
-Stellarium. From this, \name{Brian Doyle} has created another online service,
-\program{horiZONE}\footnote{\url{https://briandoylegit.github.io/horiZONE/}},
-which does just this work for you.
-\begin{enumerate}
-\item When your viewshed analysis has been created in
-  \program{HeyWhatsThat}, enter the ``all panoramas'' tab, and on the
-  map click the marker associated with the panorama. Select ``make
-  public''.
-\item Then, take the landscape key given to you by
-  \program{HeyWhatsThat}\footnote{ in the line
-    \texttt{https://www.heywhatsthat.com/?view=N15ABXY}}, add a few
-  lines of description and other details that will become visible and
-  used in Stellarium, and you receive a ZIP file ready for
-  installation in Stellarium (see section
-  \ref{sec:gui:view:landscape}).
-\end{enumerate}
-
+See section~\ref{sec:landscapes:Artificial} for more options.
 
 \subsection{Spherical landscape}
 \label{sec:landscapes:Spherical}
@@ -325,7 +317,6 @@ angle_rotatez=-89.1
 minimal_brightness = 0.0075
 polygonal_horizon_list = horizon_grossmugl.txt
 polygonal_angle_rotatez=0
-horizon_line_color =  .75,.45,.45
 minimal_altitude = -1
 \end{configfile}
 Where:
@@ -347,7 +338,7 @@ Where:
 \item[\var{bottom\_cap\_color}] (optional;
   default=\texttt{-1.0,0.0,0.0} to signal ``no color''). If set, this
   is used to close any hole in the nadir area (if \var{maptex\_bottom}
-  higher than -90). \newFeature{v0.19.0}
+  higher than -90). \newFeature{0.19.0}
 \item[\var{maptex\_fog}] (optional; default: no fog) is the name of
   the fog image file for this landscape.
 \item[\var{maptex\_fog\_top}] (optional; default=90) is the altitude
@@ -379,9 +370,8 @@ Where:
   rising/setting times)
 \item[\var{polygonal\_horizon\_list\_mode}] (optional) see \ref{sec:landscapes:Polygonal}
 \item[\var{polygonal\_angle\_rotatez}] (optional, default=0) see \ref{sec:landscapes:Polygonal}
-\item[\var{horizon\_line\_color}] see \ref{sec:landscapes:Polygonal}
 \item[\var{minimal\_brightness}]  see \ref{sec:landscapes:Polygonal}
-\item[\var{minimal\_altitude}] (optional, default=-2) \newFeature{v0.14.0} Some sky
+\item[\var{minimal\_altitude}] (optional, default=-2) \newFeature{0.14.0} Some sky
   elements, e.g.\ stars, are not drawn below this altitude for
   efficiency. Under certain circumstances (e.g.\ for space station
   panoramas where you may have sky below your feet, or for deep
@@ -505,7 +495,7 @@ Where:
 \item[\var{tex0 ... tex<nbsidetex-1>}] are the side texture file
   names. These should exist in the \file{textures / landscapes /
     landscape} directory in PNG format.
-\item[\var{light0 ... light<nbsidetex-1>}] are optional textures\newFeature{v0.13.1}. If
+\item[\var{light0 ... light<nbsidetex-1>}] are optional textures\newFeature{0.13.1}. If
   they exist, they are used as overlays on top of the respective
   \var{tex<...>} files and represent nocturnal illumination,
   e.g. street lamps, lit windows, red dots on towers, sky glow by city
@@ -567,7 +557,7 @@ Where:
   front of the scenery, i.e. the side textures will overlap over the
   ground texture if \var{ground\_angle\_shift} >
   \var{decor\_angle\_shift}.
-\item[\var{calibrated}] (optional).\newFeature{v0.10.6} Only if true,
+\item[\var{calibrated}] (optional).\newFeature{0.10.6} Only if true,
   \var{decor\_alt\_angle} etc. really work as documented above. The
   (buggy) old code was left to work with the landscapes already
   existing. Note that with ``uncalibrated'' landscapes, sunrise
@@ -582,7 +572,6 @@ Where:
 \item[\var{polygonal\_horizon\_list}] (optional) see \ref{sec:landscapes:Spherical}
 \item[\var{polygonal\_horizon\_list\_mode}] (optional) see \ref{sec:landscapes:Polygonal}
 \item[\var{polygonal\_angle\_rotatez}] (optional, default=0) see \ref{sec:landscapes:Polygonal}
-\item[\var{horizon\_line\_color}] (optional) see \ref{sec:landscapes:Polygonal}
 \item[\var{minimal\_brightness}]  (optional) see \ref{sec:landscapes:Polygonal}
 \item[\var{minimal\_altitude}] (optional) see \ref{sec:landscapes:Polygonal}
 \end{description}
@@ -607,7 +596,7 @@ used.
 
 
 The image file (Fig.~\ref{fig:landscapes:Fisheye}) should be saved in
-PNG format with alpha transparency. Whereever the image is transparent
+PNG format with alpha transparency. Wherever the image is transparent
 Stellarium will render the sky.
 
 The \file{landscape.ini} file for a fish-eye type landscape looks like
@@ -649,7 +638,6 @@ Where:
 \item[\var{polygonal\_horizon\_list}] (optional) see \ref{sec:landscapes:Spherical}
 \item[\var{polygonal\_horizon\_list\_mode}] (optional) see \ref{sec:landscapes:Polygonal}
 \item[\var{polygonal\_angle\_rotatez}] (optional, default=0) see \ref{sec:landscapes:Polygonal}
-\item[\var{horizon\_line\_color}] (optional) see \ref{sec:landscapes:Polygonal}
 \item[\var{minimal\_brightness}] (optional)  see \ref{sec:landscapes:Polygonal}
 \item[\var{minimal\_altitude}] (optional) see \ref{sec:landscapes:Polygonal}
 \end{description}
@@ -734,7 +722,7 @@ film holders and specialized lenses
 (Figure~\ref{fig:landscapes:panoCam}).
 
 
-\begin{figure}[bp]
+\begin{figure}[p]
   \centering
  \includegraphics[width=9cm]{Horizon202.jpg}
  \caption{Zenit ``Horizon 202'' panorama camera with rotating lens for
@@ -746,9 +734,9 @@ film holders and specialized lenses
 
 
 
-\begin{figure}[tbp]
+\begin{figure}[p]
   \centering
-  \includegraphics[width=7cm]{Rodeon_vr_head_01.jpg}
+  \includegraphics[width=9cm]{Rodeon_vr_head_01.jpg}
   \caption{Automated panorama head. \footnotesize{(Source: Wikipedia \protect\url{https://commons.wikimedia.org/wiki/File:Rodeon_vr_head_01.jpg})}}
   \label{fig:landscapes:panoHead}
 \end{figure}
@@ -1460,8 +1448,24 @@ enough experience what level of error may be acceptable for you.
 \subsection{Artificial Panoramas}
 \label{sec:landscapes:Artificial}
 
+You do not have to visit a site to create a panorama from your own photographs. There is dedicated software that can process free and proprietary geodata.
+
+A classic for archaeoastronomers is Andrew Smith's \program{Horizon}\footnote{url{http://www.agksmith.net/horizon/}} which can process SRTM 1'' data which are freely available.
+
+A web service similar to HeyWhatsThat (see~\ref{sec:landscapes:Polygonal:Artificial}), 
+\program{PeakFinder}\footnote{\url{https://www.peakfinder.com}}, 
+creates a polygonal line and black/white landscape feature renderings and also allows downloading the horizon as installable landscape for Stellarium. 
+A great feature of this service is the excellent gazetteer (peak identification) also visible on the website.
+
+\name[Brian]{Doyle} has created another online service, \program{Skyliner}\footnote{\url{https://archaeoastronomyireland.github.io/skyliner/}}, 
+computing a panorama in the web browser. A gazetteer can be created manually. 
+A similar website that can also export Stellarium landscapes is \name[David]{Hoyle}'s \program{Panorama}\footnote{\url{https://www.standingstones.org/viewer.html}}. 
+He also released his program, which can process SRTM and even Lidar data on Github\footnote{\url{https://github.com/davidjhoyle/OpenPanorama}}.
+
+
+
 I have created a
-website\footnote{\url{https://homepage.univie.ac.at/Georg.Zotti/php/panoCam.php}} where
+website\footnote{\url{https://gzotti.github.io/panoCam.html}} where
 you can enter geographical coordinates and download a file
 \file{pano.kml}  which helps with image creation from \program{Google Earth}
 imagery. Store this file for a site, let us call it
@@ -1570,7 +1574,7 @@ The possibilities seem limited only by your time and skills!
 If something does not work as described and Stellarium does not show
 your landscape as expected but maybe just a bright magenta-colored
 box, don't panic.  Double and triple-check the entries in
-\file{landscape.ini}. \newFeature{v0.20.2} Make sure the texture is in
+\file{landscape.ini}. \newFeature{0.20.2} Make sure the texture is in
 PNG format and the file name is correct. Check the logfile for error
 messages. If the image is too large, it will be re-scaled on loading,
 but it is more efficient to keep images as small as required. Only few

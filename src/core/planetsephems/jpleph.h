@@ -59,7 +59,7 @@ int DLL_FUNC jpl_state( void *ephem, const double et, const int list[14],
 int DLL_FUNC jpl_pleph( void *ephem, const double et, const int ntarg,
                       const int ncent, double rrd[], const int calc_velocity);
 double DLL_FUNC jpl_get_double( const void *ephem, const int value);
-long DLL_FUNC jpl_get_long( const void *ephem, const int value);
+//long DLL_FUNC jpl_get_long( const void *ephem, const int value); // unused
 int DLL_FUNC make_sub_ephem( void *ephem, const char *sub_filename,
                               const double start_jd, const double end_jd);
 double DLL_FUNC jpl_get_constant( const int idx, void *ephem, char *constant_name);
@@ -114,7 +114,6 @@ int DLL_FUNC jpl_init_error_code( void);
 
 /* addition for use in stellarium */
 #define JPL_MAX_N_CONSTANTS 1018
-#define CALC_VELOCITY       0
 #define CENTRAL_PLANET_ID   11  //ID of sun in JPL enumeration
 
 const char * jpl_init_error_message(void);

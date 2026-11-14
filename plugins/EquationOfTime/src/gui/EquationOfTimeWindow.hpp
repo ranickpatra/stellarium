@@ -36,13 +36,13 @@ class EquationOfTimeWindow : public StelDialog
 
 public:
 	EquationOfTimeWindow();
-	~EquationOfTimeWindow();
+	~EquationOfTimeWindow() override;
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 
 protected:
-	void createDialogContent();
+	void createDialogContent() override;
 
 private:
 	Ui_equationOfTimeWindowForm* ui;

@@ -25,16 +25,12 @@
 #include <QFileDialog>
 
 #include "StelApp.hpp"
-#include "StelCore.hpp"
 #include "ui_novaeDialog.h"
 #include "NovaeDialog.hpp"
 #include "Novae.hpp"
 #include "StelModuleMgr.hpp"
-#include "StelObjectMgr.hpp"
-#include "StelMovementMgr.hpp"
 #include "StelStyle.hpp"
 #include "StelGui.hpp"
-#include "StelFileMgr.hpp"
 #include "StelTranslator.hpp"
 
 NovaeDialog::NovaeDialog()
@@ -72,8 +68,7 @@ void NovaeDialog::createDialogContent()
 	nova = GETSTELMODULE(Novae);
 	ui->setupUi(dialog);
 	ui->tabs->setCurrentIndex(0);	
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()),
-		this, SLOT(retranslate()));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &NovaeDialog::retranslate);
 
 	// Kinetic scrolling
 	kineticScrollingList << ui->aboutTextBrowser;
@@ -81,29 +76,29 @@ void NovaeDialog::createDialogContent()
 	if (gui)
 	{
 		enableKineticScrolling(gui->getFlagUseKineticScrolling());
-		connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+		connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &NovaeDialog::enableKineticScrolling);
 	}
 
 
 	// Settings tab / updates group
-	connect(ui->internetUpdatesCheckbox, SIGNAL(stateChanged(int)), this, SLOT(setUpdatesEnabled(int)));
-	connect(ui->updateButton, SIGNAL(clicked()), this, SLOT(updateJSON()));
-	connect(nova, SIGNAL(updateStateChanged(Novae::UpdateState)), this, SLOT(updateStateReceiver(Novae::UpdateState)));
-	connect(nova, SIGNAL(jsonUpdateComplete(void)), this, SLOT(updateCompleteReceiver(void)));	
-	connect(ui->updateFrequencySpinBox, SIGNAL(valueChanged(int)), this, SLOT(setUpdateValues(int)));
+	connect(ui->internetUpdatesCheckbox, &QCheckBox::stateChanged, this, &NovaeDialog::setUpdatesEnabled);
+	connect(ui->updateButton, &QPushButton::clicked, this, &NovaeDialog::updateJSON);
+	connect(nova, &Novae::updateStateChanged, this, &NovaeDialog::updateStateReceiver);
+	connect(nova, &Novae::jsonUpdateComplete, this, &NovaeDialog::updateCompleteReceiver);
+	connect(ui->updateFrequencySpinBox, qOverload<int>(&QSpinBox::valueChanged), this, &NovaeDialog::setUpdateValues);
 	refreshUpdateValues(); // fetch values for last updated and so on
 	// if the state didn't change, setUpdatesEnabled will not be called, so we force it
 	setUpdatesEnabled(ui->internetUpdatesCheckbox->checkState());
 
 	updateTimer = new QTimer(this);
-	connect(updateTimer, SIGNAL(timeout()), this, SLOT(refreshUpdateValues()));
+	connect(updateTimer, &QTimer::timeout, this, &NovaeDialog::refreshUpdateValues);
 	updateTimer->start(7000);
 
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
-	connect(ui->restoreDefaultsButton, SIGNAL(clicked()), this, SLOT(restoreDefaults()));
-	connect(ui->saveSettingsButton, SIGNAL(clicked()), this, SLOT(saveSettings()));
+	connect(ui->restoreDefaultsButton, &QPushButton::clicked, this, &NovaeDialog::restoreDefaults);
+	connect(ui->saveSettingsButton, &QPushButton::clicked, this, &NovaeDialog::saveSettings);
 
 	// About tab
 	setAboutHtml();
@@ -113,14 +108,11 @@ void NovaeDialog::createDialogContent()
 
 void NovaeDialog::setAboutHtml(void)
 {
-	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
-
 	QString html = "<html><head></head><body>";
-	html += "<h2>" + q_("Bright Novae Plug-in") + "</h2><table width=\"90%\">";
+	html += "<h2>" + q_("Bright Novae Plug-in") + "</h2><table class='layout' width=\"90%\">";
 	html += "<tr width=\"30%\"><td><strong>" + q_("Version") + ":</strong></td><td>" + NOVAE_PLUGIN_VERSION + "</td></tr>";
 	html += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + NOVAE_PLUGIN_LICENSE + "</td></tr>";
-	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Alexander Wolf &lt;alex.v.wolf@gmail.com&gt;</td></tr>";
+	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Alexander Wolf</td></tr>";
 	html += "</table>";
 
 	html += "<p>" + q_("A plugin that shows some bright novae in the Milky Way galaxy.");
@@ -220,7 +212,7 @@ void NovaeDialog::updateCompleteReceiver(void)
 	updateTimer->start();
 	ui->lastUpdateDateTimeEdit->setDateTime(nova->getLastUpdate());
 	QTimer *timer = new QTimer(this);
-	connect(timer, SIGNAL(timeout()), this, SLOT(refreshUpdateValues()));
+	connect(timer, &QTimer::timeout, this, &NovaeDialog::refreshUpdateValues);
 	setAboutHtml();
 }
 

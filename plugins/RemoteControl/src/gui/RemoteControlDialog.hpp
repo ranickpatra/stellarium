@@ -20,11 +20,8 @@
 #ifndef REMOTECONTROLDIALOG_HPP
 #define REMOTECONTROLDIALOG_HPP
 
-#include "StelDialog.hpp"
-#include "StelGui.hpp"
-#include "StelTranslator.hpp"
-
 #include <QString>
+#include "StelDialog.hpp"
 
 class Ui_remoteControlDialog;
 class RemoteControl;
@@ -36,13 +33,13 @@ class RemoteControlDialog : public StelDialog
 
 public:
 	RemoteControlDialog();
-	~RemoteControlDialog();
+	~RemoteControlDialog() override;
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 
 protected:
-	void createDialogContent();
+	void createDialogContent() override;
 
 private:
 	Ui_remoteControlDialog* ui;
@@ -56,6 +53,5 @@ private slots:
 	void updateIPlabel(bool);
 	void restoreDefaults();
 };
-
 
 #endif /* REMOTECONTROLDIALOG_HPP */

@@ -1,15 +1,15 @@
-# 
 # Translators:
-# cardinot <mcardinot@gmail.com>, 2017
-# Hyaku Hitori <levanbach1994ag@gmail.com>, 2018
+# cardinot <mcardinot@gmail.com>, 2022
+# Hyaku Hitori <levanbach1994ag@gmail.com>, 2022
+# Alexander V. Wolf <alex.v.wolf@gmail.com>, 2022
 # 
 msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
-"POT-Creation-Date: 2021-03-28 15:14+0700\n"
-"PO-Revision-Date: 2017-11-29 01:17+0000\n"
-"Last-Translator: Hyaku Hitori <levanbach1994ag@gmail.com>, 2018\n"
-"Language-Team: Vietnamese (https://www.transifex.com/stellarium/teams/80998/vi/)\n"
+"POT-Creation-Date: 2026-04-05 19:12+0700\n"
+"PO-Revision-Date: 2022-10-21 17:42+0000\n"
+"Last-Translator: Alexander V. Wolf <alex.v.wolf@gmail.com>, 2022\n"
+"Language-Team: Vietnamese (https://app.transifex.com/stellarium/teams/80998/vi/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -43,22 +43,17 @@ msgstr ""
 #: org.stellarium.Stellarium.appdata.xml:12
 msgid ""
 "Stellarium comes with a star catalogue of about 600 thousand stars and it is"
-" possible to download extra catalogues with up to 210 million stars."
+" possible to download extra catalogues with up to 220 million stars."
 msgstr ""
-"Stellarium đi kèm với một danh mục sao của khoảng 600.000 ngôi sao và nó có "
-"thể tải về danh mục thêm với lên đến 210 triệu ngôi sao."
 
 #. (itstool) path: description/p
 #: org.stellarium.Stellarium.appdata.xml:13
 msgid ""
 "Stellarium has multiple sky cultures - see the constellations from the "
-"traditions of Polynesian, Inuit, Navajo, Korean, Lakota, Egyptian and "
-"Chinese astronomers, as well as the traditional Western constellations."
+"traditions of Polynesian, Inuit, Navajo, Korean, Greek and Chinese "
+"astronomers, as well as the traditional Western or official modern "
+"constellations."
 msgstr ""
-"Stellarium có nhiều nền văn hóa trên bầu trời - xem các chòm sao từ các "
-"truyền thống của các nhà thiên văn học người Polynesia, Inuit, Navajo, Hàn "
-"Quốc, Lakota,  Ai Cập và Trung Quốc, cũng như những chòm sao truyền thống "
-"phương Tây."
 
 #. (itstool) path: description/p
 #: org.stellarium.Stellarium.appdata.xml:14
@@ -71,7 +66,27 @@ msgstr ""
 " Xem những gì trên bầu trời như các phi hành gia tàu Apollo từng thấy, hoặc "
 "những chiếc vòng của Thổ Tinh trông như thế nào khi nhìn từ Titan."
 
+#. (itstool) path: keywords/keyword
+#: org.stellarium.Stellarium.appdata.xml:17
+msgid "astronomy"
+msgstr ""
+
+#. (itstool) path: keywords/keyword
+#: org.stellarium.Stellarium.appdata.xml:18
+msgid "planetarium"
+msgstr ""
+
+#. (itstool) path: keywords/keyword
+#: org.stellarium.Stellarium.appdata.xml:19
+msgid "sky"
+msgstr "Bầu trời"
+
+#. (itstool) path: keywords/keyword
+#: org.stellarium.Stellarium.appdata.xml:20
+msgid "universe"
+msgstr ""
+
 #. (itstool) path: component/developer_name
-#: org.stellarium.Stellarium.appdata.xml:108
+#: org.stellarium.Stellarium.appdata.xml:144
 msgid "Stellarium team"
 msgstr "Đội Stellarium"

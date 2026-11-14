@@ -5,13 +5,16 @@ INCLUDE_DIRECTORIES(
      ${CMAKE_BINARY_DIR}/plugins/Quasars/src/gui
 )
 
-LINK_DIRECTORIES(${BUILD_DIR}/src)
+LINK_DIRECTORIES(${CMAKE_BINARY_DIR}/src)
 
 SET(Quasars_SRCS
      Quasars.hpp
      Quasars.cpp
      Quasar.hpp
      Quasar.cpp
+)
+IF (STELLARIUM_GUI_MODE STREQUAL "Standard")
+LIST(APPEND Quasars_SRCS
      gui/QuasarsDialog.hpp
      gui/QuasarsDialog.cpp
 )
@@ -19,14 +22,24 @@ SET(Quasars_SRCS
 SET(QuasarsDialog_UIS
      gui/quasarsDialog.ui
 )
-
-QT5_WRAP_UI(QuasarsDialog_UIS_H ${QuasarsDialog_UIS})
+ENDIF(STELLARIUM_GUI_MODE STREQUAL "Standard")
 
 SET(Quasars_RES ../resources/Quasars.qrc)
-QT5_ADD_RESOURCES(Quasars_RES_CXX ${Quasars_RES})
+
+IF (${QT_VERSION_MAJOR} EQUAL "5")
+     IF (STELLARIUM_GUI_MODE STREQUAL "Standard")
+          QT5_WRAP_UI(QuasarsDialog_UIS_H ${QuasarsDialog_UIS})
+     ENDIF()
+     QT5_ADD_RESOURCES(Quasars_RES_CXX ${Quasars_RES})
+ELSE()
+     IF (STELLARIUM_GUI_MODE STREQUAL "Standard")
+          QT_WRAP_UI(QuasarsDialog_UIS_H ${QuasarsDialog_UIS})
+     ENDIF()
+     QT_ADD_RESOURCES(Quasars_RES_CXX ${Quasars_RES})
+ENDIF()
 
 ADD_LIBRARY(Quasars-static STATIC ${Quasars_SRCS} ${Quasars_RES_CXX} ${QuasarsDialog_UIS_H})
-TARGET_LINK_LIBRARIES(Quasars-static Qt5::Core Qt5::Network Qt5::Widgets)
+TARGET_LINK_LIBRARIES(Quasars-static Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::OpenGL)
 SET_TARGET_PROPERTIES(Quasars-static PROPERTIES OUTPUT_NAME "Quasars")
 SET_TARGET_PROPERTIES(Quasars-static PROPERTIES COMPILE_FLAGS "-DQT_STATICPLUGIN")
 ADD_DEPENDENCIES(AllStaticPlugins Quasars-static)

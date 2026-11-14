@@ -27,16 +27,16 @@
 class Telescope : public QObject
 {
 	Q_OBJECT
-	Q_PROPERTY(QString name READ name WRITE setName)
-	Q_PROPERTY(double diameter READ diameter WRITE setDiameter)
-	Q_PROPERTY(double focalLength READ focalLength WRITE setFocalLength)
-	Q_PROPERTY(bool hFlipped READ isHFlipped WRITE setHFlipped)
-	Q_PROPERTY(bool vFlipped READ isVFlipped WRITE setVFlipped)
-	Q_PROPERTY(bool equatorial READ isEquatorial WRITE setEquatorial)
+	Q_PROPERTY(QString name       READ name         WRITE setName)
+	Q_PROPERTY(double diameter    READ diameter     WRITE setDiameter)
+	Q_PROPERTY(double focalLength READ focalLength  WRITE setFocalLength)
+	Q_PROPERTY(bool hFlipped      READ isHFlipped   WRITE setHFlipped)
+	Q_PROPERTY(bool vFlipped      READ isVFlipped   WRITE setVFlipped)
+	Q_PROPERTY(bool equatorial    READ isEquatorial WRITE setEquatorial)
 public:
 	Telescope();
 	Q_INVOKABLE Telescope(const QObject& other);
-	virtual ~Telescope();
+	~Telescope() override;
 	static Telescope* telescopeFromSettings(QSettings* theSettings, int telescopeIndex);
 	void writeToSettings(QSettings * settings, const int index);
 	static Telescope* telescopeModel();
@@ -46,7 +46,7 @@ public:
 	double focalLength() const;
 	void setFocalLength(double theValue);
 	const QString name() const;
-	void setName(QString theValue);
+	void setName(const QString &theValue);
 	bool isHFlipped() const;
 	void setHFlipped(bool flipped);
 	bool isVFlipped() const;
@@ -61,6 +61,7 @@ private:
 	bool m_hFlipped;	//!< horizontally flipped?
 	bool m_vFlipped;	//!< vertically flipped?
 	bool m_equatorial;	//!< equatorially mounted?
+	static const QMap<int, QString> mapping;
 };
 
 #endif /*TELESCOPE_HPP*/

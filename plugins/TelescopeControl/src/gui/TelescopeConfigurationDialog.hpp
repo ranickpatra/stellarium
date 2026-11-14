@@ -25,17 +25,19 @@
 #include <QHash>
 #include <QIntValidator>
 #include <QStringList>
+#include <QRegularExpressionValidator>
 #include "StelDialog.hpp"
-#include "TelescopeControlGlobals.hpp"
+#include "TelescopeControl.hpp"
 
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN)
 #include "../ASCOM/TelescopeClientASCOMWidget.hpp"
 #endif
 
-using namespace TelescopeControlGlobals;
+#ifdef ENABLE_INDI
+#include "../INDI/TelescopeClientINDIWidget.hpp"
+#endif
 
 class Ui_telescopeConfigurationDialog;
-class TelescopeControl;
 class StelStyle;
 
 class TelescopeConfigurationDialog : public StelDialog
@@ -43,23 +45,25 @@ class TelescopeConfigurationDialog : public StelDialog
 	Q_OBJECT
 public:
 	TelescopeConfigurationDialog();
-	virtual ~TelescopeConfigurationDialog();
+	~TelescopeConfigurationDialog() override;
 	
 	void initExistingTelescopeConfiguration(int slot);
 	void initNewTelescopeConfiguration(int slot);
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 
 protected:
 	//! Initialize the dialog widgets and connect the signals/slots
-	virtual void createDialogContent();
+	void createDialogContent() override;
 	Ui_telescopeConfigurationDialog* ui;
 	
 private:
 	QStringList* listSerialPorts();
 	void initConfigurationDialog();
 	void populateToolTips();
+	bool currentDeviceModelSupportsNetwork() const;
+	void updateDeviceConnectionMediumState();
 	
 private slots:
 	void buttonSavePressed();
@@ -69,28 +73,37 @@ private slots:
 	void toggleTypeConnection(bool);
 	void toggleTypeVirtual(bool);
 	void toggleTypeRTS2(bool);
+	#ifdef ENABLE_INDI
 	void toggleTypeINDI(bool enabled);
-	#ifdef Q_OS_WIN
+	#endif
+	#if defined(Q_OS_WIN)
 	void toggleTypeASCOM(bool enabled);
 	#endif
 	
-	void deviceModelSelected(const QString&);
+	void deviceModelSelected(int modelIndex);
+
+	//! Toggle between a serial and a network (TCP/IP) connection.
+	void toggleDeviceConnectionMedium(bool networkChecked);
 
 
 signals:
-	void changesSaved(QString name, ConnectionType type);
+	void changesSaved(QString name, TelescopeControl::ConnectionType type);
 	void changesDiscarded();
 	
 private:
 	QStringList deviceModelNames;
 	
-	QRegExpValidator * telescopeNameValidator;
-	QRegExpValidator * hostNameValidator;
-	QRegExpValidator * circleListValidator;
-	QRegExpValidator * serialPortValidator;
+	QRegularExpressionValidator * telescopeNameValidator;
+	QRegularExpressionValidator * hostNameValidator;
+	QRegularExpressionValidator * circleListValidator;
+	QRegularExpressionValidator * serialPortValidator;
 
-	#ifdef Q_OS_WIN
+	#if defined(Q_OS_WIN)
 	TelescopeClientASCOMWidget* ascomWidget;
+	#endif
+
+	#ifdef ENABLE_INDI
+	TelescopeClientINDIWidget* indiWidget;
 	#endif
 	
 	int configuredSlot;

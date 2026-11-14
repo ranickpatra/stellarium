@@ -18,19 +18,21 @@
  */
 
 #include <QHostInfo>
+#include <QRegularExpression>
+
 #include "RemoteControl.hpp"
 #include "RemoteControlDialog.hpp"
 #include "ui_remoteControlDialog.h"
 
 #include "StelApp.hpp"
-#include "StelCore.hpp"
-#include "StelLocaleMgr.hpp"
+#include "StelGui.hpp"
+#include "StelTranslator.hpp"
 #include "StelModule.hpp"
 #include "StelModuleMgr.hpp"
 
 RemoteControlDialog::RemoteControlDialog()
 	: StelDialog("RemoteControl")
-	, rc(Q_NULLPTR)
+	, rc(nullptr)
 {
 	ui = new Ui_remoteControlDialog();
 }
@@ -60,58 +62,56 @@ void RemoteControlDialog::createDialogContent()
 	if (gui)
 	{
 		enableKineticScrolling(gui->getFlagUseKineticScrolling());
-		connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+		connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &RemoteControlDialog::enableKineticScrolling);
 	}
 
 
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &RemoteControlDialog::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
 	// TODO Fill other buttons
 
 	connectCheckBox(ui->enabledCheckbox,"actionShow_Remote_Control");
-	connect(ui->enabledCheckbox, SIGNAL(clicked(bool)), this, SLOT(updateIPlabel(bool)));
+	connect(ui->enabledCheckbox, &QCheckBox::clicked, this, &RemoteControlDialog::updateIPlabel);
 	updateIPlabel(ui->enabledCheckbox->isChecked());
 
-	ui->activateOnStartCheckBox->setChecked(rc->getFlagAutoStart());
-	connect(ui->activateOnStartCheckBox, SIGNAL(toggled(bool)), rc, SLOT(setFlagAutoStart(bool)));
-	connect(rc, SIGNAL(flagAutoStartChanged(bool)), ui->activateOnStartCheckBox, SLOT(setChecked(bool)));
+	connectBoolProperty(ui->activateOnStartCheckBox, "RemoteControl.autoStart");
 
-	ui->passwordCheckBox->setChecked(rc->getFlagUsePassword());
-	connect(ui->passwordCheckBox, SIGNAL(toggled(bool)), rc, SLOT(setFlagUsePassword(bool)));
-	connect(rc, SIGNAL(flagUsePasswordChanged(bool)), ui->passwordCheckBox, SLOT(setChecked(bool)));
+	connectBoolProperty(ui->passwordCheckBox, "RemoteControl.usePassword");
 
 	ui->passwordEdit->setEnabled(rc->getFlagUsePassword());
 	ui->passwordEdit->setText(rc->getPassword());
 
-	connect(rc,SIGNAL(flagUsePasswordChanged(bool)),ui->passwordEdit,SLOT(setEnabled(bool)));
-	connect(ui->passwordEdit, SIGNAL(textChanged(QString)), rc, SLOT(setPassword(QString)));
+	connect(rc, &RemoteControl::flagUsePasswordChanged, ui->passwordEdit, &QLineEdit::setEnabled);
+	connect(ui->passwordEdit, &QLineEdit::textChanged, rc, &RemoteControl::setPassword);
 
-	ui->portNumberSpinBox->setValue(rc->getPort());
-	connect(ui->portNumberSpinBox, SIGNAL(valueChanged(int)), rc, SLOT(setPort(int)));
+	connectIntProperty(ui->portNumberSpinBox, "RemoteControl.port");
 
-	ui->enableCorsCheckbox->setChecked(rc->getFlagEnableCors());
-	connect(ui->enableCorsCheckbox, SIGNAL(toggled(bool)), rc, SLOT(setFlagEnableCors(bool)));
-	connect(rc, SIGNAL(flagEnableCorsChanged(bool)), ui->enableCorsCheckbox, SLOT(setChecked(bool)));
+	connectBoolProperty(ui->enableCorsCheckbox, "RemoteControl.enableCors");
 
 	ui->corsOriginEdit->setEnabled(rc->getFlagEnableCors());
 	ui->corsOriginEdit->setText(rc->getCorsOrigin());
 
-	connect(rc,SIGNAL(flagEnableCorsChanged(bool)),ui->corsOriginEdit,SLOT(setEnabled(bool)));
-	connect(ui->corsOriginEdit, SIGNAL(textChanged(QString)), rc, SLOT(setCorsOrigin(QString)));
+	connect(rc, &RemoteControl::flagEnableCorsChanged, ui->corsOriginEdit, &QLineEdit::setEnabled);
+	connect(ui->corsOriginEdit, &QLineEdit::textChanged, rc, &RemoteControl::setCorsOrigin);
+
+	connectIntProperty(ui->maximumRequestSpinBox, "RemoteControl.maxRequestSize");
+	connectIntProperty(ui->maximumMultipartSpinBox, "RemoteControl.maxMultipartSize");
 
 	ui->restartPanel->setVisible(false);
-	connect(rc, SIGNAL(flagUsePasswordChanged(bool)), this, SLOT(requiresRestart()));
-	connect(rc, SIGNAL(passwordChanged(QString)), this, SLOT(requiresRestart()));
-	connect(rc, SIGNAL(flagEnableCorsChanged(bool)), this, SLOT(requiresRestart()));
-	connect(rc, SIGNAL(corsOriginChanged(QString)), this, SLOT(requiresRestart()));
-	connect(rc, SIGNAL(portChanged(int)), this, SLOT(requiresRestart()));
+	connect(rc, &RemoteControl::flagUsePasswordChanged,  this, &RemoteControlDialog::requiresRestart);
+	connect(rc, &RemoteControl::passwordChanged,         this, &RemoteControlDialog::requiresRestart);
+	connect(rc, &RemoteControl::flagEnableCorsChanged,   this, &RemoteControlDialog::requiresRestart);
+	connect(rc, &RemoteControl::corsOriginChanged,       this, &RemoteControlDialog::requiresRestart);
+	connect(rc, &RemoteControl::portChanged,             this, &RemoteControlDialog::requiresRestart);
+	connect(rc, &RemoteControl::maxRequestSizeChanged,   this, &RemoteControlDialog::requiresRestart);
+	connect(rc, &RemoteControl::maxMultipartSizeChanged, this, &RemoteControlDialog::requiresRestart);
 
-	connect(ui->resetButton, SIGNAL(clicked(bool)),this,SLOT(restart()));
+	connect(ui->resetButton, &QPushButton::clicked, this, &RemoteControlDialog::restart);
 
-	connect(ui->saveSettingsButton, SIGNAL(clicked()), rc, SLOT(saveSettings()));	
-	connect(ui->restoreDefaultsButton, SIGNAL(clicked()), this, SLOT(restoreDefaults()));
+	connect(ui->saveSettingsButton, &QPushButton::clicked, rc, &RemoteControl::saveSettings);
+	connect(ui->restoreDefaultsButton, &QPushButton::clicked, this, &RemoteControlDialog::restoreDefaults);
 
 	setAboutHtml();
 }
@@ -130,7 +130,7 @@ void RemoteControlDialog::restoreDefaults()
 void RemoteControlDialog::setAboutHtml(void)
 {
 	QString html = "<html><head></head><body>";
-	html += "<h2>" + q_("Remote Control Plug-in") + "</h2><table width=\"90%\">";
+	html += "<h2>" + q_("Remote Control Plug-in") + "</h2><table class='layout' width=\"90%\">";
 	html += "<tr width=\"30%\"><td><strong>" + q_("Version") + ":</strong></td><td>" + REMOTECONTROL_PLUGIN_VERSION + "</td></tr>";
 	html += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + REMOTECONTROL_PLUGIN_LICENSE + "</td></tr>";
 	html += "<tr><td rowspan=2><strong>" + q_("Authors") + ":</strong></td><td>Florian Schaukowitsch</td></tr>";
@@ -142,7 +142,7 @@ void RemoteControlDialog::setAboutHtml(void)
 	// TODO Add longer instructions?
 
 	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
+	static const QRegularExpression a_rx("[{]([^{]*)[}]");
 
 	html += "<p>" + q_("It is also possible to send commands via command line, e.g..");
 	html += "<pre>\n"
@@ -166,7 +166,7 @@ void RemoteControlDialog::setAboutHtml(void)
 	html += "</body></html>";
 
 	StelGui* gui = dynamic_cast<StelGui*>(StelApp::getInstance().getGui());
-	if(gui!=Q_NULLPTR)
+	if(gui!=nullptr)
 	{
 		QString htmlStyleSheet(gui->getStelStyle().htmlStyleSheet);
 		ui->aboutTextBrowser->document()->setDefaultStyleSheet(htmlStyleSheet);
@@ -193,7 +193,7 @@ void RemoteControlDialog::updateIPlabel(bool running)
 		QString localHostName=QHostInfo::localHostName();
 		QHostInfo hostInfo = QHostInfo::fromName(localHostName);
 		QString ipString("");
-		for (auto a : hostInfo.addresses())
+		for (auto &a : hostInfo.addresses())
 		{
 			if ((a.protocol() == QAbstractSocket::IPv4Protocol) && a != QHostAddress(QHostAddress::LocalHost))
 			{

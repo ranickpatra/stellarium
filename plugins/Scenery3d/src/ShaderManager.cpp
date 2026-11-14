@@ -100,7 +100,7 @@ ShaderMgr::ShaderMgr()
 		featureFlagsStrings["CUBEMAP"] = CUBEMAP;
 		featureFlagsStrings["BLENDING"] = BLENDING;
 		featureFlagsStrings["TORCH"] = TORCH;
-		featureFlagsStrings["DEBUG"] = DEBUG;
+		featureFlagsStrings["DEBUG_SHADER"] = DEBUG_SHADER;
 		featureFlagsStrings["PCSS"] = PCSS;
 		featureFlagsStrings["SINGLE_SHADOW_FRUSTUM"] = SINGLE_SHADOW_FRUSTUM;
 		featureFlagsStrings["OGL_ES2"] = OGL_ES2;
@@ -115,14 +115,16 @@ ShaderMgr::~ShaderMgr()
 
 void ShaderMgr::clearCache()
 {
-	qCDebug(shaderMgr)<<"Clearing"<<m_shaderContentCache.size()<<"shaders";
+	qCInfo(shaderMgr)<<"Clearing"<<m_shaderContentCache.size()<<"shaders";
 
 	//iterate over the shaderContentCache - this contains the same amount of shaders as actually exist!
 	//the shaderCache could contain duplicate entries
-	for (auto* shader : m_shaderContentCache)
+	QHashIterator<QByteArray, QOpenGLShaderProgram*>it(m_shaderContentCache);
+	while (it.hasNext())
 	{
-		if (shader)
-			delete shader;
+		it.next();
+		if (it.value())
+			delete it.value();
 	}
 
 	m_shaderCache.clear();
@@ -134,8 +136,8 @@ QOpenGLShaderProgram* ShaderMgr::findOrLoadShader(uint flags)
 {
 	auto it = m_shaderCache.find(flags);
 
-	// This may also return Q_NULLPTR if the load failed.
-	//We wait until user explictly forces shader reload until we try again to avoid spamming errors.
+	// This may also return nullptr if the load failed.
+	//We wait until user explicitly forces shader reload until we try again to avoid spamming errors.
 	if(it!=m_shaderCache.end())
 		return *it;
 
@@ -148,7 +150,7 @@ QOpenGLShaderProgram* ShaderMgr::findOrLoadShader(uint flags)
 	//load shader files & preprocess
 	QByteArray vShader,gShader,fShader;
 
-	QOpenGLShaderProgram *prog = Q_NULLPTR;
+	QOpenGLShaderProgram *prog = nullptr;
 
 	if(preprocessShader(vShaderFile,flags,vShader) &&
 			preprocessShader(gShaderFile,flags,gShader) &&
@@ -178,7 +180,7 @@ QOpenGLShaderProgram* ShaderMgr::findOrLoadShader(uint flags)
 			if(!loadShader(*prog,vShader,gShader,fShader))
 			{
 				delete prog;
-				prog = Q_NULLPTR;
+				prog = nullptr;
 				qCCritical(shaderMgr)<<"ERROR: Shader '"<<flags<<"' could not be compiled. Fix errors and reload shaders or restart program.";
 			}
 #ifndef NDEBUG
@@ -223,7 +225,7 @@ QString ShaderMgr::getVShaderName(uint flags)
 	{
 		return "s3d_texture.vert";
 	}
-	else if (flags & DEBUG)
+	else if (flags & DEBUG_SHADER)
 	{
 		return "s3d_debug.vert";
 	}
@@ -270,7 +272,7 @@ QString ShaderMgr::getFShaderName(uint flags)
 	{
 		return "s3d_texture.frag";
 	}
-	else if (flags & DEBUG)
+	else if (flags & DEBUG_SHADER)
 	{
 		return "s3d_debug.frag";
 	}
@@ -300,7 +302,7 @@ bool ShaderMgr::preprocessShader(const QString &fileName, const uint flags, QByt
 	}
 
 	processedSource.clear();
-	processedSource.reserve(file.size());
+	processedSource.reserve(static_cast<int>(file.size()));
 
 	//use a text stream for "parsing"
 	QTextStream in(&file),lineStream;
@@ -340,7 +342,7 @@ bool ShaderMgr::preprocessShader(const QString &fileName, const uint flags, QByt
 		}
 
 		//write output
-		processedSource.append(write);
+		processedSource.append(write.toUtf8());
 		processedSource.append('\n');
 	}
 	return true;
@@ -353,7 +355,8 @@ bool ShaderMgr::loadShader(QOpenGLShaderProgram& program, const QByteArray& vSha
 
 	if(!vShader.isEmpty())
 	{
-		if(!program.addShaderFromSourceCode(QOpenGLShader::Vertex,vShader))
+		const auto prefix = StelOpenGL::globalShaderPrefix(StelOpenGL::VERTEX_SHADER);
+		if(!program.addShaderFromSourceCode(QOpenGLShader::Vertex, prefix + vShader))
 		{
 			qCCritical(shaderMgr) << "Unable to compile vertex shader";
 			qCCritical(shaderMgr) << program.log();
@@ -395,7 +398,57 @@ bool ShaderMgr::loadShader(QOpenGLShaderProgram& program, const QByteArray& vSha
 
 	if(!fShader.isEmpty())
 	{
-		if(!program.addShaderFromSourceCode(QOpenGLShader::Fragment,fShader))
+		const auto globalPrefix = StelOpenGL::globalShaderPrefix(StelOpenGL::FRAGMENT_SHADER);
+		const bool prefixHasVersion = globalPrefix.contains("#version");
+		const bool shaderHasVersion = fShader.contains("#version");
+		QByteArray prefix;
+		QByteArray finalShader = fShader;
+		if(shaderHasVersion)
+		{
+			static const QRegularExpression versionRE("^#version ([0-9]+)\\b.*");
+			static const QRegularExpression versionRE2("(^|\n)(#version[ \t]+)([0-9]+)\\b");
+			const QString shaderVersionString = QString(fShader.simplified()).replace(versionRE, "\\1");
+			bool svOK = false;
+			const int shaderVersion = shaderVersionString.toInt(&svOK);
+
+			const QString prefixVersionString = QString(globalPrefix.simplified()).replace(versionRE, "\\1");
+			bool pvOK = false;
+			const int prefixVersion = prefixVersionString.toInt(&pvOK);
+
+			bool failed = false;
+			if(!svOK)
+			{
+				qCCritical(shaderMgr) << "Failed to get shader version, string:" << shaderVersionString;
+				failed = true;
+			}
+
+			if(prefixHasVersion && !pvOK)
+			{
+				qCCritical(shaderMgr) << "Failed to get prefix version, string:" << prefixVersionString;
+				failed = true;
+			}
+
+			if(failed) return false;
+
+			if(!prefixHasVersion)
+			{
+				prefix = QString("#version %1\n").arg(shaderVersion).toUtf8() + globalPrefix;
+			}
+			else if(shaderVersion > prefixVersion)
+			{
+				prefix = QString(globalPrefix).replace(versionRE2, QString("\\1\\2%1").arg(shaderVersion)).toUtf8();
+			}
+			else
+			{
+				prefix = globalPrefix;
+			}
+			finalShader = QString(fShader).replace(versionRE2, "//\\1\\2\\3").toUtf8();
+		}
+		else
+		{
+			prefix = globalPrefix;
+		}
+		if(!program.addShaderFromSourceCode(QOpenGLShader::Fragment, prefix + finalShader))
 		{
 			qCCritical(shaderMgr) << "Unable to compile fragment shader";
 			qCCritical(shaderMgr) << program.log();
@@ -453,23 +506,23 @@ void ShaderMgr::buildUniformCache(QOpenGLShaderProgram &program)
 #ifndef NDEBUG
 	//qCDebug(shaderMgr)<<"Shader has"<<numUniforms<<"uniforms";
 #endif
-	for(int i =0;i<numUniforms;++i)
+	for(uint i =0;i<static_cast<GLuint>(numUniforms);++i)
 	{
 		GL(gl->glGetActiveUniform(prog,i,bufSize,&length,&size,&type,buf.data()));
 		QString str(buf);
-		str = str.trimmed(); // no idea if this is required
+		str = str.left(str.indexOf(QChar(0x00)));
 
 		GLint loc = program.uniformLocation(str);
 
 		auto it = uniformStrings.find(str);
 
-		// This may also return Q_NULLPTR if the load failed.
-		//We wait until user explictly forces shader reload until we try again to avoid spamming errors.
+		// This may also return nullptr if the load failed.
+		//We wait until user explicitly forces shader reload until we try again to avoid spamming errors.
 		if(it!=uniformStrings.end())
 		{
 			//this is uniform we recognize
 			//need to get the uniforms location (!= index)
-			m_uniformCache[&program][*it] = loc;
+			m_uniformCache[&program][*it] = static_cast<GLuint>(loc);
 			//output mapping for debugging
 			//qCDebug(shaderMgr)<<i<<loc<<str<<size<<type<<" mapped to "<<*it;
 		}

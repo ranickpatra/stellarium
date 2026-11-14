@@ -19,16 +19,46 @@
 
 #include "StelTranslator.hpp"
 #include "StelFileMgr.hpp"
-#include "StelUtils.hpp"
 
 #include <QFile>
 #include <QDebug>
 #include <QStringList>
-#include <QRegExp>
+#include <QRegularExpression>
 #include <QLocale>
 #include <QDir>
 #include <QTranslator>
 
+namespace
+{
+int parseRomanNumeral(const QStringView& roman)
+{
+	const auto romanLat = roman.toLatin1();
+	int v = 0;
+	const char* p = romanLat.data();
+
+	/**/ if (strncmp(p, "XC",   2) == 0) { v += 90; p += 2; }
+	else if (strncmp(p, "LXXX", 4) == 0) { v += 80; p += 4; }
+	else if (strncmp(p, "LXX",  3) == 0) { v += 70; p += 3; }
+	else if (strncmp(p, "LX",   2) == 0) { v += 60; p += 2; }
+	else if (strncmp(p, "L",    1) == 0) { v += 50; p += 1; }
+	else if (strncmp(p, "XL",   2) == 0) { v += 40; p += 2; }
+	else if (strncmp(p, "XXX",  3) == 0) { v += 30; p += 3; }
+	else if (strncmp(p, "XX",   2) == 0) { v += 20; p += 2; }
+	else if (strncmp(p, "X",    1) == 0) { v += 10; p += 1; }
+
+	/**/ if (strncmp(p, "IX",   2) == 0) { v += 9;  p += 2; }
+	else if (strncmp(p, "VIII", 4) == 0) { v += 8;  p += 4; }
+	else if (strncmp(p, "VII",  3) == 0) { v += 7;  p += 3; }
+	else if (strncmp(p, "VI",   2) == 0) { v += 6;  p += 2; }
+	else if (strncmp(p, "V",    1) == 0) { v += 5;  p += 1; }
+	else if (strncmp(p, "IV",   2) == 0) { v += 4;  p += 2; }
+	else if (strncmp(p, "III",  3) == 0) { v += 3;  p += 3; }
+	else if (strncmp(p, "II",   2) == 0) { v += 2;  p += 2; }
+	else if (strncmp(p, "I",    1) == 0) { v += 1;  p += 1; }
+
+	return v;
+}
+}
 
 // Init static members
 QMap<QString, QString> StelTranslator::iso639codes;
@@ -55,20 +85,125 @@ StelTranslator::~StelTranslator()
 	translator = Q_NULLPTR;
 }
 
-QString StelTranslator::qtranslate(const QString& s, const QString& c) const
+bool StelTranslator::isEmpty() const
 {
-	if (s.isEmpty())
+	return translator->isEmpty();
+}
+
+QString StelTranslator::qtranslate(const QString& string, const QString& context) const
+{
+	if (string.isEmpty())
 		return "";
-	QString res = translator->translate("", s.toUtf8().constData(), c.toUtf8().constData());
+	const auto res = tryQtranslate(string, context);
 	if (res.isEmpty())
-		return s;
+		return string;
 	return res;
 }
 
-QString StelTranslator::tryQtranslate(const QString &s, const QString &c) const
+QString StelTranslator::qTranslateStar(const QString& string, const QString& context) const
 {
-	return translator->translate("", s.toUtf8().constData(),c.toUtf8().constData());
+	if (string.isEmpty())
+		return "";
+	const auto res = tryQtranslateStar(string, context);
+	if (res.isEmpty())
+		return string;
+	return res;
 }
+
+QString StelTranslator::qTranslateStarPronounce(const QString& string, const QString& context) const
+{
+	if (string.isEmpty())
+		return "";
+	const auto res = tryQtranslateStarPronounce(string, context);
+	if (res.isEmpty())
+		return string;
+	return res;
+}
+
+QString StelTranslator::tryTranslateChineseStar(const QString& string, const QString& context) const
+{
+	static const auto re = []{ QRegularExpression re("(.+)( [IXVLCDM]+)([*?]*)$"); re.optimize(); return re; }();
+	const auto match = re.match(string);
+	if (!match.hasMatch()) return {};
+
+	auto constellation = match.captured(1);
+	bool addedPresent = false;
+	static const QString addedPattern(" Added");
+	if (constellation.endsWith(addedPattern))
+	{
+		constellation.chop(addedPattern.length());
+		addedPresent = true;
+	}
+
+	const auto translatedConstellation = tryQtranslate(constellation, context);
+	if (translatedConstellation.isEmpty()) return {};
+
+	QString number = match.captured(2);
+	if (getTrueLocaleName().startsWith("zh"))
+	{
+		const auto num = parseRomanNumeral(QStringView(number).mid(1));
+		Q_ASSERT(num < 100);
+
+		static const char16_t chars[10+1] = u"十一二三四五六七八九";
+
+		number = "";
+		int tens = num / 10;
+		const int units = num % 10;
+		if (tens >= 2)
+		{
+			number += chars[tens];
+			tens = 1;
+		}
+		if (tens == 1)
+		{
+			number += QChar(chars[0]);
+		}
+		if (units)
+		{
+			number += chars[units];
+		}
+	}
+	const QString extra = match.captured(3);
+	if (!addedPresent) return translatedConstellation + number + extra;
+
+	// TRANSLATORS: The string " Added" stars with a space. Carefully keep the space if needed with your language.
+	const QString& translatedAdded = qtranslate(" Added", "chinese skycultures");
+	return translatedConstellation + translatedAdded + number + extra;
+}
+
+QString StelTranslator::tryTranslateChineseStarPronounce(const QString& string, const QString& context) const
+{
+        static const auto re = []{ QRegularExpression re("(.+)( [IXVLCDM*?]+)$"); re.optimize(); return re; }();
+	const auto match = re.match(string);
+	if (!match.hasMatch()) return {};
+
+	const auto constellation = match.captured(1);
+	const auto translatedConstellation = tryQtranslate(constellation, context);
+	if (translatedConstellation.isEmpty()) return {};
+
+	QString number = match.captured(2);
+	return translatedConstellation + number;
+}
+
+QString StelTranslator::tryQtranslate(const QString &string, const QString &context) const
+{
+	return translator->translate("", string.toUtf8().constData(),context.toUtf8().constData());
+}
+
+QString StelTranslator::tryQtranslateStar(const QString &string, const QString &context) const
+{
+	const auto translated = tryTranslateChineseStar(string, context);
+	if (!translated.isEmpty()) return translated;
+	return tryQtranslate(string, context);
+}
+
+QString StelTranslator::tryQtranslateStarPronounce(const QString &string, const QString &context) const
+{
+	const auto translated = tryTranslateChineseStarPronounce(string, context);
+	if (!translated.isEmpty()) return translated;
+	return tryQtranslate(string, context);
+}
+
 	
 //! Initialize Translation
 //! @param fileName file containing the list of language codes
@@ -78,14 +213,16 @@ void StelTranslator::init(const QString& fileName)
 	StelTranslator::initIso639_1LanguageCodes(fileName);
 	
 	Q_ASSERT(StelTranslator::globalTranslator==Q_NULLPTR);
-	StelTranslator::globalTranslator = new StelTranslator("stellarium", "system");
+	StelTranslator::globalTranslator = new StelTranslator("stellarium", "en");
 }
 
 //! Try to determine system language from system configuration
 void StelTranslator::initSystemLanguage()
 {
+#ifdef ENABLE_NLS
 	systemLangName = QLocale::system().name();
 	if (systemLangName.isEmpty())
+#endif
 		systemLangName = "en";
 
 	//change systemLangName to ISO 639 / ISO 3166.
@@ -93,10 +230,12 @@ void StelTranslator::initSystemLanguage()
 	if (pos != -1) systemLangName.resize(pos);
 	pos = systemLangName.indexOf('.', 0);
 	if (pos != -1) systemLangName.resize(pos);
+
+	qInfo().noquote() << "System language (ISO 639 / ISO 3166):" << systemLangName;
 }
 
 
-//! Convert from ISO639-1 2(+3) letters langage code to native language name
+//! Convert from ISO639-1 2(+3) letters language code to native language name
 QString StelTranslator::iso639_1CodeToNativeName(const QString& languageCode)
 {
 	if (languageCode=="C")
@@ -115,15 +254,15 @@ QString StelTranslator::iso639_1CodeToNativeName(const QString& languageCode)
 	if (iso639codes.contains(languageCode))
 		return iso639codes[languageCode];
 
-	// qWarning() << "WARNING: Cannot determine name of language for code" << languageCode;
+	// qWarning() << "Cannot determine name of language for code" << languageCode;
 	return languageCode;
 }
 
-//! Convert from native language name to ISO639-1 2(+3) letters langage code
+//! Convert from native language name to ISO639-1 2(+3) letters language code
 QString StelTranslator::nativeNameToIso639_1Code(const QString& languageName)
 {
 	QMap<QString, QString>::ConstIterator iter;
-	for (iter=iso639codes.begin();iter!=iso639codes.end();++iter)
+	for (iter=iso639codes.constBegin();iter!=iso639codes.constEnd();++iter)
 		if (iter.value() == languageName)
 			return iter.key();
 
@@ -138,7 +277,7 @@ QStringList StelTranslator::getAvailableLanguagesNamesNative(const QString& loca
 		tmpDir.append("/stellarium/");
 	else
 		tmpDir.append("/stellarium-" + section + "/");
-	QStringList codeList = getAvailableIso639_1Codes(tmpDir);
+	const QStringList codeList = getAvailableIso639_1Codes(tmpDir);
 	QStringList output;
 	for (const auto& lang : codeList)
 	{
@@ -158,8 +297,9 @@ QStringList StelTranslator::getAvailableIso639_1Codes(const QString& localeDir)
 		return QStringList();
 	}
 
+	const QStringList entries=dir.entryList(QDir::Files, QDir::Name);
 	QStringList result;
-	for (auto path : dir.entryList(QDir::Files, QDir::Name))
+	for (auto path : entries)
 	{
 		if (!path.endsWith(".qm"))
 			continue;
@@ -186,7 +326,12 @@ void StelTranslator::initIso639_1LanguageCodes(const QString& fileName)
 	while (!inf.atEnd())
 	{
 		QString record = QString::fromUtf8(inf.readLine());
-		record.remove(QRegExp("[\\n\\r]*$")); // chomp new lines
+
+		if (record.startsWith("//") || record.startsWith("#") || record.isEmpty()) // skip comments and empty lines
+			continue;
+
+		static const QRegularExpression nlExp("[\\n\\r]*$");
+		record.remove(nlExp); // chomp new lines
 		#if (QT_VERSION>=QT_VERSION_CHECK(5, 14, 0))
 		const QStringList& fields = record.split("\t", Qt::SkipEmptyParts);
 		#else
@@ -194,4 +339,24 @@ void StelTranslator::initIso639_1LanguageCodes(const QString& fileName)
 		#endif
 		iso639codes.insert(fields.at(0), fields.at(2));
 	}
+}
+
+StelSkyTranslator::StelSkyTranslator(const QString& langName)
+	: StelTranslator("stellarium-skycultures", langName)
+	, commonSkyTranslator("stellarium-sky", langName)
+{
+	if (commonSkyTranslator.isEmpty())
+		qWarning() << "Empty skyculture-independent translation file for language " << getTrueLocaleName();
+}
+
+QString StelSkyTranslator::tryQtranslate(const QString& string, const QString& context) const
+{
+	const auto res = StelTranslator::tryQtranslate(string, context);
+	if (!res.isEmpty()) return res;
+	return commonSkyTranslator.tryQtranslate(string, context);
+}
+
+bool StelSkyTranslator::isEmpty() const
+{
+	return StelTranslator::isEmpty() && commonSkyTranslator.isEmpty();
 }

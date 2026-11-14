@@ -72,15 +72,15 @@ public:
 	StelSkyImageTile();
 
 	//! Constructor
-	StelSkyImageTile(const QString& url, StelSkyImageTile* parent=Q_NULLPTR);
+	StelSkyImageTile(const QString& url, StelSkyImageTile* parent=Q_NULLPTR, int decimateBy=1);
 	//! Constructor
-	StelSkyImageTile(const QVariantMap& map, StelSkyImageTile* parent);
+	StelSkyImageTile(const QVariantMap& map, StelSkyImageTile* parent, int decimateBy=1);
 
 	//! Destructor
-	~StelSkyImageTile();
+	~StelSkyImageTile() override;
 
 	//! Draw the image on the screen.
-	void draw(StelCore* core, StelPainter& sPainter, float opacity=1.);
+	void draw(StelCore* core, StelPainter& sPainter, float opacity=1.) override;
 
 	//! Return the dataset credits to use in the progress bar
 	DataSetCredits getDataSetCredits() const {return dataSetCredits;}
@@ -91,7 +91,7 @@ public:
 	//! Return true if the tile is fully loaded and can be displayed
 	bool isReadyToDisplay() const;
 
-	//! Convert the image informations to a map following the JSON structure.
+	//! Convert the image information to a map following the JSON structure.
 	//! It can be saved as JSON using the StelJsonParser methods.
 	QVariantMap toQVariantMap() const;
 
@@ -99,12 +99,21 @@ public:
 	QString getAbsoluteImageURI() const {return absoluteImageURI;}
 
 	//! Return an HTML description of the image to be displayed in the GUI.
-	virtual QString getLayerDescriptionHtml() const {return htmlDescription;}
+	QString getLayerDescriptionHtml() const override {return htmlDescription;}
+
+	//! Set Visible Flag.
+	void setVisible(bool b){flagVisible = b;}
+
+	//! Get Visible Flag.
+	bool getVisible(){return flagVisible;}
+
+	//! return list of all the polygons.
+	QList<SphericalRegionP> getSkyConvexPolygons(){return skyConvexPolygons;}
 
 protected:
 	//! Reimplement the abstract method.
 	//! Load the tile from a valid QVariantMap.
-	virtual void loadFromQVariantMap(const QVariantMap& map);
+	void loadFromQVariantMap(const QVariantMap& map) override;
 
 	//! The credits of the server where this data come from
 	ServerCredits serverCredits;
@@ -136,6 +145,12 @@ protected:
 	//! Allow some images to be shown only after this date, e.g. Supernova remnants.
 	double birthJD;
 
+	//! Should usually be true. Allow disabling observation of aberration correction for script-loaded SkyImages.
+	bool withAberration;
+
+	//! Should be default true. Control visible of single tile.
+	bool flagVisible;
+
 private:
 	//! init the StelSkyImageTile
 	void initCtor();
@@ -146,10 +161,10 @@ private:
 
 	//! Draw the image on the screen.
 	//! @return true if the tile was actually displayed
-	bool drawTile(StelCore* core, StelPainter& sPainter);
+	bool drawTile(StelCore* core, StelPainter& sPainter, const Vec3d &vel);
 
 	//! Return the minimum resolution
-	double getMinResolution() const {return minResolution;}
+	double getMinResolution() const {return static_cast<double>(minResolution);}
 
 	//! The list of all the subTiles URL or already loaded JSON map for this tile
 	QVariantList subTilesUrls;
@@ -158,6 +173,8 @@ private:
 	QTimeLine* texFader;
 
 	QString htmlDescription;
+
+	int decimation; //!> Allow texture size reduction for very weak hardware. Default 1, useful 2..8.
 };
 
 #endif // STELSKYIMAGETILE_HPP

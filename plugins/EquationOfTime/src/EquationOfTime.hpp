@@ -23,7 +23,6 @@
 #include "StelGui.hpp"
 #include "StelModule.hpp"
 
-#include <QFont>
 #include <QString>
 
 class QPixmap;
@@ -32,7 +31,7 @@ class EquationOfTimeWindow;
 
 /*! @defgroup equationOfTime Equation of Time plug-in
 @{
-The %Equation of Time plugin shows the solution of the equation of time.
+The %Equation of Time plugin shows the values of the equation of time.
 
 The equation of time describes the discrepancy between two kinds of solar
 time. These are apparent solar time, which directly tracks the motion of
@@ -71,14 +70,12 @@ class EquationOfTime : public StelModule
 
 public:
 	EquationOfTime();
-	virtual ~EquationOfTime();
+	~EquationOfTime() override;
 
-	virtual void init();
-	virtual void deinit();
-	virtual void update(double) {;}
-	virtual void draw(StelCore *core);
-	virtual double getCallOrder(StelModuleActionName actionName) const;
-	virtual bool configureGui(bool show);
+	void init() override;
+	void draw(StelCore *core) override;
+	double getCallOrder(StelModuleActionName actionName) const override;
+	bool configureGui(bool show) override;
 
 	//! Set up the plugin with default values.  This means clearing out the EquationOfTime section in the
 	//! main config.ini (if one already exists), and populating it with default values.
@@ -151,11 +148,13 @@ private:
 	// if existing, delete EquationOfTime section in main config.ini, then create with default values
 	void restoreDefaultConfigIni(void);
 
-	EquationOfTimeWindow* mainWindow;
-	QSettings* conf;
+#ifndef NO_GUI
 	StelGui* gui;
+	EquationOfTimeWindow* mainWindow;
+	StelButton* toolbarButton;
+#endif
+	QSettings* conf;
 
-	QFont font;
 	bool flagShowSolutionEquationOfTime;
 	bool flagUseInvertedValue;
 	bool flagUseMsFormat;
@@ -166,7 +165,6 @@ private:
 	QString messageEquationSeconds;
 	Vec3f textColor;
 	int fontSize;
-	StelButton* toolbarButton;
 };
 
 
@@ -180,9 +178,9 @@ class EquationOfTimeStelPluginInterface : public QObject, public StelPluginInter
 	Q_PLUGIN_METADATA(IID StelPluginInterface_iid)
 	Q_INTERFACES(StelPluginInterface)
 public:
-	virtual StelModule* getStelModule() const;
-	virtual StelPluginInfo getPluginInfo() const;
-	virtual QObjectList getExtensionList() const { return QObjectList(); }
+	StelModule* getStelModule() const override;
+	StelPluginInfo getPluginInfo() const override;
+	//QObjectList getExtensionList() const override { return QObjectList(); }
 };
 
 #endif /* EQUATIONOFTIME_HPP */

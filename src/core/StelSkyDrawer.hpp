@@ -20,16 +20,20 @@
 #ifndef STELSKYDRAWER_HPP
 #define STELSKYDRAWER_HPP
 
+#include "StelApp.hpp"
 #include "RefractionExtinction.hpp"
 #include "StelTextureTypes.hpp"
-#include "StelProjectorType.hpp"
 #include "VecMath.hpp"
-#include "StelOpenGL.hpp"
 
+#include <memory>
 #include <QObject>
 #include <QImage>
+#include <QSettings>
+#include <QOpenGLFunctions>
 
+class QOpenGLVertexArrayObject;
 class StelToneReproducer;
+class QOpenGLBuffer;
 class StelCore;
 class StelPainter;
 
@@ -54,7 +58,8 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(double absoluteStarScale READ getAbsoluteStarScale WRITE setAbsoluteStarScale NOTIFY absoluteStarScaleChanged)
 	Q_PROPERTY(double twinkleAmount READ getTwinkleAmount WRITE setTwinkleAmount NOTIFY twinkleAmountChanged)
 	Q_PROPERTY(bool flagStarTwinkle READ getFlagTwinkle WRITE setFlagTwinkle NOTIFY flagTwinkleChanged)
-	Q_PROPERTY(int bortleScaleIndex READ getBortleScaleIndex WRITE setBortleScaleIndex NOTIFY bortleScaleIndexChanged)
+	Q_PROPERTY(bool flagForcedTwinkle READ getFlagForcedTwinkle WRITE setFlagForcedTwinkle NOTIFY flagForcedTwinkleChanged)
+	Q_PROPERTY(double lightPollutionLuminance READ getLightPollutionLuminance WRITE setLightPollutionLuminance NOTIFY lightPollutionLuminanceChanged)
 	Q_PROPERTY(bool flagDrawBigStarHalo READ getFlagDrawBigStarHalo WRITE setFlagDrawBigStarHalo NOTIFY flagDrawBigStarHaloChanged)
 	Q_PROPERTY(bool flagStarSpiky READ getFlagStarSpiky WRITE setFlagStarSpiky NOTIFY flagStarSpikyChanged)
 
@@ -73,11 +78,16 @@ class StelSkyDrawer : public QObject, protected QOpenGLFunctions
 	Q_PROPERTY(double atmosphereTemperature READ getAtmosphereTemperature WRITE setAtmosphereTemperature NOTIFY atmosphereTemperatureChanged)
 	Q_PROPERTY(double atmospherePressure READ getAtmospherePressure WRITE setAtmospherePressure NOTIFY atmospherePressureChanged)
 
+	Q_PROPERTY(bool flagDrawSunAfterAtmosphere READ getFlagDrawSunAfterAtmosphere WRITE setFlagDrawSunAfterAtmosphere NOTIFY flagDrawSunAfterAtmosphereChanged)
+	Q_PROPERTY(bool flagEarlySunHalo READ getFlagEarlySunHalo WRITE setFlagEarlySunHalo NOTIFY flagEarlySunHaloChanged)
+	Q_PROPERTY(bool flagTfromK READ getFlagTfromK WRITE setFlagTfromK NOTIFY flagTfromKChanged)
+	Q_PROPERTY(double turbidity READ getT WRITE setT NOTIFY turbidityChanged)
+
 public:
 	//! Constructor
 	StelSkyDrawer(StelCore* core);
 	//! Destructor
-	~StelSkyDrawer();
+	~StelSkyDrawer() override;
 
 	//! Init parameters from config file
 	void init();
@@ -91,7 +101,8 @@ public:
 	void preDrawPointSource(StelPainter* p);
 
 	//! Finalize the drawing of point sources
-	void postDrawPointSource(StelPainter* sPainter);
+	//! Temporary: test if calling this in corona makes any sense.
+	void postDrawPointSource(StelPainter* sPainter, bool drawInCorona=false);
 
 	//! Draw a point source halo.
 	//! @param sPainter the StelPainter to use for drawing.
@@ -101,18 +112,26 @@ public:
 	//! @param checkInScreen whether source in screen should be checked to avoid unnecessary drawing.
 	//! @param twinkleFactor allows height-dependent twinkling. Recommended value: min(1,1-0.9*sin(altitude)). Allowed values [0..1]
 	//! @return true if the source was actually visible and drawn
-	bool drawPointSource(StelPainter* sPainter, const Vec3f& v, const RCMag &rcMag, int bVindex, bool checkInScreen=false, float twinkleFactor=1.0f)
+	bool drawPointSource(StelPainter* sPainter, const Vec3d& v, const RCMag &rcMag, int bVindex, bool checkInScreen=false, float twinkleFactor=1.0f)
 	{
 		return drawPointSource(sPainter, v, rcMag, colorTable[bVindex], checkInScreen, twinkleFactor);
 	}
 
-	bool drawPointSource(StelPainter* sPainter, const Vec3f& v, const RCMag &rcMag, const Vec3f& bcolor, bool checkInScreen=false, float twinkleFactor=1.0f);
+	//! Draw a point source halo.
+	//! @param sPainter the StelPainter to use for drawing.
+	//! @param v the 3d position of the source in J2000 reference frame
+	//! @param rcMag the radius and luminance of the source as computed by computeRCMag()
+	//! @param color the RGB color value (0...1, 0...1, 0...1)
+	//! @param checkInScreen whether source in screen should be checked to avoid unnecessary drawing.
+	//! @param twinkleFactor allows height-dependent twinkling. Recommended value: min(1,1-0.9*sin(altitude)). Allowed values [0..1]
+	//! @return true if the source was actually visible and drawn
+	bool drawPointSource(StelPainter* sPainter, const Vec3d& v, const RCMag &rcMag, const Vec3f& bcolor, bool checkInScreen=false, float twinkleFactor=1.0f);
 
 	//! Draw an image of the solar corona onto the screen at position v.
-	//! @param radius depends on the actually used texture and current disk size of the sun.
+	//! @param radius of current disk size of the sun [radians].
+	//! @param color solar color (after atmospheric extinction).
 	//! @param alpha opacity value. Set 1 for full visibility, but usually keep close to 0 except during solar eclipses.
-	//! @param angle includes parallactic angle (if alt/azimuth frame) and angle between solar polar axis and celestial equator.
-	void drawSunCorona(StelPainter* painter, const Vec3f& v, float radius, const Vec3f& color, const float alpha, const float angle);
+	void drawSunCorona(StelPainter* painter, const Vec3d& posJ2000, double radius, const Vec3f& color, const float alpha);
 
 	//! Terminate drawing of a 3D model, draw the halo
 	//! @param p the StelPainter instance to use for this drawing operation
@@ -120,7 +139,8 @@ public:
 	//! @param illuminatedArea the illuminated area in arcmin^2
 	//! @param mag the source integrated magnitude
 	//! @param color the object halo RGB color
-	void postDrawSky3dModel(StelPainter* p, const Vec3f& v, float illuminatedArea, float mag, const Vec3f& color = Vec3f(1.f,1.f,1.f));
+	//! @param isSun the object is the sun (will be drawn with different texture)
+	void postDrawSky3dModel(StelPainter* p, const Vec3d& v, float illuminatedArea, float mag, const Vec3f& color = Vec3f(1.f,1.f,1.f), const bool isSun=false);
 
 	//! Compute RMag and CMag from magnitude.
 	//! @param mag the object integrated V magnitude
@@ -161,65 +181,43 @@ public:
 
 public slots:
 	//! Set the way brighter stars will look bigger as the fainter ones
-	void setRelativeStarScale(double b=1.0) { starRelativeScale=b; emit relativeStarScaleChanged(b);}
+	void setRelativeStarScale(double b=1.0);
 	//! Get the way brighter stars will look bigger as the fainter ones
 	double getRelativeStarScale() const {return starRelativeScale;}
 
 	//! Set the absolute star brightness scale
-	void setAbsoluteStarScale(double b=1.0) { starAbsoluteScaleF=b; emit absoluteStarScaleChanged(b);}
+	void setAbsoluteStarScale(double b=1.0);
 	//! Get the absolute star brightness scale
 	double getAbsoluteStarScale() const {return starAbsoluteScaleF;}
 
 	//! Set source twinkle amount.
-	void setTwinkleAmount(double b) { twinkleAmount=b; emit twinkleAmountChanged(b);}
+	void setTwinkleAmount(double b);
 	//! Get source twinkle amount.
 	double getTwinkleAmount() const {return twinkleAmount;}
 
 	//! Set flag for source twinkling.
-	void setFlagTwinkle(bool b) {if(b!=flagStarTwinkle){ flagStarTwinkle=b; emit flagTwinkleChanged(b);}}
+	void setFlagTwinkle(bool b);
 	//! Get flag for source twinkling.
 	bool getFlagTwinkle() const {return flagStarTwinkle;}
 
 	//! Set flag for enable twinkling of stars without atmosphere.
 	//! @note option for planetariums
-	void setFlagForcedTwinkle(bool b) {if(b!=flagForcedTwinkle){ flagForcedTwinkle=b;}}
+	void setFlagForcedTwinkle(bool b);
 	//! Get flag for enable twinkling of stars without atmosphere.
 	//! @note option for planetariums
 	bool getFlagForcedTwinkle() const {return flagForcedTwinkle;}
 
-	//! Set the parameters so that the stars disappear at about the limit given by the bortle scale
+	//! Set the parameters so that the stars disappear at about the naked-eye limiting magnitude corresponding
+	//! to the given zenith luminance at moonless night.
 	//! The limit is valid only at a given zoom level (around 60 deg)
-	//! @see https://en.wikipedia.org/wiki/Bortle_scale
-	void setBortleScaleIndex(int index);
-	//! Get the current Bortle scale index
-	//! @see https://en.wikipedia.org/wiki/Bortle_scale
-	int getBortleScaleIndex() const {return bortleScaleIndex;}
-	//! Get the average Naked-Eye Limiting Magnitude (NELM) for current Bortle scale index:
-	//! Class 1 = NELM 7.6-8.0; average NELM is 7.8
-	//! Class 2 = NELM 7.1-7.5; average NELM is 7.3
-	//! Class 3 = NELM 6.6-7.0; average NELM is 6.8
-	//! Class 4 = NELM 6.1-6.5; average NELM is 6.3
-	//! Class 5 = NELM 5.6-6.0; average NELM is 5.8
-	//! Class 6 = NELM 5.1-5.5; average NELM is 5.3
-	//! Class 7 = NELM 4.6-5.0; average NELM is 4.8
-	//! Class 8 = NELM 4.1-4.5; average NELM is 4.3
-	//! Class 9 = NELM 4.0
-	float getNELMFromBortleScale() const;
-	//! Get the average Naked-Eye Limiting Magnitude (NELM) for given Bortle scale index [1..9]
-	//! Class 1 = NELM 7.6-8.0; average NELM is 7.8
-	//! Class 2 = NELM 7.1-7.5; average NELM is 7.3
-	//! Class 3 = NELM 6.6-7.0; average NELM is 6.8
-	//! Class 4 = NELM 6.1-6.5; average NELM is 6.3
-	//! Class 5 = NELM 5.6-6.0; average NELM is 5.8
-	//! Class 6 = NELM 5.1-5.5; average NELM is 5.3
-	//! Class 7 = NELM 4.6-5.0; average NELM is 4.8
-	//! Class 8 = NELM 4.1-4.5; average NELM is 4.3
-	//! Class 9 = NELM 4.0
-	//! @arg idx Bortle Scale Index (valid: 1..9, will be forced to valid range)
-	static float getNELMFromBortleScale(int idx);
+	void setLightPollutionLuminance(double luminance);
+	//! Get the current zenith luminance at moonless night.
+	double getLightPollutionLuminance() const {return lightPollutionLuminance;}
+
+	Q_DECL_DEPRECATED int getBortleScaleIndex() const;
 
 	//! Set flag for drawing a halo around bright stars.
-	void setFlagDrawBigStarHalo(bool b) {if(b!=flagDrawBigStarHalo){ flagDrawBigStarHalo=b; emit flagDrawBigStarHaloChanged(b);}}
+	void setFlagDrawBigStarHalo(bool b);
 	//! Get flag for drawing a halo around bright stars.
 	bool getFlagDrawBigStarHalo() const {return flagDrawBigStarHalo;}
 
@@ -229,26 +227,26 @@ public slots:
 	bool getFlagStarSpiky() const {return flagStarSpiky;}
 
 	//! Get the magnitude of the currently faintest visible point source
-	//! It depends on the zoom level, on the eye adapation and on the point source rendering parameters
+	//! It depends on the zoom level, on the eye adaptation and on the point source rendering parameters
 	//! @return the limit V mag at which a point source will be displayed
 	float getLimitMagnitude() const {return limitMagnitude;}
 
 	//! Toggle the application of user-defined star magnitude limit.
 	//! If enabled, stars fainter than the magnitude set with
 	//! setCustomStarMagnitudeLimit() will not be displayed.
-	void setFlagStarMagnitudeLimit(bool b) {if(b!=flagStarMagnitudeLimit){ flagStarMagnitudeLimit = b; emit flagStarMagnitudeLimitChanged(b);}}
+	void setFlagStarMagnitudeLimit(bool b);
 	//! @return true if the user-defined star magnitude limit is in force.
 	bool getFlagStarMagnitudeLimit() const {return flagStarMagnitudeLimit;}
 	//! Toggle the application of user-defined deep-sky object magnitude limit.
 	//! If enabled, deep-sky objects fainter than the magnitude set with
 	//! setCustomNebulaMagnitudeLimit() will not be displayed.
-	void setFlagNebulaMagnitudeLimit(bool b) {if(b!=flagNebulaMagnitudeLimit){ flagNebulaMagnitudeLimit = b; emit flagNebulaMagnitudeLimitChanged(b);}}
+	void setFlagNebulaMagnitudeLimit(bool b);
 	//! @return true if the user-defined nebula magnitude limit is in force.
 	bool getFlagNebulaMagnitudeLimit() const {return flagNebulaMagnitudeLimit;}
 	//! Toggle the application of user-defined solar system object magnitude limit.
 	//! If enabled, planets, planetary moons, asteroids (KBO, ...) and comets fainter than the magnitude set with
 	//! setCustomPlanetMagnitudeLimit() will not be displayed.
-	void setFlagPlanetMagnitudeLimit(bool b) {if(b!=flagPlanetMagnitudeLimit){ flagPlanetMagnitudeLimit = b; emit flagPlanetMagnitudeLimitChanged(b);}}
+	void setFlagPlanetMagnitudeLimit(bool b);
 	//! @return true if the user-defined nebula magnitude limit is in force.
 	bool getFlagPlanetMagnitudeLimit() const {return flagPlanetMagnitudeLimit;}
 
@@ -256,30 +254,30 @@ public slots:
 	double getCustomStarMagnitudeLimit() const {return customStarMagLimit;}
 	//! Sets a lower limit for star magnitudes (anything fainter is ignored).
 	//! In force only if flagStarMagnitudeLimit is set.
-	void setCustomStarMagnitudeLimit(double limit) { customStarMagLimit=limit; emit customStarMagLimitChanged(limit);}
+	void setCustomStarMagnitudeLimit(double limit);
 	//! Get the value used for forced nebula magnitude limiting.
 	double getCustomNebulaMagnitudeLimit() const {return customNebulaMagLimit;}
 	//! Sets a lower limit for nebula magnitudes (anything fainter is ignored).
 	//! In force only if flagNebulaMagnitudeLimit is set.
-	void setCustomNebulaMagnitudeLimit(double limit) { customNebulaMagLimit=limit; emit customNebulaMagLimitChanged(limit);}
+	void setCustomNebulaMagnitudeLimit(double limit);
 	//! Get the value used for forced solar system object magnitude limiting.
 	double getCustomPlanetMagnitudeLimit() const {return customPlanetMagLimit;}
 	//! Sets a lower limit for solar system object magnitudes (anything fainter is ignored).
 	//! In force only if flagPlanetMagnitudeLimit is set.
-	void setCustomPlanetMagnitudeLimit(double limit) { customPlanetMagLimit=limit; emit customPlanetMagLimitChanged(limit);}
+	void setCustomPlanetMagnitudeLimit(double limit);
 
 	//! Get the luminance of the faintest visible object (e.g. RGB<0.05)
-	//! It depends on the zoom level, on the eye adapation and on the point source rendering parameters
+	//! It depends on the zoom level, on the eye adaptation and on the point source rendering parameters
 	//! @return the limit V luminance at which an object will be visible
 	float getLimitLuminance() const {return limitLuminance;}
 
 	//! Set the value of the eye adaptation flag
-	void setFlagLuminanceAdaptation(bool b) {if(b!=flagLuminanceAdaptation){ flagLuminanceAdaptation=b; emit flagLuminanceAdaptationChanged(b);}}
+	void setFlagLuminanceAdaptation(bool b);
 	//! Get the current value of eye adaptation flag
 	bool getFlagLuminanceAdaptation() const {return flagLuminanceAdaptation;}
 
 	//! Set the label brightness threshold
-	void setDaylightLabelThreshold(double t) { daylightLabelThreshold=t; emit daylightLabelThresholdChanged(t);}
+	void setDaylightLabelThreshold(double t);
 	//! Get the current label brightness threshold
 	double getDaylightLabelThreshold() const {return daylightLabelThreshold;}
 	//! Return a brightness value based on objects in view (sky, sun, moon, ...)
@@ -287,20 +285,21 @@ public slots:
 
 	//! Informing the drawer whether atmosphere is displayed.
 	//! This is used to avoid twinkling/simulate extinction/refraction.
+	//! Not required as property!
 	void setFlagHasAtmosphere(bool b) {flagHasAtmosphere=b;}
 	//! This is used to decide whether to apply refraction/extinction before rendering point sources et al.
 	bool getFlagHasAtmosphere() const {return flagHasAtmosphere;}
 
 	//! Set extinction coefficient, mag/airmass (for extinction).
-	void setExtinctionCoefficient(double extCoeff) { extinction.setExtinctionCoefficient(static_cast<float>(extCoeff)); emit extinctionCoefficientChanged(static_cast<double>(extinction.getExtinctionCoefficient()));}
+	void setExtinctionCoefficient(double extCoeff);
 	//! Get extinction coefficient, mag/airmass (for extinction).
 	double getExtinctionCoefficient() const {return static_cast<double>(extinction.getExtinctionCoefficient());}
 	//! Set atmospheric (ground) temperature in deg celsius (for refraction).
-	void setAtmosphereTemperature(double celsius) {refraction.setTemperature(static_cast<float>(celsius)); emit atmosphereTemperatureChanged(static_cast<double>(refraction.getTemperature()));}
+	void setAtmosphereTemperature(double celsius);
 	//! Get atmospheric (ground) temperature in deg celsius (for refraction).
 	double getAtmosphereTemperature() const {return static_cast<double>(refraction.getTemperature());}
 	//! Set atmospheric (ground) pressure in mbar (for refraction).
-	void setAtmospherePressure(double mbar) { refraction.setPressure(static_cast<float>(mbar)); emit atmospherePressureChanged(static_cast<double>(refraction.getPressure()));}
+	void setAtmospherePressure(double mbar);
 	//! Get atmospheric (ground) pressure in mbar (for refraction).
 	double getAtmospherePressure() const {return static_cast<double>(refraction.getPressure());}
 
@@ -313,6 +312,21 @@ public slots:
 	float getBig3dModelHaloRadius() const {return big3dModelHaloRadius;}
 	//! Set the radius of the big halo texture used when a 3d model is very bright.
 	void setBig3dModelHaloRadius(float r) {big3dModelHaloRadius=r;}
+
+	// These are to find out the best sky parameters. Program feature for debugging/expert mode.
+	// These will be connected from AtmosphereDialog and forward the settings to SkyLight class.
+
+	void setFlagDrawSunAfterAtmosphere(bool val);
+	bool getFlagDrawSunAfterAtmosphere() const {return flagDrawSunAfterAtmosphere;}
+	void setFlagEarlySunHalo(bool val);
+	bool getFlagEarlySunHalo() const {return flagEarlySunHalo;}
+
+	bool getFlagTfromK(void) const {return flagTfromK;}
+	void setFlagTfromK(bool val);
+
+	double getT(void) const {return static_cast<double>(turbidity);}
+	void setT(double newT);
+
 signals:
 	//! Emitted whenever the relative star scale changed
 	void relativeStarScaleChanged(double b);
@@ -322,8 +336,10 @@ signals:
 	void twinkleAmountChanged(double b);
 	//! Emitted whenever the twinkle flag is toggled
 	void flagTwinkleChanged(bool b);
-	//! Emitted whenever the Bortle scale index changed
-	void bortleScaleIndexChanged(int index);
+	//! Emitted whenever the force twinkle flag is toggled
+	void flagForcedTwinkleChanged(bool b);
+	//! Emitted whenever light pollution luminance changed
+	void lightPollutionLuminanceChanged(double luminance);
 	//! Emitted when flag to draw big halo around stars changed
 	void flagDrawBigStarHaloChanged(bool b);
 	//! Emitted on change of star texture
@@ -351,7 +367,12 @@ signals:
 	void extinctionCoefficientChanged(double coeff);
 	void atmosphereTemperatureChanged(double celsius);
 	void atmospherePressureChanged(double mbar);
-	
+
+	void flagTfromKChanged(bool b);
+	void flagDrawSunAfterAtmosphereChanged(bool b);
+	void flagEarlySunHaloChanged(bool b);
+	void turbidityChanged(double t);
+
 private:
 	// Debug
 	float reverseComputeRCMag(float rmag) const;
@@ -402,16 +423,26 @@ private:
 	//! is displayed with a halo of size targetRadius
 	float findWorldLumForMag(float mag, float targetRadius) const;
 
+	//! Binds actual VAO if it's supported, sets up the relevant state manually otherwise.
+	void bindVAO();
+	//! Sets the vertex attribute states for the currently bound VAO so that glDraw* commands can work.
+	void setupCurrentVAO();
+	//! Binds zero VAO if VAO is supported, manually disables the relevant vertex attributes otherwise.
+	void releaseVAO();
+
 	StelCore* core;
 	StelToneReproducer* eye;
+
+	std::unique_ptr<QOpenGLVertexArrayObject> vao;
+	std::unique_ptr<QOpenGLBuffer> vbo;
 
 	Extinction extinction;
 	Refraction refraction;
 
 	float maxAdaptFov, minAdaptFov, lnfovFactor;
-	bool flagStarTwinkle;
-	bool flagForcedTwinkle;
-	double twinkleAmount;
+	bool flagStarTwinkle;      //! flickering stars due to atmospheric turbulence
+	bool flagForcedTwinkle;    //! force flickering even if atmosphere is off
+	double twinkleAmount;      //! magnitude range of atmospheric flicker at horizon
 	bool flagDrawBigStarHalo;
 	bool flagStarSpiky;
 
@@ -465,8 +496,8 @@ private:
 	//! Contains the list of colors matching a given B-V index
 	static Vec3f colorTable[128];
 
-	//! The current Bortle Scale index
-	int bortleScaleIndex;
+	//! The current light pollution luminance
+	double lightPollutionLuminance;
 
 	//! The scaling applied to input luminance before they are converted by the StelToneReproducer
 	float inScale;
@@ -499,7 +530,7 @@ private:
 	//! Current number of sources stored in the buffers (still to display)
 	unsigned int nbPointSources;
 	//! Maximum number of sources which can be stored in the buffers
-	unsigned int maxPointSources;
+	constexpr static unsigned int maxPointSources=1000;
 
 	//! The maximum transformed luminance to apply at the next update
 	float maxLum;
@@ -510,6 +541,9 @@ private:
 	StelTextureSP texBigHalo;
 	StelTextureSP texSunHalo;
 	StelTextureSP texSunCorona;
+	StelVertexArray coronaMesh; // area textured with texSunCorona
+	const int coronaMeshDim;
+	QVector<Vec2f> coronaTextureCoords;
 
 	//! Simulate the eye's luminance adaptation?
 	bool flagLuminanceAdaptation;
@@ -517,6 +551,10 @@ private:
 	double daylightLabelThreshold;
 
 	float big3dModelHaloRadius;
+	bool flagDrawSunAfterAtmosphere; // Overdraw to avoid color mixing. Useful to allow deep-red suns, but may also look ugly.
+	bool flagEarlySunHalo; // Used to select if solar halo is plotted before (true) or after (default, false) the 3D sphere.
+	bool flagTfromK; // true to compute T from extinction k
+	float turbidity; // atmospheric turbidity: Preetham sky usable for 2<T<6, best at T=5.
 };
 
 #endif // STELSKYDRAWER_HPP

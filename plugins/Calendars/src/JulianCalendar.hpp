@@ -21,6 +21,10 @@
 
 #include "Calendar.hpp"
 
+//! @class JulianCalendar
+//! @brief Functions for the Julian calendar
+//! @author Georg Zotti
+//! @ingroup calendars
 //! Stellarium uses Julian Day numbers internally, and the conventional approach of using the Gregorian calendar for dates after 1582-10-15.
 //! For dates before that, the Julian calendar is used, in the form finalized by Augustus and running unchanged since 8AD.
 //! Some European countries, especially the Protestant countries, delayed the calendar switch well into the 18th century.
@@ -37,26 +41,25 @@ public:
 
 	JulianCalendar(double jd);
 
-	virtual ~JulianCalendar() Q_DECL_OVERRIDE {}
+	~JulianCalendar() override {}
 
 public slots:
-	virtual void retranslate() Q_DECL_OVERRIDE;
+	void retranslate() override;
 
 	//! Set a calendar date from the Julian day number
-	virtual void setJD(double JD) Q_DECL_OVERRIDE;
+	void setJD(double JD) override;
 
 	//! set date from a vector of calendar date elements sorted from the largest to the smallest.
 	//! Year-Month[1...12]-Day[1...31]
-	virtual void setDate(QVector<int> parts) Q_DECL_OVERRIDE;
+	void setDate(const QVector<int> &parts) override;
 
 	//! get a stringlist of calendar date elements sorted from the largest to the smallest.
 	//! Year, Month, MonthName, Day, DayName
-	virtual QStringList getDateStrings() const Q_DECL_OVERRIDE;
+	QStringList getDateStrings() const override;
 
 	//! get a formatted complete string for a date
-	virtual QString getFormattedDateString() const Q_DECL_OVERRIDE;
+	QString getFormattedDateString() const override;
 
-public:
 	//! return name of week day. This is actually independent from any calendar, just a modulo of JD.
 	static QString weekday(double jd);
 
@@ -64,11 +67,12 @@ public:
 	static bool isLeap(int year);
 
 	//! find RD number for date in the Julian calendar (may be used in other calendars!)
-	static int fixedFromJulian(QVector<int> julian);
+	static int fixedFromJulian(const QVector<int> &julian);
 	//! find date in the Julian calendar from RD number (may be used in other calendars!)
 	static QVector<int> julianFromFixed(int rd);
 
-	constexpr static const int julianEpoch=-1; //! RD of January 1, AD1.
+public:
+	constexpr static const int julianEpoch=-1; //! RD of January 1, AD1 (jul.).
 
 protected:
 	static QMap<int, QString> weekDayNames;

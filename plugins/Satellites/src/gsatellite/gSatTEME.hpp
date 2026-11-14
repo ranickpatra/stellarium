@@ -11,12 +11,12 @@
  *              Kelso, "Revisiting Spacetrack Report #3,"
  *              presented at the AIAA/AAS Astrodynamics Specialist
  *              Conference, Keystone, CO, 2006 August 21-24.
- *              http://celestrak.com/publications/AIAA/2006-6753/
+ *              https://celestrak.org/publications/AIAA/2006-6753/
  ***************************************************************************/
 
 /***************************************************************************
  *   Copyright (C) 2006 by J.L. Canales                                    *
- *   jlcanales.gasco@gmail.com                                  *
+ *   jlcanales.gasco@gmail.com                                             *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -31,7 +31,7 @@
  *   You should have received a copy of the GNU General Public License     *
  *   along with this program; if not, write to the                         *
  *   Free Software Foundation, Inc.,                                       *
- *   51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.             *
+ *   51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.           *
  ***************************************************************************/
 
 #ifndef GSATTEME_HPP
@@ -39,16 +39,16 @@
 
 #include "gTime.hpp"
 #include "VecMath.hpp"
+#include "StelUtils.hpp"
 
 #include "sgp4unit.h"
-#include "sgp4ext.h"
 #include "stdsat.h"
 
 //! @class gSatTEME
 //! @brief Sat position and velocity predictions over TEME reference system.
 //! @details
 //! Class to abstract all the SGP4 complexity.
-//! It implementation wrap whit an object oriented class the revised David. A. Vallado
+//! It implementation wrap with an object oriented class the revised David. A. Vallado
 //! code for SGP4 Calculation. (Spacetrack report #6 revised AIAA-2006-6753-rev1)
 //! @ingroup satellites
 class gSatTEME
@@ -86,7 +86,7 @@ public:
 	// Operation: getPos()
 	//! @brief Get the TEME satellite position Vector
 	//! @return Vec3d
-	//!   Satellite position vector meassured in Km.
+	//!   Satellite position vector measured in Km.
 	//!    x: position[0]
 	//!    y: position[1]
 	//!    z: position[2]
@@ -110,11 +110,11 @@ public:
 	//! @brief Get the Geographic satellite subpoint Vector calculated by the method compute SubPoint
 	//! @details To implement this operation, next references has been used:
 	//!	   Orbital Coordinate Systems, Part III  By Dr. T.S. Kelso
-	//!	   http://www.celestrak.com/columns/v02n03/
+	//!	   https://celestrak.org/columns/v02n03/
 	//! @return Vec3d Geographical coordinates\n
 	//!    Latitude:  Coord[0]  measured in degrees\n
 	//!    Longitude: Coord[1]  measured in degrees\n
-	//!	   Altitude:  Coord[2]  measured in Km.\n
+	//!    Altitude:  Coord[2]  measured in Km.\n
 	const Vec3d& getSubPoint() const
 	{
 		return m_SubPoint;
@@ -144,7 +144,7 @@ public:
 	Vec2d getPerigeeApogee() const
 	{
 		double semiMajorAxis = std::cbrt((xke/satrec.no)*(xke/satrec.no));
-		return Vec2d((semiMajorAxis*(1.0 - satrec.ecco) - 1.0)*KEARTHRADIUS, (semiMajorAxis*(1.0 + satrec.ecco) - 1.0)*KEARTHRADIUS);
+		return Vec2d((semiMajorAxis*(1.0 - satrec.ecco) - 1.0)*EARTH_RADIUS, (semiMajorAxis*(1.0 + satrec.ecco) - 1.0)*EARTH_RADIUS);
 	}
 
 private:
@@ -152,7 +152,7 @@ private:
 	//! @brief Compute the Geographic satellite subpoint Vector
 	//! @details To implement this operation, next references has been used:
 	//!	   Orbital Coordinate Systems, Part III  By Dr. T.S. Kelso
-	//!	   http://www.celestrak.com/columns/v02n03/
+	//!	   https://celestrak.org/columns/v02n03/
 	//! @param[in] ai_Time Epoch time for subpoint calculation. (of course, this must be
 	//!    refactorized to be computed in the setEpoch function)
 	//! @return Vec3d Geographical coordinates\n
@@ -161,7 +161,7 @@ private:
 	//!	   Altitude:  Coord[2]  measured in Km.\n
 	Vec3d computeSubPoint(gTime ai_time);
 
-	// sgp4 proceses variables
+	// sgp4 processes variables
 	double tumin, mu, radiusearthkm, xke, j2, j3, j4, j3oj2;
 	elsetrec satrec;
 

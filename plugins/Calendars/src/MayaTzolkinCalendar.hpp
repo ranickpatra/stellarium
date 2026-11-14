@@ -31,24 +31,23 @@ class MayaTzolkinCalendar : public Calendar
 public:
 	MayaTzolkinCalendar(double jd);
 
-	virtual ~MayaTzolkinCalendar() Q_DECL_OVERRIDE {}
+	~MayaTzolkinCalendar() override {}
 
 public slots:
-	virtual void retranslate() Q_DECL_OVERRIDE;
+	void retranslate() override;
 
 	//! Set a calendar date from the Julian day number
-	virtual void setJD(double JD) Q_DECL_OVERRIDE;
+	void setJD(double JD) override;
 
 	//! set date from a vector of calendar date elements sorted from the largest to the smallest.
 	//! dayNumber[1..13]-nameIndex[1..20]
 	//! We face a problem as the date is not unique. We can only find the date before current JD which matches the parts.
-	virtual void setDate(QVector<int> parts) Q_DECL_OVERRIDE;
+	void setDate(const QVector<int> &parts) override;
 
 	//! get a stringlist of calendar date elements sorted from the largest to the smallest.
 	//! dayNumber[1..13]-name
-	virtual QStringList getDateStrings() const Q_DECL_OVERRIDE;
+	QStringList getDateStrings() const override;
 
-public:
 	//! usually internal, but used by MayaHaabCalendar.
 	static QVector<int> mayanTzolkinFromFixed(int rd);
 
@@ -56,11 +55,15 @@ public:
 	static QString tzolkinName(int i) {return tzolkinNames.value(i);}
 
 	// ordinal of {number, name}
-	inline static int mayanTzolkinOrdinal(QVector<int> tzolkin) {return StelUtils::imod((tzolkin.at(0) - 1 + 39*(tzolkin.at(0)-tzolkin.at(1))), 260);}
-	static const int mayanTzolkinEpoch;
+	inline static int mayanTzolkinOrdinal(const QVector<int> &tzolkin) {return StelUtils::imod((tzolkin.at(0) - 1 + 39*(tzolkin.at(0)-tzolkin.at(1))), 260);}
 
+	static int mayanTzolkinOnOrBefore(const QVector<int> &tzolkin, int rd);
+
+	//! Handle a change of Maya Epoch. Connect this in Calendars init.
+	void updateFromMayaEpoch();
+public:
+	static int mayanTzolkinEpoch;
 private:
-	static int mayanTzolkinOnOrBefore(QVector<int> tzolkin, int rd);
 	static QMap<int, QString> tzolkinNames;
 };
 

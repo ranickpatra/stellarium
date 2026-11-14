@@ -20,18 +20,15 @@
 #include "StelPropertyService.hpp"
 
 #include "StelApp.hpp"
-#include "StelCore.hpp"
-#include "StelModuleMgr.hpp"
-#include "StelLocationMgr.hpp"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 
 StelPropertyService::StelPropertyService(QObject *parent)
-	: AbstractAPIService(parent)
+	: AbstractAPIService(parent),
+	  propMgr(StelApp::getInstance().getStelPropertyManager())
 {
-	propMgr = StelApp::getInstance().getStelPropertyManager();
 }
 
 void StelPropertyService::get(const QByteArray& operation, const APIParameters &parameters, APIServiceResponse &response)

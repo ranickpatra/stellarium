@@ -24,22 +24,23 @@
  * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
  */
  
+#include <QRegularExpression>
+#include <QStringList>
+
 #include "TelescopeClientDirectLx200.hpp"
 
 #include "Lx200Connection.hpp"
 #include "Lx200Command.hpp"
-#include "common/LogFile.hpp"
+#include "common/TelescopeLogging.hpp"
 #include "StelCore.hpp"
-#include "StelUtils.hpp"
 
-#include <QRegExp>
-#include <QStringList>
-
-TelescopeClientDirectLx200::TelescopeClientDirectLx200 (const QString &name, const QString &parameters, Equinox eq)
-	: TelescopeClient(name)
+TelescopeClientDirectLx200::TelescopeClientDirectLx200(const QString &name, const QString &parameters,
+                                                       TelescopeControl::Equinox eq, int slot)
+	: TelescopeClient(name, slot)
+	, Server(0, slot)
 	, time_delay(0)
 	, equinox(eq)
-	, lx200(Q_NULLPTR)
+	, lx200(nullptr)
 	, long_format_used(false)
 	, answers_received(false)
 	, last_ra(0)
@@ -47,49 +48,101 @@ TelescopeClientDirectLx200::TelescopeClientDirectLx200 (const QString &name, con
 	, next_pos_time(0)
 {
 	interpolatedPosition.reset();
-	
-	//Extract parameters
-	//Format: "serial_port_name:time_delay"
-	QRegExp paramRx("^([^:]*):(\\d+)$");
+
+	//Extract parameters. Two formats are accepted:
+	// Serial:  "serial_port_name:time_delay"          e.g. "/dev/ttyS0:500000"
+	// Network: "host_name:tcp_port:time_delay"        e.g. "192.168.1.5:4030:500000"
+	//The network form (LX200 protocol over TCP) is distinguished by having
+	//two colons instead of one.
+	static const QRegularExpression tcpParamRx("^([^:]+):(\\d+):(\\d+)$");
+	static const QRegularExpression serialParamRx("^([^:]*):(\\d+)$");
+	QRegularExpressionMatch tcpMatch = tcpParamRx.match(parameters);
+
 	QString serialDeviceName;
-	if (paramRx.exactMatch(parameters))
+	QString hostName;
+	int tcpPort = 0;
+	bool useNetwork = false;
+
+	if (tcpMatch.hasMatch())
 	{
-		// This QRegExp only matches valid integers
-		serialDeviceName = paramRx.cap(1).trimmed();
-		time_delay       = paramRx.cap(2).toInt();
+		useNetwork = true;
+		hostName   = tcpMatch.captured(1).trimmed();
+		tcpPort    = tcpMatch.captured(2).toInt();
+		time_delay = tcpMatch.captured(3).toInt();
 	}
 	else
 	{
-		qWarning() << "ERROR creating TelescopeClientDirectLx200: invalid parameters.";
-		return;
+		QRegularExpressionMatch serialMatch = serialParamRx.match(parameters);
+		if (serialMatch.hasMatch())
+		{
+			// This RegExp only matches valid integers
+			serialDeviceName = serialMatch.captured(1).trimmed();
+			time_delay       = serialMatch.captured(2).toInt();
+		}
+		else
+		{
+			qCWarning(Telescopes) << getLogPrefix()
+			                      << "ERROR creating TelescopeClientDirectLx200: invalid parameters.";
+			return;
+		}
 	}
-	
-	qDebug() << "TelescopeClientDirectLx200 parameters: port, time_delay:" << serialDeviceName << time_delay;
-	
+
+	if (useNetwork)
+		qCDebug(Telescopes) << getLogPrefix()
+		                    << "TelescopeClientDirectLx200 parameters: host, port, time_delay:" << hostName
+		                    << tcpPort << time_delay;
+	else
+		qCDebug(Telescopes) << getLogPrefix()
+		                    << "TelescopeClientDirectLx200 parameters: port, time_delay:" << serialDeviceName
+		                    << time_delay;
+
 	//Validation: Time delay
 	if (time_delay <= 0 || time_delay > 10000000)
 	{
-		qWarning() << "ERROR creating TelescopeClientDirectLx200: time_delay not valid (should be less than 10000000)";
+		qCWarning(Telescopes) << getLogPrefix()
+		                      << "ERROR creating TelescopeClientDirectLx200: time_delay not valid "
+		                         "(should be less than 10000000)";
 		return;
 	}
-	
+
 	//end_of_timeout = -0x8000000000000000LL;
-	
-	#ifdef Q_OS_WIN
-	if(serialDeviceName.right(serialDeviceName.size() - 3).toInt() > 9)
-		serialDeviceName = "\\\\.\\" + serialDeviceName;//"\\.\COMxx", not sure if it will work
-	#endif //Q_OS_WIN
-	
+
 	//Try to establish a connection to the telescope
-	lx200 = new Lx200Connection(*this, qPrintable(serialDeviceName));
-	if (lx200->isClosed())
+	if (useNetwork)
 	{
-		qWarning() << "ERROR creating TelescopeClientDirectLx200: cannot open serial device" << serialDeviceName;
-		return;
+		Lx200TcpConnection *connection = new Lx200TcpConnection(*this, qPrintable(hostName), tcpPort);
+		if (connection->isClosed())
+		{
+			qCWarning(Telescopes) << getLogPrefix()
+			                      << "ERROR creating TelescopeClientDirectLx200: cannot connect to"
+			                      << hostName << "port" << tcpPort;
+			delete connection;
+			return;
+		}
+		lx200 = connection;
+		// Server owns the connection and deletes it with its socket list in Server::SocketList::clear().
+		addConnection(connection);
 	}
-	
-	// lx200 will be deleted in the destructor of Server
-	addConnection(lx200);
+	else
+	{
+		#ifdef Q_OS_WIN
+		if(serialDeviceName.right(serialDeviceName.size() - 3).toInt() > 9)
+			serialDeviceName = "\\\\.\\" + serialDeviceName;//"\\.\COMxx", not sure if it will work
+		#endif //Q_OS_WIN
+
+		Lx200SerialConnection *connection = new Lx200SerialConnection(*this, qPrintable(serialDeviceName));
+		if (connection->isClosed())
+		{
+			qCWarning(Telescopes) << getLogPrefix()
+			                      << "ERROR creating TelescopeClientDirectLx200: cannot open serial device"
+			                      << serialDeviceName;
+			delete connection;
+			return;
+		}
+		lx200 = connection;
+		// Server owns the connection and deletes it with its socket list in Server::SocketList::clear().
+		addConnection(connection);
+	}
 	
 	long_format_used = false; // unknown
 	last_ra = 0;
@@ -107,7 +160,7 @@ void TelescopeClientDirectLx200::telescopeGoto(const Vec3d &j2000Pos, StelObject
 		return;
 
 	Vec3d position = j2000Pos;
-	if (equinox == EquinoxJNow)
+	if (equinox == TelescopeControl::EquinoxJNow)
 	{
 		const StelCore* core = StelApp::getInstance().getCore();
 		position = core->j2000ToEquinoxEqu(j2000Pos, StelCore::RefractionOff);
@@ -117,8 +170,8 @@ void TelescopeClientDirectLx200::telescopeGoto(const Vec3d &j2000Pos, StelObject
 	//Workaround for the discrepancy in precision between Windows/Linux/PPC Macs and Intel Macs:
 	const double ra = (ra_signed >= 0) ? ra_signed : (ra_signed + 2.0 * M_PI);
 	const double dec = atan2(position[2], std::sqrt(position[0]*position[0]+position[1]*position[1]));
-	unsigned int ra_int = static_cast<unsigned int>(floor(0.5 + ra*(static_cast<unsigned int>(0x80000000)/M_PI)));
-	int dec_int = static_cast<int>(floor(0.5 + dec*(static_cast<unsigned int>(0x80000000)/M_PI)));
+	unsigned int ra_int = static_cast<unsigned int>(std::floor(0.5 + ra*(static_cast<unsigned int>(0x80000000)/M_PI)));
+	int dec_int = static_cast<int>(std::floor(0.5 + dec*(static_cast<unsigned int>(0x80000000)/M_PI)));
 
 	gotoReceived(ra_int, dec_int);
 }
@@ -131,7 +184,7 @@ void TelescopeClientDirectLx200::telescopeSync(const Vec3d &j2000Pos, StelObject
 		return;
 
 	Vec3d position = j2000Pos;
-	if (equinox == EquinoxJNow)
+	if (equinox == TelescopeControl::EquinoxJNow)
 	{
 		const StelCore* core = StelApp::getInstance().getCore();
 		position = core->j2000ToEquinoxEqu(j2000Pos, StelCore::RefractionOff);
@@ -141,10 +194,26 @@ void TelescopeClientDirectLx200::telescopeSync(const Vec3d &j2000Pos, StelObject
 	//Workaround for the discrepancy in precision between Windows/Linux/PPC Macs and Intel Macs:
 	const double ra = (ra_signed >= 0) ? ra_signed : (ra_signed + 2.0 * M_PI);
 	const double dec = atan2(position[2], std::sqrt(position[0]*position[0]+position[1]*position[1]));
-	unsigned int ra_int = static_cast<unsigned int>(floor(0.5 + ra*(static_cast<unsigned int>(0x80000000)/M_PI)));
-	int dec_int = static_cast<int>(floor(0.5 + dec*(static_cast<unsigned int>(0x80000000)/M_PI)));
+	unsigned int ra_int = static_cast<unsigned int>(std::floor(0.5 + ra*(static_cast<unsigned int>(0x80000000)/M_PI)));
+	int dec_int = static_cast<int>(std::floor(0.5 + dec*(static_cast<unsigned int>(0x80000000)/M_PI)));
 
 	syncReceived(ra_int, dec_int);
+}
+
+void TelescopeClientDirectLx200::telescopeAbortSlew()
+{
+	if (!isConnected())
+		return;
+	lx200->sendAbort();
+
+	// sendAbort() discards every queued command, including any position query
+	// that was in flight. That would leave queue_get_position stuck false and
+	// stop the position polling entirely. Re-arm it, but with a short delay so
+	// that answers to the discarded queries can arrive and be ignored before
+	// the next query is sent. Without this the client goes silent and a
+	// networked LX200 server drops the connection on its read timeout.
+	queue_get_position = true;
+	next_pos_time = GetNow() + 500000; // 0.5 s
 }
 
 void TelescopeClientDirectLx200::gotoReceived(unsigned int ra_int, int dec_int)
@@ -182,16 +251,14 @@ void TelescopeClientDirectLx200::communicationResetReceived(void)
 	long_format_used = false;
 	queue_get_position = true;
 	next_pos_time = -0x8000000000000000LL;
-	
-#ifndef QT_NO_DEBUG
-	*log_file << Now() << "TelescopeClientDirectLx200::communicationResetReceived" << StelUtils::getEndLineChar();
-#endif
 
-	if (answers_received)
-	{
-		closeAcceptedConnections();
-		answers_received = false;
-	}
+	qCDebug(Telescopes) << getLogPrefix() << "TelescopeClientDirectLx200::communicationResetReceived";
+
+	// A protocol-level reset (e.g. a timeout while waiting for an answer)
+	// must not tear down the transport itself: the serial path never did
+	// (closeAcceptedConnections() only touches TCP sockets), so neither
+	// should the TCP path. We simply re-synchronise and keep the link open.
+	answers_received = false;
 }
 
 //! Called in Lx200CommandGetRa and Lx200CommandGetDec.
@@ -210,9 +277,7 @@ void TelescopeClientDirectLx200::raReceived(unsigned int ra_int)
 {
 	answers_received = true;
 	last_ra = ra_int;
-#ifndef QT_NO_DEBUG
-	*log_file << Now() << "TelescopeClientDirectLx200::raReceived: " << ra_int << StelUtils::getEndLineChar();
-#endif
+	qCDebug(Telescopes) << getLogPrefix() << "TelescopeClientDirectLx200::raReceived:" << ra_int;
 }
 
 //! Called by Lx200CommandGetDec::readAnswerFromBuffer().
@@ -220,9 +285,7 @@ void TelescopeClientDirectLx200::raReceived(unsigned int ra_int)
 void TelescopeClientDirectLx200::decReceived(unsigned int dec_int)
 {
 	answers_received = true;
-#ifndef QT_NO_DEBUG
-	*log_file << Now() << "TelescopeClientDirectLx200::decReceived: " << dec_int << StelUtils::getEndLineChar();
-#endif
+	qCDebug(Telescopes) << getLogPrefix() << "TelescopeClientDirectLx200::decReceived:" << dec_int;
 	const int lx200_status = 0;
 	sendPosition(last_ra, static_cast<int>(dec_int), lx200_status);
 	queue_get_position = true;
@@ -230,6 +293,8 @@ void TelescopeClientDirectLx200::decReceived(unsigned int dec_int)
 
 void TelescopeClientDirectLx200::step(long long int timeout_micros)
 {
+	if (!lx200 || lx200->isClosed())
+		return;
 	long long int now = GetNow();
 	if (queue_get_position && now >= next_pos_time)
 	{
@@ -243,12 +308,12 @@ void TelescopeClientDirectLx200::step(long long int timeout_micros)
 
 bool TelescopeClientDirectLx200::isConnected(void) const
 {
-	return (!lx200->isClosed());//TODO
+	return (lx200 && !lx200->isClosed());//TODO
 }
 
 bool TelescopeClientDirectLx200::isInitialized(void) const
 {
-	return (!lx200->isClosed());
+	return (lx200 && !lx200->isClosed());
 }
 
 //Merged from Connection::sendPosition() and TelescopeTCP::performReading()
@@ -261,7 +326,7 @@ void TelescopeClientDirectLx200::sendPosition(unsigned int ra_int, int dec_int, 
 	const double cdec = cos(dec);
 	Vec3d position(cos(ra)*cdec, sin(ra)*cdec, sin(dec));
 	Vec3d j2000Position = position;
-	if (equinox == EquinoxJNow)
+	if (equinox == TelescopeControl::EquinoxJNow)
 	{
 		const StelCore* core = StelApp::getInstance().getCore();
 		j2000Position = core->equinoxEquToJ2000(position, StelCore::RefractionOff);

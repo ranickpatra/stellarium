@@ -21,6 +21,10 @@
 
 #include "OldHinduSolarCalendar.hpp"
 
+//! @class OldHinduLuniSolarCalendar
+//! @brief Functions for the Old Hindu Lunisolar calendars described in CC:UE chapter 10.
+//! @author Georg Zotti
+//! @ingroup calendars
 //! The old Hindu Lunisolar calendar as given in CC.UE describes the South Indian version where months begin at New Moon (amanta scheme).
 //! The name of a lunar month depends on the solar month that begins during that lunar month.
 //! A month is leap and takes the following month’s name when no solar month begins within it.
@@ -33,30 +37,28 @@ class OldHinduLuniSolarCalendar : public OldHinduSolarCalendar
 public:
 	OldHinduLuniSolarCalendar(double jd);
 
-	virtual ~OldHinduLuniSolarCalendar() Q_DECL_OVERRIDE {}
+	~OldHinduLuniSolarCalendar() override {}
 
 public slots:
-	virtual void retranslate() Q_DECL_OVERRIDE;
+	void retranslate() override;
 
 	//! Set a calendar date from the Julian day number
-	virtual void setJD(double JD) Q_DECL_OVERRIDE;
+	void setJD(double JD) override;
 
 	//! set date from a vector of calendar date elements sorted from the largest to the smallest.
 	//! Year-Month[1...12]-leap[0|1]-Day[1...30]
-	virtual void setDate(QVector<int> parts) Q_DECL_OVERRIDE;
+	void setDate(const QVector<int> &parts) override;
 
 	//! get a stringlist of calendar date elements sorted from the largest to the smallest.
 	//! {Year, Month, MonthName, leap[0|1], Day, DayName}
-	virtual QStringList getDateStrings() const Q_DECL_OVERRIDE;
+	QStringList getDateStrings() const override;
 
 	//! get a formatted complete string for a date
-	virtual QString getFormattedDateString() const Q_DECL_OVERRIDE;
+	QString getFormattedDateString() const override;
 
-	// static public Methods from CC
-public:
 	//! compute RD date from an Old Hindu Lunisolar date
 	//! parts={ year, month, leap, day}
-	static int fixedFromOldHinduLunar(QVector<int> parts);
+	static int fixedFromOldHinduLunar(const QVector<int> &parts);
 	//! return { year, month, leap, day}
 	static QVector<int> oldHinduLunarFromFixed(int rd);
 

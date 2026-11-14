@@ -60,8 +60,7 @@ void ObservabilityDialog::createDialogContent()
 {
 	ui->setupUi(dialog);
 	ui->tabs->setCurrentIndex(0);
-	connect(&StelApp::getInstance(),
-	        SIGNAL(languageChanged()), this, SLOT(retranslate()));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &ObservabilityDialog::retranslate);
 
 	Observability* plugin = GETSTELMODULE(Observability);
 
@@ -71,54 +70,38 @@ void ObservabilityDialog::createDialogContent()
 	if (gui)
 	{
 		enableKineticScrolling(gui->getFlagUseKineticScrolling());
-		connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+		connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &ObservabilityDialog::enableKineticScrolling);
 	}
 
 	// Settings:
 	
 	// clicked() is called only when the user makes an input,
 	// so we avoid an endless loop when setting the value in updateControls().
-	connect(ui->todayCheckBox, SIGNAL(clicked(bool)),
-	        plugin, SLOT(enableTodayField(bool)));
-	connect(ui->acroCosCheckBox, SIGNAL(clicked(bool)),
-	        plugin, SLOT(enableAcroCosField(bool)));
-	connect(ui->oppositionCheckBox, SIGNAL(clicked(bool)),
-	        plugin, SLOT(enableOppositionField(bool)));
-	connect(ui->goodNightsCheckBox, SIGNAL(clicked(bool)),
-	        plugin, SLOT(enableGoodNightsField(bool)));
-	connect(ui->fullMoonCheckBox, SIGNAL(clicked(bool)),
-	        plugin, SLOT(enableFullMoonField(bool)));
+	connect(ui->todayCheckBox,      &QCheckBox::clicked, plugin, &Observability::enableTodayField);
+	connect(ui->acroCosCheckBox,    &QCheckBox::clicked, plugin, &Observability::enableAcroCosField);
+	connect(ui->oppositionCheckBox, &QCheckBox::clicked, plugin, &Observability::enableOppositionField);
+	connect(ui->goodNightsCheckBox, &QCheckBox::clicked, plugin, &Observability::enableGoodNightsField);
+	connect(ui->fullMoonCheckBox,   &QCheckBox::clicked, plugin, &Observability::enableFullMoonField);
 
-	connect(ui->redSlider, SIGNAL(sliderMoved(int)),
-	        this, SLOT(setColor()));
-	connect(ui->greenSlider, SIGNAL(sliderMoved(int)),
-	        this, SLOT(setColor()));
-	connect(ui->blueSlider, SIGNAL(sliderMoved(int)),
-	        this, SLOT(setColor()));
+	connect(ui->redSlider,   &QSlider::sliderMoved, this, &ObservabilityDialog::setColor);
+	connect(ui->greenSlider, &QSlider::sliderMoved, this, &ObservabilityDialog::setColor);
+	connect(ui->blueSlider,  &QSlider::sliderMoved, this, &ObservabilityDialog::setColor);
 	
 	// Isn't valueChanged() better? But then we'll have to block
-	// signlas when settting the slider values.
-	connect(ui->fontSize, SIGNAL(sliderMoved(int)),
-	        plugin, SLOT(setFontSize(int)));
-	connect(ui->sunAltitudeSlider, SIGNAL(sliderMoved(int)),
-	        plugin, SLOT(setTwilightAltitude(int)));
-	connect(ui->sunAltitudeSlider, SIGNAL(sliderMoved(int)),
-	        this, SLOT(updateAltitudeLabel(int)));
-	connect(ui->horizonAltitudeSlider, SIGNAL(sliderMoved(int)),
-	        plugin, SLOT(setHorizonAltitude(int)));
-	connect(ui->horizonAltitudeSlider, SIGNAL(sliderMoved(int)),
-	        this, SLOT(updateHorizonLabel(int)));
+	// signals when setting the slider values.
+	connect(ui->fontSize, &QSlider::sliderMoved, plugin, &Observability::setFontSize);
+	connect(ui->sunAltitudeSlider, &QSlider::sliderMoved, plugin, &Observability::setTwilightAltitude);
+	connect(ui->sunAltitudeSlider, &QSlider::sliderMoved, this, &ObservabilityDialog::updateAltitudeLabel);
+	connect(ui->horizonAltitudeSlider, &QSlider::sliderMoved, plugin, &Observability::setHorizonAltitude);
+	connect(ui->horizonAltitudeSlider, &QSlider::sliderMoved, this, &ObservabilityDialog::updateHorizonLabel);
 
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
-	connect(ui->restoreDefaultsButton, SIGNAL(clicked()),
-		this, SLOT(restoreDefaults()));
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
+	connect(ui->restoreDefaultsButton, &QPushButton::clicked, this, &ObservabilityDialog::restoreDefaults);
 	// TODO: The plug-in should emit a signal when settings are changed.
 	// This works, because slots are called in the order they were connected.
-	connect(ui->restoreDefaultsButton, SIGNAL(clicked()),
-	        this, SLOT(updateControls()));
-	connect(ui->saveSettingsButton, SIGNAL(clicked()),
-	        plugin, SLOT(saveConfiguration()));
+	connect(ui->restoreDefaultsButton, &QPushButton::clicked, this, &ObservabilityDialog::updateControls);
+	connect(ui->saveSettingsButton, &QPushButton::clicked, plugin, &Observability::saveConfiguration);
 
 	// About tab
 	setAboutHtml();
@@ -126,6 +109,7 @@ void ObservabilityDialog::createDialogContent()
 		ui->aboutTextBrowser->document()->setDefaultStyleSheet(QString(gui->getStelStyle().htmlStyleSheet));
 
 	updateControls();
+	ui->todayCheckBox->hide(); // DISABLED for 0.21.2. No longer needed.
 }
 
 void ObservabilityDialog::restoreDefaults()
@@ -143,23 +127,23 @@ void ObservabilityDialog::setAboutHtml(void)
 {
 	QString html = "<html><head></head><body>";
 
-	html += "<h2>" + q_("Observability Plug-in") + "</h2><table width=\"90%\">";
+	html += "<h2>" + q_("Observability Plug-in") + "</h2><table class='layout' width=\"90%\">";
 	html += "<tr width=\"30%\"><td><strong>" + q_("Version") + ":</strong></td><td>" + OBSERVABILITY_PLUGIN_VERSION + "</td></tr>";
 	html += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + OBSERVABILITY_PLUGIN_LICENSE + "</td></tr>";
 	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Ivan Marti-Vidal &lt;i.martividal@gmail.com&gt;</td></tr></table>";
 
 	html += "<p>" + q_("Plugin that analyzes the observability of the selected source (or the screen center, if no source is selected). The plugin can show rise, transit, and set times, as well as the best epoch of the year (i.e., largest angular separation from the Sun), the date range when the source is above the horizon at dark night, and the dates of Acronychal and Cosmical rise/set.<br>Ephemeris of the Solar-System objects and parallax effects are taken into account.<br><br> The author thanks Alexander Wolf and Georg Zotti for their advice.<br><br>Ivan Marti-Vidal (Onsala Space Observatory)") + "</p>";
 
-	html += "<h3>" + q_("Explanation of some parameters") + "</h3><table width=\"90%\">";
-	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Sun altitude at twilight:")).arg(q_("Any celestial object will be considered visible when the Sun is below this altitude. The altitude at astronomical twilight ranges usually between -12 and -18 degrees. This parameter is only used for the estimate of the range of observable epochs (see below)."));
+	html += "<h3>" + q_("Explanation of some parameters") + "</h3><table class='layout' width=\"90%\">";
+	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Sun altitude at twilight:"), q_("Any celestial object will be considered visible when the Sun is below this altitude. The altitude at astronomical twilight ranges usually between -12 and -18 degrees. This parameter is only used for the estimate of the range of observable epochs (see below)."));
 
-	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Horizon altitude:")).arg(q_("Minimum observable altitude (due to mountains, buildings, or just a limited telescope mount)."));
+	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Horizon altitude:"), q_("Minimum observable altitude (due to mountains, buildings, or just a limited telescope mount)."));
 
-	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Today ephemeris:")).arg(q_("Self-explanatory. The program will show the rise, set, and culmination (transit) times. The exact times for these ephemeris are given in two ways: as time spans (referred to the current time) and as clock hours (in local time)."));
-	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Acronychal/Cosmical/Heliacal rise/set:")).arg(q_("The days of Cosmical rise/set of an object are estimated as the days when the object rises (or sets) together with the rise/set of the Sun. The exact dates of these ephemeris depend on the Observer's location.  On the contrary, the Acronycal rise (or set) happens when the star rises/sets with the setting/rising of the Sun (i.e., opposite to the Sun). On the one hand, it is obvious that the source is hardly observable (or not observable at all) in the dates between Cosmical set and Cosmical rise. On the other hand, the dates around the Acronychal set and rise are those when the altitude of the celestial object uses to be high when the Sun is well below the horizon (hence the object can be well observed). The date of Heliacal rise is the first day of the year when a star becomes visible. It happens when the star is close to the eastern horizon roughly before the end of the astronomical night (i.e., at the astronomical twilight). In the following nights, the star will be visibile during longer periods of time, until it reaches its Heliacal set (i.e., the last night of the year when the star is still visible). At the Heliacal set, the star sets roughly after the beginning of the astronomical night."));
-	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Largest Sun separation:")).arg(q_("Happens when the angular separation between the Sun and the celestial object are maximum. In most cases, this is equivalent to say that the Equatorial longitudes of the Sun and the object differ by 180 degrees, so the Sun is in opposition to the object. When an object is at its maximum possible angular separation from the Sun (no matter if it is a planet or a star), it culminates roughly at midnight, and on the darkest possible area of the Sky at that declination. Hence, that is the 'best' night to observe a particular object."));
-	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Nights with source above horizon:")).arg(q_("The program computes the range of dates when the celestial object is above the horizon at least during one moment of the night. By 'night', the program considers the time span when the Sun altitude is below that of the twilight (which can be set by the user; see above). When the objects are fixed on the sky (or are exterior planets), the range of observable epochs for the current year can have two possible forms: either a range from one date to another (e.g., 20 Jan to 15 Sep) or in two steps (from 1 Jan to a given date and from another date to 31 Dec). In the first case, the first date (20 Jan in our example) shall be close to the so-called 'Heliacal rise of a star' and the second date (15 Sep in our example) shall be close to the 'Heliacal set'. In the second case (e.g., a range in the form 1 Jan to 20 May and 21 Sep to 31 Dec), the first date (20 May in our example) would be close to the Heliacal set and the second one (21 Sep in our example) to the Heliacal rise. More exact equations to estimate the Heliacal rise/set of stars and planets (which will not depend on the mere input of a twilight Sun elevation by the user) will be implemented in future versions of this plugin."));
-	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Full Moon:")).arg(q_("When the Moon is selected, the program can compute the exact closest dates of the Moon's opposition to the Sun."));
+	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Today ephemeris:"), q_("Self-explanatory. The program will show the rise, set, and culmination (transit) times. The exact times for these ephemeris are given in two ways: as time spans (referred to the current time) and as clock hours (in local time)."));
+	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Acronychal/Cosmical/Heliacal rise/set:"), q_("The days of Cosmical rise/set of an object are defined as the days when the object rises (or sets) together with the rise/set of the Sun. The exact dates of these events depend on the Observer's location.  In contrast, the Acronychal rise (or set) happens when the star rises/sets with the setting/rising of the Sun (i.e., opposite to the Sun). On the one hand, it is obvious that the source is hardly observable (or not observable at all) in the dates between Cosmical set and Cosmical rise. On the other hand, the dates around the Acronychal set and rise are those when the altitude of the celestial object uses to be high when the Sun is well below the horizon (hence the object can be well observed). The date of Heliacal rise is the first day of the year when a star becomes visible. It happens when the star rises along the eastern horizon before disappearing in the morning twilight. In the following nights, the star will be visible during longer periods of time, until it reaches its Heliacal set (i.e., the last night of the year when the star is still visible). At the Heliacal set, the star sets after becoming visible for just a moment shortly after sunset."));
+	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Largest Sun separation:"), q_("Happens when the angular separation between the Sun and the celestial object are maximum. In most cases, this is equivalent to say that the Equatorial longitudes of the Sun and the object differ by 180 degrees, so the Sun is in opposition to the object. When an object is at its maximum possible angular separation from the Sun (no matter if it is a planet or a star), it culminates roughly at midnight, and on the darkest possible area of the Sky at that declination. Hence, that is the 'best' night to observe a particular object."));
+	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Nights with source above horizon:"), q_("The program computes the range of dates when the celestial object is above the horizon at least during one moment of the night. By 'night', the program considers the time span when the Sun altitude is below that of the twilight (which can be set by the user; see above). When the objects are fixed on the sky (or are exterior planets), the range of observable epochs for the current year can have two possible forms: either a range from one date to another (e.g., 20 Jan to 15 Sep) or in two steps (from 1 Jan to a given date and from another date to 31 Dec). In the first case, the first date (20 Jan in our example) shall be close to the so-called 'Heliacal rise of a star' and the second date (15 Sep in our example) shall be close to the 'Heliacal set'. In the second case (e.g., a range in the form 1 Jan to 20 May and 21 Sep to 31 Dec), the first date (20 May in our example) would be close to the Heliacal set and the second one (21 Sep in our example) to the Heliacal rise. More exact equations to estimate the Heliacal rise/set of stars and planets (which will not depend on the mere input of a twilight Sun elevation by the user) will be implemented in future versions of this plugin."));
+	html += QString("<tr><td>%1</td><td>%2</td></tr>").arg(q_("Full Moon:"), q_("When the Moon is selected, the program can compute the exact closest dates of the Moon's opposition to the Sun."));
 	html += "</table>";
 	html += "</body></html>";
 
@@ -179,9 +163,9 @@ void ObservabilityDialog::updateControls()
 //	ui->SuperMoon->setChecked(GETSTELMODULE(Observability)->getShowFlags(7));
 
 	Vec3f fontColor = plugin->getFontColor();
-	int red = static_cast<int>(100.*fontColor[0]);
-	int green = static_cast<int>(100.*fontColor[1]);
-	int blue = static_cast<int>(100.*fontColor[2]);
+	int red = static_cast<int>(100.f*fontColor[0]);
+	int green = static_cast<int>(100.f*fontColor[1]);
+	int blue = static_cast<int>(100.f*fontColor[2]);
 	ui->redSlider->setValue(red);
 	ui->greenSlider->setValue(green);
 	ui->blueSlider->setValue(blue);
@@ -201,9 +185,9 @@ void ObservabilityDialog::setColor()
 	int green = ui->greenSlider->value();
 	int blue = ui->blueSlider->value();
 
-	float fRed = (float)(red) / 100.;
-	float fGreen = (float)(green) / 100.;
-	float fBlue = (float)(blue) / 100.;
+	float fRed =   static_cast<float>(red) / 100.f;
+	float fGreen = static_cast<float>(green) / 100.f;
+	float fBlue =  static_cast<float>(blue) / 100.f;
 	
 	Vec3f color(fRed, fGreen, fBlue);
 	GETSTELMODULE(Observability)->setFontColor(color);

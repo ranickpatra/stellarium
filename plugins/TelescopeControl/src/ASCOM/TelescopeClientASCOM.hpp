@@ -19,32 +19,34 @@
 #ifndef TELESCOPECLIENTASCOM_HPP
 #define TELESCOPECLIENTASCOM_HPP
 
+#include "TelescopeControl.hpp"
 #include "TelescopeClient.hpp"
 #include "ASCOMDevice.hpp"
 
-bool useJNow(ASCOMDevice::ASCOMEquatorialCoordinateType coordinateType, bool mAscomUseDeviceEqCoordType, Equinox mEquinox);
-bool areSimilar(double a, double b);
 
 class TelescopeClientASCOM : public TelescopeClient
 {
 	Q_OBJECT
 
 public:
-	TelescopeClientASCOM(const QString& name = "ASCOM", const QString& params = QString(), Equinox eq = EquinoxJ2000);
-	~TelescopeClientASCOM() Q_DECL_OVERRIDE;
+	TelescopeClientASCOM(const QString& name = "ASCOM", const QString& params = QString(),
+	                     TelescopeControl::Equinox eq = TelescopeControl::EquinoxJ2000, int slot = 0);
+	~TelescopeClientASCOM() override;
 
 	Vec3d getJ2000EquatorialPos(const StelCore *core) const override;
-	void move(double angle, double speed) override;
 	void telescopeGoto(const Vec3d &j2000Pos, StelObjectP selectObject) override;
 	void telescopeSync(const Vec3d& j2000Pos, StelObjectP selectObject) override;
+	bool isTelescopeSyncSupported() const override {return true;}
 	void telescopeAbortSlew() override;
+	bool isAbortSlewSupported() const override {return true;}
 	bool isConnected() const override;
 	bool hasKnownPosition() const override;
+	static bool useJNow(ASCOMDevice::ASCOMEquatorialCoordinateType coordinateType, bool ascomUseDeviceEqCoordType, TelescopeControl::Equinox equinox);
 
 
 private:
- 	bool prepareCommunication() Q_DECL_OVERRIDE;
- 	void performCommunication() Q_DECL_OVERRIDE;
+	bool prepareCommunication() override;
+	void performCommunication() override;
 
 	ASCOMDevice::ASCOMCoordinates j2000PosToAscomCoord(const Vec3d& j2000Pos);
 	QString mAscomDeviceId;
@@ -52,7 +54,7 @@ private:
 	ASCOMDevice* mAscomDevice;
 	ASCOMDevice::ASCOMEquatorialCoordinateType mCoordinateType;
 	bool mDoesRefraction;
-	Equinox mEquinox;
+	TelescopeControl::Equinox mEquinox;
 	ASCOMDevice::ASCOMCoordinates mLastCoord;
 	Vec3d mInterpolatedPosition;
 	Vec3d mCurrentTargetPosition;

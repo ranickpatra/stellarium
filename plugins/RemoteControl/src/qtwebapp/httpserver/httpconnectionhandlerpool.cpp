@@ -15,7 +15,7 @@ HttpConnectionHandlerPool::HttpConnectionHandlerPool(const HttpConnectionHandler
     this->sslConfiguration=Q_NULLPTR;
     loadSslConfig();
     cleanupTimer.start(settings.cleanupInterval);
-    connect(&cleanupTimer, SIGNAL(timeout()), SLOT(cleanup()));
+    connect(&cleanupTimer, &QTimer::timeout, this, &HttpConnectionHandlerPool::cleanup);
 }
 
 
@@ -71,13 +71,13 @@ void HttpConnectionHandlerPool::cleanup()
         if (!handler->isBusy())
         {
             if (++idleCounter > maxIdleHandlers)
-            {
-                pool.removeOne(handler);
-                qDebug("HttpConnectionHandlerPool: Removed connection handler (%p), pool size is now %i",handler,pool.size());
+	    {
+		pool.removeOne(handler);
+		qDebug("HttpConnectionHandlerPool: Removed connection handler (%p), pool size is now %i",handler,int(pool.size()));
 		delete handler;
-                break; // remove only one handler in each interval
-            }
-        }
+		break; // remove only one handler in each interval
+	    }
+	}
     }
     mutex.unlock();
 }
@@ -129,7 +129,11 @@ void HttpConnectionHandlerPool::loadSslConfig()
             sslConfiguration->setLocalCertificate(certificate);
             sslConfiguration->setPrivateKey(sslKey);
             sslConfiguration->setPeerVerifyMode(QSslSocket::VerifyNone);
-            sslConfiguration->setProtocol(QSsl::TlsV1SslV3);
+#if QT_VERSION < QT_VERSION_CHECK(6, 3, 0)
+	    sslConfiguration->setProtocol(QSsl::TlsV1_0);
+#else
+	    sslConfiguration->setProtocol(QSsl::TlsV1_2OrLater);
+#endif
 
             qDebug("HttpConnectionHandlerPool: SSL settings loaded");
          #endif

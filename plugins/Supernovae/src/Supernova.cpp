@@ -21,13 +21,12 @@
 #include "StelPainter.hpp"
 #include "StelApp.hpp"
 #include "StelCore.hpp"
-#include "StelTexture.hpp"
 #include "StelUtils.hpp"
 #include "StelTranslator.hpp"
 #include "StelModuleMgr.hpp"
 #include "StelSkyDrawer.hpp"
 #include "StelLocaleMgr.hpp"
-#include "StarMgr.hpp"
+#include "Planet.hpp"
 
 #include <QTextStream>
 #include <QDebug>
@@ -37,6 +36,8 @@
 #include <QList>
 
 const QString Supernova::SUPERNOVA_TYPE = QStringLiteral("Supernova");
+// It's need for checking displaying of labels for stars
+bool Supernova::syncShowLabels = true;
 
 Supernova::Supernova(const QVariantMap& map)
 	: initialized(false)
@@ -94,7 +95,7 @@ QString Supernova::getNameI18n(void) const
 	QString name = designation;
 	const StelTranslator& trans = StelApp::getInstance().getLocaleMgr().getSkyTranslator();
 	if (note.size()!=0)
-		name = QString("%1 (%2)").arg(name).arg(trans.qtranslate(note));
+		name = QString("%1 (%2)").arg(name, trans.qtranslate(note));
 
 	return name;
 }
@@ -103,24 +104,24 @@ QString Supernova::getEnglishName(void) const
 {
 	QString name = designation;
 	if (note.size()!=0)
-		name = QString("%1 (%2)").arg(name).arg(note);	
+		name = QString("%1 (%2)").arg(name, note);
 
 	return name;
 }
 
-QString Supernova::getMaxBrightnessDate(const double JD) const
+QString Supernova::getMaxBrightnessDate(const StelCore *core, const double JD) const
 {
-	return StelApp::getInstance().getLocaleMgr().getPrintableDateLocal(JD);
+	return StelApp::getInstance().getLocaleMgr().getPrintableDateLocal(JD, core->getUTCOffset(JD));
 }
 
-QString Supernova::getMagnitudeInfoString(const StelCore *core, const InfoStringGroup& flags, const int decimals) const
+QString Supernova::getMagnitudeInfoString(const StelCore *core, const InfoStringGroup& flags, const int decimals, const float& magOffset) const
 {
 	const float maglimit = 21.f;
 	QString res;
 
 	if (flags&Magnitude)
 	{
-		if (getVMagnitude(core) <= maglimit)
+		if (getVMagnitude(core) + magOffset <= maglimit)
 			res = StelObject::getMagnitudeInfoString(core, flags, decimals);
 		else
 		{
@@ -140,7 +141,7 @@ QString Supernova::getInfoString(const StelCore* core, const InfoStringGroup& fl
 		oss << "<h2>" << getNameI18n() << "</h2>";
 
 	if (flags&ObjectType)
-		oss << QString("%1: <b>%2</b>").arg(q_("Type"), q_("supernova")) << "<br />";
+		oss << QString("%1: <b>%2</b>").arg(q_("Type"), getObjectTypeI18n()) << "<br />";
 
 	if (flags&Magnitude)
 		oss << getMagnitudeInfoString(core, flags, 2);
@@ -151,7 +152,7 @@ QString Supernova::getInfoString(const StelCore* core, const InfoStringGroup& fl
 	if (flags&Extra)
 	{
 		oss << QString("%1: %2").arg(q_("Type of supernova"), sntype) << "<br />";
-		oss << QString("%1: %2").arg(q_("Maximum brightness"), getMaxBrightnessDate(peakJD)) << "<br />";
+		oss << QString("%1: %2").arg(q_("Maximum brightness"), getMaxBrightnessDate(core, peakJD)) << "<br />";
 		if (distance>0)
 		{
 			//TRANSLATORS: Unit of measure for distance - Light Years
@@ -160,6 +161,7 @@ QString Supernova::getInfoString(const StelCore* core, const InfoStringGroup& fl
 		}
 	}
 
+	oss << getSolarLunarInfoString(core, flags);
 	postProcessInfoString(str, flags);
 	return str;
 }
@@ -176,11 +178,6 @@ QVariantMap Supernova::getInfoMap(const StelCore *core) const
 	map["distance"] = distance;
 
 	return map;
-}
-
-Vec3f Supernova::getInfoColor(void) const
-{
-	return Vec3f(1.f, 1.f, 1.f);
 }
 
 float Supernova::getVMagnitude(const StelCore* core) const
@@ -240,26 +237,17 @@ float Supernova::getVMagnitude(const StelCore* core) const
 	return static_cast<float>(vmag);
 }
 
-double Supernova::getAngularSize(const StelCore*) const
-{
-	return 0.00001;
-}
-
-void Supernova::update(double deltaTime)
-{
-	labelsFader.update(static_cast<int>(deltaTime*1000));
-}
-
 void Supernova::draw(StelCore* core, StelPainter& painter)
 {
 	StelSkyDrawer* sd = core->getSkyDrawer();
 	const float mlimit = sd->getLimitMagnitude();
 	const float mag = getVMagnitudeWithExtinction(core);
+	const float shift = 8.f;
 	
 	if (mag <= mlimit)
 	{
 		const Vec3f color(1.f);
-		Vec3f vf(XYZ.toVec3f());
+		Vec3f vf(getJ2000EquatorialPos(core).toVec3f());
 		Vec3f altAz(vf);
 		altAz.normalize();
 		core->j2000ToAltAzInPlaceNoRefraction(&altAz);
@@ -267,13 +255,25 @@ void Supernova::draw(StelCore* core, StelPainter& painter)
 		sd->computeRCMag(mag, &rcMag);
 		sd->preDrawPointSource(&painter);
 		// allow height-dependent twinkle and suppress twinkling in higher altitudes. Keep 0.1 twinkle amount in zenith.
-		sd->drawPointSource(&painter, vf, rcMag, color, true, qMin(1.0f, 1.0f-0.9f*altAz[2]));
+		sd->drawPointSource(&painter, vf.toVec3d(), rcMag, color, true, qMin(1.0f, 1.0f-0.9f*altAz[2]));
 		sd->postDrawPointSource(&painter);
 		painter.setColor(color, 1.f);
-		float size = static_cast<float>(getAngularSize(Q_NULLPTR))*M_PI_180f*painter.getProjector()->getPixelPerRadAtCenter();
-		float shift = 6.f + size/1.8f;
-		StarMgr* smgr = GETSTELMODULE(StarMgr); // It's need for checking displaying of labels for stars
-		if (labelsFader.getInterstate()<=0.f && (mag+5.f)<mlimit && smgr->getFlagLabels())
-			painter.drawText(XYZ, designation, 0, shift, shift, false);
+		if ((mag+5.f)<mlimit && syncShowLabels)
+			painter.drawText(getJ2000EquatorialPos(core), designation, 0, shift, shift, false);
 	}	
+}
+
+Vec3d Supernova::getJ2000EquatorialPos(const StelCore* core) const
+{
+	if ((core) && (core->getUseAberration()) && (core->getCurrentPlanet()))
+	{
+		const Vec3d vel = core->getAberrationVec(core->getJDE());
+		Vec3d pos=XYZ+vel;
+		pos.normalize();
+		return pos;
+	}
+	else
+	{
+		return XYZ;
+	}
 }

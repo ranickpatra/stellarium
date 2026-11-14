@@ -5,33 +5,21 @@ installers
 .DS_Store
 CMakeLists.txt.user*
 CMakeFiles
+CMakeUserPresets.json
 CMakeCache*
+cmake-build-*
 CPackConfig.cmake
 CPackSourceConfig.cmake
 cmake_install.cmake
 cmake_uninstall.cmake
-/translations
 /CMakeDoxyfile.in
 /CMakeDoxygenDefaults.cmake
 /Doxyfile
-Stellarium.bat
-stellarium.iss
-README
 doc/qt.tag
 doc/stellarium.pod
 doc/stellarium.1
-locale
-util/locations-editor/Makefile
-util/locations-editor/locations-editor
-util/locations-editor/locations-editor.pro.user
-util/copy-translations.bat
-plugins/Observability/doc
-data/default_config.ini
 data/default_cfg.ini
 data/Info.plist
-src/external/config.h
-src/external/indiversion.h
-src/stellarium
 Makefile
 !guide/Makefile
 guide/*.aux
@@ -72,3 +60,26 @@ qrc_*.cpp
 .idea
 # Ignore KDevelop project files
 .kdev4
+# Ignore Eclipse project files
+.project
+# Ignore vscode project files
+.vscode
+# Ignore QtCreator project files
+.qtcreator
+# Ignore Git attributes
+.gitattributes
+# Ignore script test data
+scripts/tests/media
+scripts/tests/videotest_avi.ssc
+scripts/tests/QJSEngine_basictest.ssc
+skycultures/modern_her
+skycultures/*.bak/
+skycultures/*.bak[0-9]*/
+*.tif
+valgrind.log
+*_old*
+*_pch.h
+PCH-*
+*_GZ*
+GZ_*
+*.awk

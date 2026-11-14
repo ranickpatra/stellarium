@@ -20,15 +20,13 @@
 #ifndef ARCHAEOLINESDIALOGLOCATIONS_HPP
 #define ARCHAEOLINESDIALOGLOCATIONS_HPP
 
-#include "StelDialog.hpp"
-#include "StelGui.hpp"
-#include "StelTranslator.hpp"
 
 #include <QString>
 #include <QColor>
 #include <QColorDialog>
 #include <QStringListModel>
 #include <QSortFilterProxyModel>
+#include "StelDialog.hpp"
 
 class Ui_archaeoLinesDialogLocations;
 class ArchaeoLines;
@@ -41,15 +39,15 @@ class ArchaeoLinesDialogLocations : public StelDialog
 
 public:
 	ArchaeoLinesDialogLocations();
-	~ArchaeoLinesDialogLocations();
+	~ArchaeoLinesDialogLocations() override;
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 	//! call with context 1 or 2 to prepare selection of location 1 or 2.
 	void setModalContext(int context);
 
 protected:
-	void createDialogContent();
+	void createDialogContent() override;
 
 private:
 	Ui_archaeoLinesDialogLocations* ui;
@@ -63,9 +61,7 @@ private slots:
 	//! Called whenever the StelLocationMgr is updated. Taken from LocationDialog.
 	void reloadLocations();
 
-	//! Connected to a QPushButton. When called, modalContext should have been set to 1 or 2 for a meaningful result.
-	void setLocationFromList();
-	//! Connected to the list. A double click on the cell calls this item.
+	//! Connected to the list. A double click on the cell calls this item. When called, modalContext should have been set to 1 or 2 for a meaningful result.
 	void setLocationFromList(const QModelIndex& index);
 };
 

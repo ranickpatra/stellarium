@@ -2,7 +2,7 @@
 The stellarium telescope library helps building
 telescope server programs, that can communicate with stellarium
 by means of the stellarium TCP telescope protocol.
-It also contains smaple server classes (dummy, Meade LX200).
+It also contains sample server classes (dummy, Meade LX200).
 
 Author and Copyright of this file and of the stellarium telescope library:
 Johannes Gajdosik, 2006
@@ -23,16 +23,15 @@ Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
 */
 
 #include "SerialPort.hpp"
-#include "LogFile.hpp"
-#include "StelUtils.hpp"
+#include "TelescopeLogging.hpp"
 
 #ifndef Q_OS_WIN
 #include <unistd.h>
 #endif
 
-#include <cstring> // memset
+#include <QString>
 
-using namespace std;
+#include <cstring> // memset
 
 SerialPort::SerialPort(Server &server, const char *serial_device)
 	: Connection(server, INVALID_SOCKET)
@@ -41,11 +40,11 @@ SerialPort::SerialPort(Server &server, const char *serial_device)
 	#endif
 {
 #ifdef Q_OS_WIN
-	handle = CreateFile(serial_device, GENERIC_READ|GENERIC_WRITE, 0, Q_NULLPTR, OPEN_EXISTING, 0, Q_NULLPTR);
+	handle = CreateFileW(LPCWSTR(QString(serial_device).utf16()), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
 	if (handle == INVALID_HANDLE_VALUE)
 	{
-		*log_file << Now() << "SerialPort::SerialPort(" << serial_device << "): "
-				      "CreateFile() failed: " << GetLastError() << StelUtils::getEndLineChar();
+		qCWarning(Telescopes).nospace() << getLogPrefix() << "SerialPort::SerialPort(" << serial_device
+		                                << "): CreateFile() failed: " << GetLastError();
 	}
 	else
 	{
@@ -57,32 +56,32 @@ SerialPort::SerialPort(Server &server, const char *serial_device)
 		timeouts.WriteTotalTimeoutConstant = 0;
 		if (!SetCommTimeouts(handle, &timeouts))
 		{
-			*log_file << Now() << "SerialPort::SerialPort(" << serial_device << "): "
-					      "SetCommTimeouts() failed: " << GetLastError() << StelUtils::getEndLineChar();
+			qCWarning(Telescopes).nospace() << getLogPrefix() << "SerialPort::SerialPort(" << serial_device
+			                                << "): SetCommTimeouts() failed: " << GetLastError();
 		}
 		else
 		{
 			if (!GetCommState(handle, &dcb_original))
 			{
-				*log_file << Now() << "SerialPort::SerialPort(" << serial_device << "): "
-						      "GetCommState() failed: " << GetLastError() << StelUtils::getEndLineChar();
+				qCWarning(Telescopes).nospace() << getLogPrefix() << "SerialPort::SerialPort(" << serial_device
+				                                << "): GetCommState() failed: " << GetLastError();
 			}
 			else
 			{
 				DCB dcb;
 				memset(&dcb, 0, sizeof(dcb));
 				dcb.DCBlength = sizeof(dcb);
-				if (!BuildCommDCB("9600,n,8,1", &dcb))
+				if (!BuildCommDCBW(LPCWSTR(QString("9600,n,8,1").utf16()), &dcb))
 				{
-					*log_file << Now() << "SerialPort::SerialPort(" << serial_device << "): "
-							      "BuildCommDCB() failed: " << GetLastError() << StelUtils::getEndLineChar();
+					qCWarning(Telescopes).nospace() << getLogPrefix() << "SerialPort::SerialPort(" << serial_device
+					                                << "): BuildCommDCB() failed: " << GetLastError();
 				}
 				else
 				{
-					if (!SetCommState(handle,&dcb))
+					if (!SetCommState(handle, &dcb))
 					{
-						*log_file << Now() << "SerialPort::SerialPort(" << serial_device << "): "
-								      "SetCommState() failed: " << GetLastError() << StelUtils::getEndLineChar();
+						qCWarning(Telescopes).nospace() << getLogPrefix() << "SerialPort::SerialPort(" << serial_device
+						                                << "): SetCommState() failed: " << GetLastError();
 					}
 					else
 					{
@@ -99,22 +98,22 @@ SerialPort::SerialPort(Server &server, const char *serial_device)
 	fd = open(serial_device, O_RDWR|O_NOCTTY);
 	if (fd < 0)
 	{
-		*log_file << Now() << "SerialPort::SerialPort(" << serial_device << "): "
-				      "open() failed: " << strerror(errno) << StelUtils::getEndLineChar();
+		qCWarning(Telescopes).nospace() << getLogPrefix() << "SerialPort::SerialPort(" << serial_device
+		                                << "): open() failed: " << strerror(errno);
 	}
 	else
 	{
 		if (SETNONBLOCK(fd) < 0)
 		{
-			*log_file << Now() << "SerialPort::SerialPort(" << serial_device << "): "
-					      "fcntl(O_NONBLOCK) failed: " << STRERROR(ERRNO) << StelUtils::getEndLineChar();
+			qCWarning(Telescopes).nospace() << getLogPrefix() << "SerialPort::SerialPort(" << serial_device
+			                                << "): fcntl(O_NONBLOCK) failed: " << STRERROR(ERRNO);
 		}
 		else
 		{
 			if (tcgetattr(fd,&termios_original) < 0)
 			{
-				*log_file << Now() << "SerialPort::SerialPort(" << serial_device << "): "
-						      "tcgetattr failed: " << strerror(errno) << StelUtils::getEndLineChar();
+				qCWarning(Telescopes).nospace() << getLogPrefix() << "SerialPort::SerialPort(" << serial_device
+				                                << "): tcgetattr failed: " << strerror(errno);
 			}
 			else
 			{
@@ -130,8 +129,8 @@ SerialPort::SerialPort(Server &server, const char *serial_device)
 				termios_new.c_cc[VMIN] = 1;
 				if (tcsetattr(fd,TCSAFLUSH,&termios_new) < 0)
 				{
-					*log_file << Now() << "SerialPort::SerialPort(" << serial_device << "): "
-							      "tcsetattr failed: " << strerror(errno) << StelUtils::getEndLineChar();
+					qCWarning(Telescopes).nospace() << getLogPrefix() << "SerialPort::SerialPort(" << serial_device
+					                                << "): tcsetattr failed: " << strerror(errno);
 				}
 				else
 				{
@@ -172,7 +171,7 @@ SerialPort::~SerialPort(void)
 int SerialPort::readNonblocking(char *buf, int count)
 {
 	DWORD rval;
-	if (ReadFile(handle, buf, static_cast<DWORD>(count), &rval, Q_NULLPTR))
+	if (ReadFile(handle, buf, static_cast<DWORD>(count), &rval, nullptr))
 		return static_cast<int>(rval);
 	if (GetLastError() == ERROR_IO_PENDING)
 		return 0;
@@ -182,7 +181,7 @@ int SerialPort::readNonblocking(char *buf, int count)
 int SerialPort::writeNonblocking(const char *buf, int count)
 {
 	DWORD rval;
-	if (WriteFile(handle, buf, static_cast<DWORD>(count), &rval, Q_NULLPTR))
+	if (WriteFile(handle, buf, static_cast<DWORD>(count), &rval, nullptr))
 		return static_cast<int>(rval);
 	if (GetLastError() == ERROR_IO_PENDING)
 		return 0;

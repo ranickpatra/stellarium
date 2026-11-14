@@ -20,15 +20,17 @@
 #ifndef METEORSHOWERSMGR_HPP
 #define METEORSHOWERSMGR_HPP
 
+#include <QDateTime>
 #include <QNetworkReply>
 #include <QNetworkAccessManager>
 
 #include "StelGuiItems.hpp"
-#include "StelTextureMgr.hpp"
-#include "StelObjectModule.hpp"
-#include "StelLocationMgr.hpp"
+#include "StelModule.hpp"
+#include "StelLocation.hpp"
+#include "StelTextureTypes.hpp"
+#include "VecMath.hpp"
 
-#define MS_CATALOG_VERSION 1
+#define MS_CATALOG_VERSION 2
 #define MS_CONFIG_PREFIX QString("MeteorShowers")
 
 class MeteorShowers;
@@ -57,21 +59,26 @@ class MeteorShowersMgr : public StelModule
 	Q_OBJECT
 	Q_PROPERTY(bool enablePlugin READ getEnablePlugin WRITE actionEnablePlugin NOTIFY enablePluginChanged)
 	Q_PROPERTY(bool enableLabels READ getEnableLabels WRITE setEnableLabels NOTIFY enableLabelsChanged)
+	Q_PROPERTY(Vec3f colorARG READ getColorARG WRITE setColorARG NOTIFY colorARGChanged)
+	Q_PROPERTY(Vec3f colorARC READ getColorARC WRITE setColorARC NOTIFY colorARCChanged)
+	Q_PROPERTY(Vec3f colorIR  READ getColorIR  WRITE setColorIR  NOTIFY colorIRChanged)
 
 public:
-	//! @enum DownloadStatus
-	enum DownloadStatus {
-		OUTDATED,
-		UPDATING,
-		UPDATED,
-		FAILED
+	//! @enum UpdateState
+	//! Used for keeping for track of the download/update status
+	enum UpdateState {
+		Updating,			//!< Update in progress
+		CompleteNoUpdates,	//!< Update completed, there we no updates
+		CompleteUpdates,	//!< Update completed, there were updates
+		DownloadError,		//!< Error during download phase
+		OtherError			//!< Other error
 	};
 
 	//! Constructor.
 	MeteorShowersMgr();
 
 	//! Destructor.
-	virtual ~MeteorShowersMgr();
+	~MeteorShowersMgr() override;
 
 	//! Restore default catalog.
 	bool restoreDefaultCatalog(const QString& destination);
@@ -96,9 +103,6 @@ public:
 	void setEnablePlugin(const bool& b);
 	bool getEnablePlugin() { return m_enablePlugin; }
 
-	//! Get the font.
-	QFont getFont() { return m_font; }
-
 	//! Set the URL for downloading the meteor showers catalog.
 	void setUrl(const QString& url);
 	QString getUrl() { return m_url; }
@@ -107,9 +111,8 @@ public:
 	void setLastUpdate(const QDateTime& datetime);
 	QDateTime getLastUpdate() { return m_lastUpdate; }
 
-	//! Set the status of the last update
-	void setStatusOfLastUpdate(const int &downloadStatus);
-	DownloadStatus getStatusOfLastUpdate() { return m_statusOfLastUpdate; }
+	//! Get the current updateState
+	UpdateState getUpdateState(void) const {return m_updateState;}
 
 	//! Gets the date of the next update.
 	QDateTime getNextUpdate();
@@ -120,17 +123,24 @@ public:
 	//
 	// Methods defined in the StelModule class
 	//
-	virtual void init();
-	virtual void deinit();
-	virtual void update(double deltaTime);
-	virtual void draw(StelCore* core);
-	virtual double getCallOrder(StelModuleActionName actionName) const;
-	virtual bool configureGui(bool show=true);
+	void init() override;
+	void deinit() override;
+	void update(double deltaTime) override;
+	void draw(StelCore* core) override;
+	double getCallOrder(StelModuleActionName actionName) const override;
+	bool configureGui(bool show=true) override;
 
 signals:
-	void downloadStatusChanged(DownloadStatus);
+	//! @param state the new update state.
+	void updateStateChanged(MeteorShowersMgr::UpdateState state);
+
+	//! Emitted after a JSON update has run.
+	void jsonUpdateComplete(void);
 	void enablePluginChanged(bool b);
 	void enableLabelsChanged(bool b);
+	void colorARGChanged(Vec3f c);
+	void colorARCChanged(Vec3f c);
+	void colorIRChanged(Vec3f c);
 
 public slots:
 	//! Enable the meteor showers plugin at Stellarium startup.
@@ -212,7 +222,7 @@ public slots:
 	//! // example of usage in scripts
 	//! var size = MeteorShowers.getFontSize();
 	//! @endcode
-	int getFontSize() { return m_font.pixelSize(); }
+	int getFontSize() { return m_fontSize; }
 
 	//! Set the update frequency in hours.
 	//! @param hours update frequency in hours
@@ -230,8 +240,9 @@ public slots:
 
 	//! Set the color of the active radiant based on generic data.
 	//! @code
-	//! // example of usage in scripts
-	//! MeteorShowers.setColorARG(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! MeteorShowers.setColorARG(c.toVec3f());
 	//! @endcode
 	void setColorARG(const Vec3f& rgb);
 	//! @return color of markers of the active radiants based on generic data.
@@ -243,8 +254,9 @@ public slots:
 
 	//! Set the color of the active radiant based on confirmed data.
 	//! @code
-	//! // example of usage in scripts
-	//! MeteorShowers.setColorARC(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! MeteorShowers.setColorARC(c.toVec3f());
 	//! @endcode
 	void setColorARC(const Vec3f& rgb);
 	//! @return color of markers of the active radiants based on confirmed data.
@@ -256,8 +268,9 @@ public slots:
 
 	//! Set the color of the inactive radiant.
 	//! @code
-	//! // example of usage in scripts
-	//! MeteorShowers.setColorIR(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! MeteorShowers.setColorIR(c.toVec3f());
 	//! @endcode
 	void setColorIR(const Vec3f& rgb);
 	//! @return color of markers of the inactive radiants.
@@ -274,7 +287,7 @@ public slots:
 	void restoreDefaultSettings();
 
 	//! Display a message. This is used for plugin-specific warnings and such
-	void displayMessage(const QString& message, const QString hexColor="#999999");
+	void displayMessage(const QString& message, const QString &hexColor="#999999");
 
 private slots:
 	void checkForUpdates();
@@ -286,10 +299,11 @@ private slots:
 
 private:
 	MeteorShowers* m_meteorShowers;
+#ifndef NO_GUI
 	MSConfigDialog* m_configDialog;
 	MSSearchDialog* m_searchDialog;
-
-	QFont m_font;
+#endif
+	int m_fontSize;
 	QSettings* m_conf;
 	QString m_catalogPath;
 
@@ -312,22 +326,23 @@ private:
 	StelTextureSP m_pointerTexture; //! Pointer texture
 	StelTextureSP m_radiantTexture; //! Radiant texture
 
-	bool m_isUpdating;
+	//bool m_isUpdating;
 	bool m_enableAutoUpdates;
 	int m_updateFrequencyHours;
 	QString m_url;
 	QDateTime m_lastUpdate;
-	DownloadStatus m_statusOfLastUpdate;
+	UpdateState m_updateState;
 	QNetworkAccessManager * m_networkManager;
 	QNetworkReply * m_downloadReply;
 	class StelProgressController* m_progressBar;
+	QTimer* m_updateTimer;
 
 	void createActions();
 	void loadConfig();	
 	void loadTextures();
 	bool loadCatalog(const QString& jsonPath);
 
-	void startDownload(QString url);
+	void startDownload(const QString &url);
 	void deleteDownloadProgressBar();
 
 	//! Enable/disable the Meteor Showers plugin.
@@ -345,9 +360,9 @@ class MeteorShowersStelPluginInterface : public QObject, public StelPluginInterf
 	Q_PLUGIN_METADATA(IID StelPluginInterface_iid)
 	Q_INTERFACES(StelPluginInterface)
 public:
-	virtual StelModule* getStelModule() const;
-	virtual StelPluginInfo getPluginInfo() const;
-	virtual QObjectList getExtensionList() const { return QObjectList(); }
+	StelModule* getStelModule() const override;
+	StelPluginInfo getPluginInfo() const override;
+	//QObjectList getExtensionList() const override { return QObjectList(); }
 };
 
 #endif /*METEORSHOWERSMGR_HPP*/

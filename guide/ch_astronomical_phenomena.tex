@@ -39,6 +39,39 @@ the \key{,} key.
   amounts of energy. By far the safest way to observe the Sun is to
   look at it on a computer screen, courtesy of Stellarium!}
 
+\subsection{Twilight}
+\label{sec:Phenomena:sun:twilight}
+
+The sunlight is scattered in Earth's atmosphere even if the Sun is
+below the horizon. The period after sunset when the Sun is higher than
+$-6°$ is called \indexterm[twilight!civil]{civil twilight}. The sky
+is generally bright enough for outdoor activity or reading the
+newspaper.
+
+As time progresses, the first stars will appear. The phase where the
+Sun is between $-6°$ and $-12°$ below the (mathematical) horizon is
+called \indexterm[twilight!nautical]{nautical twilight}: before the
+invention of satellite navigation, celestial navigation was used to
+find a ship's position on the oceans. This required that it was still
+bright enough so that the horizon line was visible, but already dark
+enough to see enough stars to clearly identify them and measure the
+altitude of a few of them. (See also section \ref{sec:plugins:NavigationalStars}.)
+
+The twilight phase when the Sun is between $-12°$ and $-18°$ is called
+\indexterm[twilight!astronomical]{astronomical twilight}. Only the
+western horizon shows some brightening, but else the natural sky is
+``almost'' as dark as it can get.
+
+In the morning the game is reversed. Dawn starts with astronomical
+twilight, progresses to nautical and civil twilight, and sunrise
+ends the night.
+
+In Stellarium, you can \newFeature{0.21.2} set the time when the Sun
+reaches a configured altitude. See
+section~\ref{sec:gui:help:hotkeys:example} about how to configure the
+program.
+
+
 \section{Stars}
 \label{sec:Phenomena:stars}
 
@@ -81,50 +114,15 @@ constellations. In many cultures, the various constellations have been
 associated with mythological entities. As such people have often
 projected pictures into the skies as can be seen in figure~\ref{fig:ursamajor} which shows the constellation of Ursa Major. On the
 left is a picture with the image of the mythical Great Bear, on the
-right only a line-art version (or \emph{stick figure}) is shown. The seven bright stars of Ursa
-Major are widely recognised, known variously as ``the plough'', the
-``pan-handle'', and the ``big dipper''. This sub-grouping is known as an
-\emph{asterism} --- a distinct grouping of stars. On the right, the
-picture of the bear has been removed and only a constellation diagram
-remains.
+right only a line-art version (or \emph{stick figure}) is shown. 
 
-\begin{figure}[hb]
+
+
+\begin{figure}[tbp]
 \centering\includegraphics[scale=0.8]{uma.png}
 \caption{Ursa Major}
 \label{fig:ursamajor}
 \end{figure}
-
-
-Stellarium can draw both constellation diagrams and artistic
-representations of the constellations. Multiple sky cultures are
-supported: Western, Polynesian, Egyptian, Chinese, and several other sky cultures are
-available, although at time of writing the non-Western constellations
-are not complete, and as yet there are no artistic representations of
-these sky-cultures.
-
-Aside from historical and mythological value, to the modern astronomer
-the constellations provide a way to segment the sky for the purposes
-of describing locations of objects, indeed one of the first tasks for
-an amateur observer is \emph{learning the constellations} --- the
-process of becoming familiar with the relative positions of the
-constellations, at what time of year a constellation is visible, and
-in which constellations observationally interesting objects reside.
-The International Astronomical Union\index{IAU} has adopted 88 ``Western''
-constellations as a common system for segmenting the sky (Table~\ref{tab:IAUConstellations}). They are
-based on Greek/Roman mythology, but with several additions from
-Renaissance and later centuries.  As such some formalisation has been
-adopted, each constellation having a \emph{proper name}, which is in
-Latin, and a three letter abbreviation of that name.  For example,
-Ursa Major has the abbreviation UMa. Also, the ``Western''
-constellation have clearly defined boundaries \citep{Delporte:1930}, which you can draw in
-Stellarium when you press the \key{B} key\footnote{These boundaries or
-  borders have been drawn using star maps from 1875. Due to the effect
-  of \emph{precession}, these borders are no longer parallel to
-  today's coordinates.}. The IAU constellation a selected object is placed in 
-is also available in the object information data \citep{1987PASP...99..695R}, 
-regardless of the currently active skyculture.  On the other hand, the shapes 
-of mythological figures, and also stick figures, have not been canonized, so 
-you will find deviations between Stellarium and printed atlases.
 
 
 \begin{table}[p]
@@ -177,7 +175,7 @@ Equ & Equuleus             & Equulei               & Tel & Telescopium          
 Eri & Eridanus             & Eridani               & Tri & Triangulum           & Trianguli             \\
 For & Fornax               & Fornacis              & TrA & Triangulum Australe  & Trianguli Australis   \\
 Gem & Gemini               & Geminorum             & Tuc & Tucana               & Tucanae               \\
-Gru & Grus                 & Gruis                 & UMa & Ursa Major           & Ursae Majoris         \\
+Gru & Grus                 & Gruis                 & UMa & Ursa Maior           & Ursae Maioris         \\
 Her & Hercules             & Herculis              & UMi & Ursa Minor           & Ursae Minoris         \\
 %                                                  & %                                                  \\
 Hor & Horologium           & Horologii             & Vel & Vela                 & Velae                 \\
@@ -190,6 +188,85 @@ Ind & Indus                & Indi                  & Vul & Vulpecula            
   \label{tab:IAUConstellations}
 \end{table}
 
+\begin{table}[p]
+  \centering
+  \begin{tabular}{>{$}c<{$}l>{$}c<{$}l>{$}c<{$}l>{$}c<{$}l>{$}c<{$}l>{$}c<{$}l}
+    \toprule
+    \alpha    & alpha   & \epsilon  & epsilon & \iota     & iota    & \nu       & nu       & \rho     & rho       & \varphi  & phi    \\ 
+    \beta     & beta    & \zeta     & zeta    & \kappa    & kappa   & \xi       & xi       & \sigma   & sigma     & \chi     & chi    \\ 
+    \gamma    & gamma   & \eta      & eta     & \lambda   & lambda  & \omicron  & omicron  & \tau     & tau       & \psi     & psi    \\ 
+    \delta    & delta   & \theta    & theta   & \mu       & mu      & \pi       & pi       & \upsilon & upsilon   & \omega   & omega  \\ 
+     \bottomrule
+ \end{tabular}
+  \caption{The Greek alphabet used by Bayer}
+  \label{tab:Phenomena:StarNames:BayerLetters}
+\end{table}
+
+
+Stellarium can draw both constellation diagrams and artistic
+representations of the constellations. Multiple sky cultures are
+supported: Stellarium's default 'Modern' skyculture is an amalgamate of European scientific traditions 
+that are rooted in Ptolemy's Almagest, with constellation figures mostly from ancient Greek mythology. 
+In the upcoming era of Islam, the Almagest was translated to Arab, including
+star names that often just described the location of a star within the constellation. 
+Around the year 1000 the Almagest was re-introduced to Western Europe, but some star names were misspelled 
+and transferred without re-tranalation, introducing a large number of star names of Arab origin now in use for many centuries.
+
+Aside from historical and mythological value still valued by storytellers around the campfires, 
+to the modern astronomer
+the constellations provide a way to segment the sky for the purposes
+of describing locations of objects. Indeed, one of the first tasks for
+an amateur observer is \emph{astrognosis} (learning the constellations) --- the
+process of becoming familiar with the relative positions of the
+constellations, at what time of year a constellation is visible, and
+in which constellations observationally interesting objects reside.
+
+As scientific astronomy evolved in the Renaissance and later, star atlases were produced, 
+each introducing more constellations to fill gaps left between the classic 48 Ptolemaic constellations, 
+with artistic figures often overwhelming the actual star map.
+The telescope age and needs to assign each fixed celestial object coordinates and a 'host constellation' 
+finally had to bring an end to the uncontrolled growth of officially recognized constellations. 
+In 1930, the International Astronomical Union \index{IAU} has adopted 88 
+constellations as a common system for segmenting the sky (Table~\ref{tab:IAUConstellations}). 
+Some formalisation has been adopted, each constellation having a \emph{proper name} in Latin, 
+and a three letter abbreviation of that name.  
+For example, Ursa Major has the abbreviation UMa. Also, the IAU
+constellations have clearly defined \emph{boundaries}\citep{Delporte:1930}, which you can draw in
+Stellarium when you press the \key{B} key\footnote{These boundaries or
+  borders have been defined using coordinates from 1875. Due to the effect
+  of \emph{precession}, these borders are no longer parallel to
+  today's coordinate grid.}. The IAU constellation a selected object is placed in 
+is also available in the object information data \citep{1987PASP...99..695R}, 
+regardless of the currently active sky culture.  
+
+On the other hand, the shapes of mythological figures, and also stick figures, have not been canonized, so 
+you will likely find deviations between Stellarium's default skyculture and your favourite printed atlas. 
+In this sense, do also not assume Stellarium's default stick figures to be in any way authoritative. 
+As any other, they are an artistic interpretation that should help memorizing and discerning the constellations.
+
+\subsubsection{Asterisms}
+\label{sec:Phenomena:Asterisms}
+
+As nonscientific observing of the sky became a pastime for non-scientists (amateur astronomers) in the late 19th century, 
+some easy to recognize star groups were described and labeled in sky observing guides. 
+These are internationally not standardized and may show even regionally differing names for (almost) the same figure. 
+For example, the seven bright stars of Ursa Major are widely recognised, known variously as ``the plough'', the
+``pan-handle'', ``greater wagon'' or the ``big dipper''. 
+
+After the canonisation of the IAU constellations, these figures became commonly known as \emph{asterisms}%
+\footnote{Note that in other scientific contexts, `asterism' may also be the general designation of a star figure (often of other cultures). 
+However, in Stellarium an `asterism' can be understood as `informal second-class figure' that may be used for culture-dependent purposes.}. 
+In Stellarium, you can display them as stick figures with name labels in colors different from the ``main'' constellations. 
+
+\subsubsection{Non-European Constellations}
+\label{sec:Phenomena:OtherSkycultures}
+
+Many other sky cultures are available in Stellarium which show constellations and other elements of ethnoastronomy 
+of other traditions, contributed by users and scientists from all over the world, and showing the diversity 
+and ubiquity of human interest in the sky all around the globe.
+ 
+We welcome well-made contributions, but as time evolves these skyculture contributions may be further extended by the original authors, 
+other contributors (if allowed by respective licenses), or removed if found problematic. See chapter~\ref{ch:SkyCultures} for full details.
 
 
 \subsection{Star Names}
@@ -197,7 +274,7 @@ Ind & Indus                & Indi                  & Vul & Vulpecula            
 
 The brighter stars often have one or more \emph{common
 names} relating to mythical characters from the various traditions. For
-example the brightest star in the sky, Sirius is also known as The Dog
+example the brightest star in the sky, Sirius, is also known as The Dog
 Star (the name Canis Major --- the constellation Sirius is found in ---
 is Latin for ``The Great Dog''). 
 
@@ -214,7 +291,14 @@ names added by court astronomers into their maps. There are also 3
 stars named after the victims of the Apollo~1 disaster in 1967.
 Today, the International Astronomical Union (IAU)\index{IAU} is the only
 scientifically accepted authority which can give proper names to
-stars. Some companies offer a paid name service for commemoration or
+stars, and a `Working Group on Star Names' (WGSN) has been established. 
+Apart from canonizing one spelling for the well-known stars and avoiding using the same name for multiple stars, 
+recently WGSN has started to assign star names from non-European cultures to hitherto unnamed 
+(usually dimmer, but still naked-eye) stars in order to diversify star names. 
+(Constellation names and IAU borders are not affected.) 
+Stellarium closely follows this development in the default `Modern' and `IAU' Skycultures.
+
+Some companies offer a paid name service for commemoration or
 dedication of a star for deceased relatives or such, but all you get
 here is a piece of paper with coordinates of (usually) an unremarkably
 dim star only visible in a telescope, and a name to remember, stored
@@ -241,22 +325,6 @@ ordering, and some multiple stars (both real and optical) are named
 with a numerical superscript after the Greek letter, e.g.\ $\pi^1$...
 $\pi^6$ Orionis.
 
-
-\begin{table}[htb]
-  \centering
-  \begin{tabular}{>{$}c<{$}l>{$}c<{$}l>{$}c<{$}l>{$}c<{$}l}
-    \toprule
-    \alpha    & alpha   &  \eta      & eta     & \nu       & nu       & \tau     & tau     \\ 
-    \beta     & beta    &  \theta    & theta   & \xi       & xi       & \upsilon & upsilon \\ 
-    \gamma    & gamma   &  \iota     & iota    & \omicron  & omicron  & \varphi  & phi     \\ 
-    \delta    & delta   &  \kappa    & kappa   & \pi       & pi       & \chi     & chi     \\ 
-    \epsilon  & epsilon &  \lambda   & lambda  & \rho     & rho       & \psi     & psi     \\ 
-    \zeta     & zeta    &  \mu       & mu      & \sigma   & sigma     & \omega   & omega   \\
-    \bottomrule
- \end{tabular}
-  \caption{The Greek alphabet used by Bayer}
-  \label{tab:Phenomena:StarNames:BayerLetters}
-\end{table}
 
 \subsubsection{Flamsteed Designation}
 \label{sec:Phenomena:StarNames:Flamsteed}
@@ -400,7 +468,7 @@ denoted by a number in roman numerals, as described in table~\ref{tab:luminosity
 
 \begin{table}[tb]
   \centering\small
-  \begin{tabular}{lll}
+  \begin{tabular}{ll}
 \toprule
 \emph{Luminosity class} & \emph{Description}\\\midrule
 Ia, Ib & Super-giants\\
@@ -423,7 +491,7 @@ temperature gives a diagram called a Hertzsprung-Russell diagram
 in figure~\ref{fig:colourmag} (which is technically a colour/magnitude
 plot).
 
-\begin{figure}[tp]
+\begin{figure}[tbp]
 \centering\includegraphics[width=\textwidth]{colour_magnitude_graph.png}
 \caption{Hertzsprung-Russell Diagram}
 \label{fig:colourmag}
@@ -511,14 +579,15 @@ extrapolated from measurements when the phase angle $|\alpha|<7^\circ$.
 Of course, just at Full Moon when the opposition is near-perfect, the
 Moon will also move through Earth's shadow during a Lunar eclipse.
 
-The Moon is a large reflective body which reflects not only sunlight
+The Moon %is a large reflective body which 
+reflects not only sunlight
 which directly hits it, but also sunlight reflected from Earth to the
-Moon \citep{Agrawal:2016}. This \indexterm{Ashen Light} or
-\indexterm{Earthshine} is brightest when Earth is most strongly
-illuminated for the Moon, i.e., when the Moon as seen from Earth shows
-only a thin crescent. Therefore in these days around the New Moon, the
+Moon \citep{Agrawal:2016}. This \indexterm{earthshine}, also known as
+\indexterm{ashen glow}, is brightest when the Moon is most strongly
+illuminated by the Earth, i.e., when the Moon as seen from Earth shows
+only a thin crescent. In these days around the New Moon, the
 thin crescent can often be seen complemented into a softly glowing
-full disk. \newFeature{v0.21.0} Stellarium's estimate for visual
+full disk. \newFeature{0.21.0} Stellarium's estimate for visual
 magnitude is based on the mentioned references and a new standard 
 value for the solar illumination constant of 133.1~klx \citep{Ashdown:2019}.
 
@@ -566,9 +635,9 @@ definition of a planet in 2006 Pluto has been relegated to having the
 status of \emph{dwarf planet}, along with bodies such as Ceres and Eris.
 See figure~\ref{fig:planets}.
 
-\begin{figure}[t]
+\begin{figure}[tb]
   \centering
-  \includegraphics[width=0.9\linewidth]{pictures/the_planets.jpg}
+  \includegraphics[width=0.9\linewidth]{the_planets.jpg}
   \caption{The Planets}
   \label{fig:planets}
 \end{figure}
@@ -598,16 +667,18 @@ metallic cores). Because of this, they have an average density which is
 much less than the terrestrial planets. Saturn's mean density is only
 about $0.7 \g/\cm^3$ -- it would float in water!
 
-\subsection{Magnitudes of the Planets}
-The visual magnitude of the planets can be found in astronomical
+\subsection{Apparent Magnitudes of the Planets}
+The apparent magnitude of the planets can be found in astronomical
 almanachs. Over time, several scientific studies have refined these
 models. A few of them have been implemented in Stellarium:
 \begin{description}
-\item[Müller 1893] G. Müller formulated visual magnitudes for the
+\item[M\"uller 1893] G. M\"uller formulated
+  \indexterm[magnitudes, visual]{visual magnitudes} for the
   planets from visual observations of 1877--1891. They can be found in
   \citet{AstronomicalAlgorithms:1998} and \citet{ESAE:1961}. They give 
   notably lower brightness estimates than the later models, which however 
-  provide Johnson V (instrumental) magnitudes. Several important 
+  provide \indexterm[magnitudes, instrumental]{instrumental magnitudes}
+  in the Johnson V photometric system. Several important 
   historical studies from the early 20th century are based on these estimates.
 \item[Astronomical Almanac 1984] This model was used in the
   Astronomical Almanac starting in 1984. The expressions are allegedly
@@ -623,11 +694,32 @@ models. A few of them have been implemented in Stellarium:
 
 \section{The Minor Bodies}%\label{the-minor-planets}
 
-As well as the Major Planets, the solar system also contains
+As well as the Major Planets, the Solar system also contains
 innumerable smaller bodies in orbit around the Sun. These are
 generally the \emph{dwarf planets} (Ceres, Pluto, Eris), the other
 \emph{minor planets}, also known as \emph{planetoids} or
 \emph{asteroids}, and comets.
+
+While the positions of the major planets can meanwhile be computed for
+many millennia in the past and future, the minor bodies have only been
+systematically observed since the beginning of the 19th
+century.\footnote{The first discovered asteroid, (1) Ceres, was in
+  fact discovered on January 1, 1801.} The small masses occasionally
+pass by the larger planets which exert gravitational forces, so that
+the orbits of the minor bodies are not stable and cannot be computed
+for long periods. The positions are computed by using
+\indexterm[orbital elements, osculating]{osculating orbital elements}, which describe the motions on
+instantaneous \indexterm{Kepler orbits}\footnote{The mathematician and
+  astronomer \name[Johannes]{Kepler} (1571--1630) discovered that
+  planets do not move on circles (which had been postulated since
+  antiquity), but on ``conical sections'', i.e., ellipses, parabolae
+  or even hyperbolae. The latter two can be observed for far-out
+  comets and recently even interstellar objects passing the Sun.}. If
+you want to compute positions of these objects with Stellarium, you
+need to have valid (current) \indexterm[orbital elements, osculating]{orbital elements}. See
+Solar System Editor plugin (section~\ref{sec:plugins:SolarSystemEditor}) and 
+Appendix~\ref{sec:ssystem.ini:minor} for more details. For long-term valid orbital data,
+see Appendix~\ref{sec:ssystem.ini:MultiEpoch}.
 
 \subsection{Asteroids}
 \label{sec:Phenomena:Asteroids}
@@ -641,7 +733,7 @@ hundreds of kilometres.
 \subsection{Comets}
 \label{sec:Phenomena:Comets}
 
-A comet is a small body in the solar system that orbits the Sun and (at
+A comet is a small body in the Solar system that orbits the Sun and (at
 least occasionally) exhibits a coma (or atmosphere) and/or a tail.
 
 Most comets have a very eccentric orbit (featuring a highly flattened
@@ -650,7 +742,9 @@ time a very long way from the Sun. Comets are composed of rock, dust
 and ices. When they come close to the Sun, the heat evaporates the
 ices, causing a gaseous release. This gas and loose material which
 comes away from the body of the comet is swept away from the Sun by
-the Solar wind, forming the tail.
+the Solar wind, forming the tail. The outgassing may also change the
+orbit of the comet, so that its orbital elements should be used only
+for a few months around their \indexterm{epoch}. 
 
 Most larger comets exhibit two kinds of tail: a straight gas tail
 (often blue-green in photographs), and a wider, occasionally curved
@@ -659,9 +753,9 @@ dust tail (reflecting whitish sunlight).
 Comets whose orbit brings them close to the Sun more frequently than
 every 200 years are considered to be \emph{short period} comets, the
 most famous of which is probably Comet Halley, named after the British
-astronomer \name[Edmund]{Halley} (1656--1741/42\footnote{Halley lived 
+astronomer \name[Edmund]{Halley} (1656--1741/42\footnote{\name[Edmund]{Halley} lived 
 in a time when Great Britain still used the Julian calendar and started 
-the years in March. He died January 14th, 1741 (Julian), 
+the years in March. He died on January 14th, 1741 (British Julian), 
 which was called January 25th 1742 (Gregorian) in most other European countries.}), 
 which has an orbital period of roughly 76~years.
 
@@ -670,7 +764,7 @@ which has an orbital period of roughly 76~years.
 \label{sec:Phenomena:Meteoroids}
 
 These objects are small pieces of space debris left over from the early
-days of the solar system or which crumbled off a comet when it came close to the sun. 
+days of the Solar system or which crumbled off a comet when it came close to the sun. 
 These particles orbit the Sun and come in a variety of shapes, 
 sizes an compositions, ranging from microscopic dust particles
 up to about ten meters across.
@@ -725,7 +819,7 @@ can be observed with dark-adapted eyes in perfect skies: the
 \emph{Gegenschein} (counterglow). 
 
 This is sunlight reflected off the same dust and meteoroids in the
-plane of our solar system which is the source of meteors. Stellarium's
+plane of our Solar system which is the source of meteors. Stellarium's
 sky can show the Zodiacal light \citep{Kwon:2004:ZodiacalLight}, but
 observe how quickly light pollution kills its visibility!
 
@@ -883,11 +977,11 @@ galaxies}, \emph{lenticular galaxies} and \emph{irregular galaxies}.
 
 
 
-\section{Eclipses}
+\section{Eclipses and Transits}
 \label{sec:Eclipses}
 
 Eclipses occur when an apparently large celestial body (planet, moon
-etc.) moves between the observer (that's you!) and a more distant object
+etc.) moves between the observer and a more distant object
 -- the more distant object being eclipsed by the nearer one.
 
 \subsection{Solar Eclipses}
@@ -902,9 +996,10 @@ By a wonderful coincidence, Sun and Moon appear of almost identical
 size in Earth's sky, but the Moon's elliptical orbit sometimes causes
 it to appear just a bit smaller than the Sun.
 
-There are therefore three types of solar eclipses:
+There are therefore three types of Solar eclipses:
 \begin{description}
-\item[Partial] The Moon only covers part of the Sun's surface.
+\item[Partial] The Moon only covers part of the Sun's surface which, 
+for higher eclipse magnitudes, appears as crescent.\nocite{Meeus:Morsels4}%Chapt.15. 
 \item[Total] The Moon completely obscures the Sun's surface.
 \item[Annular] The Moon is at or close to apogee (furthest from Earth in its
 elliptic orbit) and its disc is too small to completely cover the Sun.
@@ -913,7 +1008,7 @@ around the edge.
 \end{description}
 Sometimes the eclipse starts annular, but when the shadow reaches the
 part of the globe closest to the Moon, it becomes just large enough to
-cover the sun totally, and when receding, it may go back to the
+cover the Sun totally, and when receding, it may go back to the
 annular characteristic. This is called \emph{annular-total} in the
 classical literature, or \emph{hybrid} in more recent works.
 
@@ -922,8 +1017,25 @@ classical literature, or \emph{hybrid} in more recent works.
 
 Lunar eclipses occur when the Earth moves between the Sun and the Moon,
 and the Moon is in the Earth's shadow. They occur under the same basic
-conditions as the solar eclipse but can occur more often because the
-Earth's shadow is so much larger than the Moon's.
+conditions as Solar eclipses but appear to occur more often because the
+Earth's shadow is so much larger than the Moon's, and a Lunar eclipse is
+observable from more than half of the Earth's surface, while a Solar eclipse
+is limited to a smaller region.
+
+The geometrical begin of a Lunar eclipse is totally unobservable: seen
+from a point near the observable edge of the Lunar surface, the large black
+disk of Earth just touches the Solar disk. While the time of this
+event can be determined, the effect on the apparent brightness of the
+Moon's surface as observed from Earth is close to zero. Only as more
+of the Solar disk is occulted by Earth, this spot on the Lunar surface
+will receive less sunlight and will appear darker when observed from
+Earth. A rule of thumb says that 70\% of the Moon must enter the
+Earth's \indexterm{penumbra} (partial shadow) before a light defect can be noted by attentive human
+observers. 
+
+The Earth's \indexterm{umbra} (deep shadow) is then much darker. As soon as an observer on
+the Lunar edge experiences a Total Solar eclipse, observers on Earth
+see the begin of the partial eclipse.
 
 Total lunar eclipses are more noticeable than partial eclipses because
 the Moon moves fully into the Earth's shadow and there is very
@@ -932,14 +1044,114 @@ noticeable darkening. However, the Earth's atmosphere refracts light
 surface even during total eclipses. The blue parts of sunlight are scattered and filtered away, 
 so that there is a marked reddening of the light as it passes through the atmosphere, and this 
 makes the Moon appear in a deep red colour. The darkness and colors are notably influenced by 
-atmospheric clarity and clouds. After big volcanic eruptions eclipses are often reported darker.
+atmospheric clarity and clouds. After big volcanic eruptions eclipses are often reported to appear darker.
+\name[Andr\'e]{Danjon} (1890--1967) has introduced a scale for the apparent brightness of the 
+fully eclipsed Moon, where 0 is given for extremely dark eclipses and 4 for very bright ones. 
+These unpredictable brightness differences make accurate simulation of the exact appearance impossible, 
+but Stellarium's display gives a pretty good impression for eclipses given as 2-3 on this \indexterm{Danjon scale}. 
 
 Earth's atmosphere also makes the shadow slightly larger than what can
 be derived by the geometrical sizes and distances of the involved
 objects. The Astronomical Almanac uses a traditional enlargement by 2\% after
-\name{Chauvenet} while recent eclipse experts prefer another
-formulation which leads to a slightly smaller enlargement after \name{Danjon} \citep{Espenak-Meeus:2009}. You
+\name[William]{Chauvenet} (1820--1870) while recent eclipse experts prefer another
+formulation which leads to a slightly smaller enlargement after \name[Andr\'e]{Danjon} \citep{Espenak-Meeus:2009}. You
 can select which formulation you prefer (see section~\ref{sec:gui:view:sso}).
+
+\subsection{Transits}
+\label{sec:Eclipses:Transits}
+
+The term ``transit'' generally describes the passage of one object in
+front of another\footnote{Another ``transit'' means the crossing of
+  the meridian by the object.}. The most prominent examples are the
+passages of the \indexterm{inferior planets} Mercury or Venus between the Sun
+and Earth, where they appear as tiny black disks on the glaringly
+bright Solar disk. The disk of Venus can be seen with the unaided
+eye\footnote{Never look into the Sun without proper filters!}, while
+Mercury is too small to be discernible.
+
+Observing the transits of Venus from various locations on Earth was an
+important scientific endeavour in previous centuries. It allows a
+direct determination of the distance scale in the Solar
+system. Unfortunately, these transits are rare events: After two such
+transits 8 years apart, there is a gap lasting more than a
+century. The last such transits occurred in 2004 and 2012. Mercury's
+transits are much more frequent.
+
+In the telescope age, this also can be a passage of a Jovian Moon in
+front of Jupiter, or even the passage of a shadow of such a moon over
+Jupiter's disk, or, more recently, the passage of an artificial
+satellite in front of the Sun or Moon.
+
+\subsection{Contact Times}
+\label{sec:Eclipses:ContactTimes}
+
+Eclipse and transit observers like to prepare tables of precomputed
+\indexterm{contact times} for which they use terminology shown in
+Tables~\ref{tab:Eclipses:ContactTimesSolar}-\ref{tab:Eclipses:ContactTimes}.
+
+\begin{table}[p]
+  \centering\small
+  \begin{tabular}{lll}
+\toprule
+\emph{Contact} & \emph{Name}       & \emph{Description}\\\midrule
+First   & Begin of partial eclipse & Moon first touches Sun from the outside\\  
+Second  & Begin of totality        & Moon completely covers the Sun \\  
+        & Mid-eclipse & central time\\
+Third   & End of totality          & Bright Solar edge re-appears from complete occultation\\  
+Fourth  & End of partial eclipse   & Moon leaves Sun completely \\  
+\bottomrule
+\end{tabular}
+\caption{Contact terminology for Total Solar eclipses.}
+\label{tab:Eclipses:ContactTimesSolar}
+\end{table}
+
+\begin{table}[p]
+  \centering\small
+  \begin{tabular}{ll}
+\toprule
+\emph{Contact} & \emph{Name, Description}\\\midrule
+First  Penumbral & P1 - Begin of (penumbral) eclipse. Unobservable. \\
+                 & Moon first touches Earth's geometrical shadow cone from the outside. \\  
+Second Penumbral & P2 - Begin of total immersion in penumbra\\
+                 & Moon shows a notable darkening \\  
+First  Umbral    & U1 - Begin of partial eclipse\\
+                 & Moon first touches the central dark shadow \\  
+Second Umbral    & U2 - Begin of totality\\
+                 & Moon completely immersed in Earth's umbra (dark shadow) \\  
+Maximum          & G - Mid-eclipse, central time\\
+Third  Umbral    & U3 - End of totality\\
+                 & A bright Lunar edge re-appears from complete occultation \\  
+Fourth Umbral    & U4 - End of partial eclipse\\
+                 & Moon leaves umbra completely \\  
+Third  Penumbral & P3 - End of total penumbral phase\\
+                 & Lunar edge leaves penumbra. The opposite side is still darkened\\  
+Fourth Penumbral & P4 - End of (penumbral) eclipse. Unobservable. \\
+                 & Moon leaves penumbra completely. \\  
+\bottomrule
+\end{tabular}
+\caption{Contact terminology for Lunar eclipses. Depending on shadow
+  geometry, the second penumbral contact may occur only after the first
+  umbral, and third penumbral contact before fourth umbral.}
+\label{tab:Eclipses:ContactTimesLunar}
+\end{table}
+
+
+\begin{table}[p]
+  \centering\small
+  \begin{tabular}{lll}
+\toprule
+\emph{Contact} & \emph{Name} & \emph{Description}\\\midrule
+First  & Exterior Ingress & Planet/Moon first touches Sun from the outside\\  
+Second & Interior Ingress & Planet/Moon starts to be visible completely inside Sun \\  
+       & Mid-transit & central time\\
+Third  & Interior Egress & Planet/Moon first touches Sun from the inside\\  
+Fourth & Exterior Egress & Planet/Moon leaves Sun completely \\  
+\bottomrule
+\end{tabular}
+\caption{Contact terminology for Transits and Annular Solar eclipses.}
+\label{tab:Eclipses:ContactTimes}
+\end{table}
+
 
 \section{Observing Hints}
 \label{sec:observing_hints}
@@ -956,9 +1168,9 @@ easily, make the most of it when you are away.
 
 \item[Wrap up warm] The best observing conditions are the same
 conditions that make for cold nights, even in the summer time. Observing
-is not a strenuous physical activity, so you will feel the cold a lot
+is not a strenuous physical activity, so you will feel the cold %a lot
 more than if you were walking around. Wear a lot of warm clothing, don't
-sit/lie on the floor (at least use a camping mat, consider taking a
+sit/lie on the floor (at least use a camping mat, better take a
 deck-chair), and take a flask of hot drink.
 
 \item[Dark adaptation] The true majesty of the night sky only
@@ -998,7 +1210,7 @@ side but concentrating on the object's location can often reveal it.
 \subsection{Atmospheric Extinction}
 \label{sec:phenomena:Extinction}
 
-\begin{figure}[tb]
+\begin{figure}[tbp]
 \centering
 \ifpdf
 \includegraphics[width=\textwidth]{gz_extinctionmag}
@@ -1025,7 +1237,7 @@ the star is on the horizon, it has to pass about 40 times longer
 through the atmosphere: 40 air masses (Fig.~\ref{fig:Extinction}). The
 number of air masses increases fast in low altitudes, this is why we
 see so few stars along the horizon. Usually blue light is extinguished
-more, this is why the sun and moon (and brigher stars) appear reddish
+more, this is why the sun and moon (and brighter stars) appear reddish
 on the horizon.
 
 Stellarium can simulate extinction, and you can set the opacity of

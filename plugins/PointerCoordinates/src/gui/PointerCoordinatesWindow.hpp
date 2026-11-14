@@ -36,25 +36,27 @@ class PointerCoordinatesWindow : public StelDialog
 
 public:
 	PointerCoordinatesWindow();
-	~PointerCoordinatesWindow();
+	~PointerCoordinatesWindow() override;
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 
 protected:
-	void createDialogContent();
+	void createDialogContent() override;
 
 private:
 	Ui_pointerCoordinatesWindowForm* ui;
 	PointerCoordinates* coord;
+	bool usePolarDistance;
 
 	void setAboutHtml();
 	void populateValues();
-	void setCustomCoordinatesAccess(QString place);
+	void setCustomCoordinatesAccess(const QString &place);
 
 private slots:
 	void saveCoordinatesSettings();
 	void resetCoordinatesSettings();
+	void populateCoordinates(bool polarDistance);
 
 	void populateCoordinatesPlacesList();
 	void populateCoordinateSystemsList();

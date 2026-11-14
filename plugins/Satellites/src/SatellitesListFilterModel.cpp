@@ -19,20 +19,22 @@
 #include "SatellitesListFilterModel.hpp"
 
 SatellitesListFilterModel::SatellitesListFilterModel(QObject *parent) :
-    QSortFilterProxyModel(parent),
-    filterFlag(SatNoFlags)
+	QSortFilterProxyModel(parent),
+	filterFlag(SatNoFlags)
 {
 }
 
 void SatellitesListFilterModel::setFilterFlag(const SatFlag& flag)
 {
 	filterFlag = flag;
+	emit filterFlagChanged(filterFlag);
 	invalidateFilter();
 }
 
 void SatellitesListFilterModel::setFilterGroup(const QString& groupId)
 {
 	filterGroup = groupId;
+	emit filterGroupChanged(filterGroup);
 	invalidateFilter();
 }
 
@@ -66,13 +68,41 @@ bool SatellitesListFilterModel::filterAcceptsRow(int source_row, const QModelInd
 	}
 	
 	// Check name
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+	if (index.data(Qt::DisplayRole).toString().contains(filterRegularExpression()))
+#else
 	if (index.data(Qt::DisplayRole).toString().contains(filterRegExp()))
+#endif
 		return true;
 	
 	// Check ID
 	data = index.data(Qt::UserRole);
 	QString id = data.toString();
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+	if (id.contains(filterRegularExpression()))
+#else
 	if (id.contains(filterRegExp()))
+#endif
+		return true;
+
+	// search international designator
+	data = index.data(SatCosparIDRole);
+	id = data.toString();
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+	if (id.contains(filterRegularExpression()))
+#else
+	if (id.contains(filterRegExp()))
+#endif
+		return true;
+
+	// search descriptions
+	data = index.data(SatDescriptionRole);
+	QString descr = data.toString();
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+	if (descr.contains(filterRegularExpression()))
+#else
+	if (descr.contains(filterRegExp()))
+#endif
 		return true;
 	
 	// TODO: Possible check for "NORAD NNNN".

@@ -20,6 +20,7 @@
 #ifndef STELUTILS_HPP
 #define STELUTILS_HPP
 
+#include <set>
 #include <cmath>
 #include "VecMath.hpp"
 
@@ -34,10 +35,22 @@
 #define AU_KMf (1.0f/149597870.691f)
 // Parsec (km)
 #define PARSEC 30.857e12
+// Parsec (LY)
+#define PARSEC_LY 3.261563777
 // speed of light (km/sec)
 #define SPEED_OF_LIGHT 299792.458
 // Ecliptic obliquity of J2000.0, degrees
 #define EPS_0 23.4392803055555555555556
+// Equatorial radius of the Earth in km (WGS-84)
+#define EARTH_RADIUS 6378.1366
+// Equatorial radius of the Sun in km
+#define SUN_RADIUS 696000.
+// Equatorial radius of the Moon in km
+#define MOON_RADIUS 1738.
+// 1 mas to 1 radian, is M_PI / (3600000. * 180.)
+#define MAS2RAD 4.8481368110953594e-9
+// julian year in seconds that is 365.25 * 86400.
+#define JYEAR_SECONDS 31557600.0
 
 // Add a few frequently used extra math-type literals
 #ifndef M_PI_180
@@ -69,22 +82,62 @@
 	#define M_180_PIf   (180.f/M_PIf)
 #endif
 
+#ifndef M_RAD_ARCSECOND
+	#define M_RAD_ARCSECOND (M_PI_180 / 3600.)
+#endif
+
 #define stelpow10f(x) std::exp((x) * 2.3025850930f)
+
+#define L1S(x) QLatin1String(x)
+
+// Allow parallel evaluation of std::transform_reduce(std::execution::par, ...) or
+// std::sort(std::execution::par, ...) where known. Not all compilers know it.
+// Use std::transform_reduce(STD_EXECUTION_PAR_COMMA ...) for the general case.
+#if STD_EXECUTION_KNOWN
+# define STD_EXECUTION_PAR_COMMA std::execution::par,
+#else
+# define STD_EXECUTION_PAR_COMMA
+#endif
+
+constexpr double DEFAULT_FONT_SIZE = 13;
 
 //! @namespace StelUtils contains general purpose utility functions.
 namespace StelUtils
 {
-	//! Return the full name of stellarium, i.e. "stellarium 0.9.0"
+	static inline constexpr double J2000 = 2451545.0;
+
+	//! Return the full name of stellarium, i.e. "Stellarium 23.1"
 	QString getApplicationName();
 
-	//! Return the version of stellarium, i.e. "0.9.0"
+	//! Return the version of stellarium, i.e. "23.1.0"
 	QString getApplicationVersion();
 
-	//! Return the name and the version of operating system, i.e. "Mac OS X 10.7"
+	//! Return the public version of stellarium, i.e. "23.1"
+	QString getApplicationPublicVersion();
+
+	//! Return the series of stellarium, i.e. "23.0"
+	QString getApplicationSeries();
+
+	//! Return the name and the version of operating system, i.e. "macOS 12.5"
 	QString getOperatingSystemInfo();
 
 	//! Return the user agent name, i.e. "Stellarium/0.15.0 (Linux)"
 	QString getUserAgentString();
+
+        //! Return the addressing mode string, i.e. "64-bit"
+        QString getAddressingMode();
+
+	/*! \brief Get a long integer from a JSON value
+	 *
+	 *  QJsonValue stores JSON numbers as double-precision floating-point values. This means
+	 *  that numbers greater than 2^53-1 will be rounded, which is unacceptable for e.g. ids
+	 *  like those of the Gaia catalog.
+	 *  This function supports, in addition to normal JSON numbers, also representations of
+	 *  numbers by JSON strings. If the value passed is a JSON string, it will be parsed to a
+	 *  number. If it's a JSON number less than 2^53, it will be returned as is. Otherwise it
+	 *  will return 0, as QJsonValue's getters would in case of a type mismatch.
+	 */
+	qint64 getLongLong(const class QJsonValue& v);
 
 	inline const QString getEndLineChar() {
 		#ifdef Q_OS_WIN
@@ -138,14 +191,21 @@ namespace StelUtils
 	//! @param rad input angle in radian
 	//! @param sign true if positive, false otherwise
 	//! @param deg decimal degree
+	Q_DECL_DEPRECATED_X("just use rad*M_180_PI instead")
 	void radToDecDeg(double rad, bool& sign, double& deg);
 
 	//! Convert an angle in radian to a decimal degree string.
 	//! @param angle input angle in radian
 	//! @param precision
 	//! @param useD Define if letter "d" must be used instead of deg sign
-	//! @param useC Define if function should use 0-360 degrees
-	QString radToDecDegStr(const double angle, const int precision = 4, const bool useD=false, const bool useC=false);
+	//! @param positive Define if function should use 0-360 degrees
+	QString radToDecDegStr(const double angle, const int precision = 4, const bool useD=false, const bool positive=false);
+	//! Convert an angle in radian to a decimal degree string for narration.
+	//! @param angle input angle in radian
+	//! @param precision
+	//! @param useD (ignored)
+	//! @param positive Define if function should use 0-360 degrees
+	QString radToDecDegNarration(const double angle, const int precision = 4, const bool useD=false, const bool positive=false);
 
 	//! Convert an angle in radian to a hms formatted string.
 	//! If the second, minute part is == 0, it is not output
@@ -156,6 +216,10 @@ namespace StelUtils
 	//! @param angle input angle in radian
 	//! @param decimal output decimal second value
 	QString radToHmsStr(const double angle, const bool decimal=false);
+	//! Convert an angle in radian to a hms formatted string for narration.
+	//! @param angle input angle in radian
+	//! @param decimal output decimal second value
+	QString radToHmsNarration(const double angle, const bool decimal=false);
 
 	//! Convert an angle in radian to a dms formatted string.
 	//! If the second, minute part is == 0, it is not output
@@ -168,12 +232,22 @@ namespace StelUtils
 	//! @param decimal output second value with decimal fraction
 	//! @param useD Define if letter "d" must be used instead of deg sign
 	QString radToDmsStr(const double angle, const bool decimal=false, const bool useD=false);
+	//! Convert an angle in radian to a dms formatted string for narration.
+	//! @param angle input angle in radian
+	//! @param decimal output second value with decimal fraction
+	//! @param useD (ignored)
+	QString radToDmsNarration(const double angle, const bool decimal=false, const bool useD=false);
 
 	//! Convert an angle in radian to a dms formatted string.
 	//! @param angle input angle in radian
 	//! @param precision
 	//! @param useD Define if letter "d" must be used instead of deg sign
 	QString radToDmsPStr(const double angle, const int precision = 0, const bool useD=false);
+	//! Convert an angle in radian to a dms formatted string for narration.
+	//! @param angle input angle in radian
+	//! @param precision
+	//! @param useD (ignored)
+	QString radToDmsPNarration(const double angle, const int precision = 0, const bool useD=false);
 
 	//! Convert an angle in decimal degree to +-dms format.
 	//! @param angle input angle in decimal degree
@@ -186,6 +260,32 @@ namespace StelUtils
 	//! Convert an angle in decimal degrees to a dms formatted string.
 	//! @param angle input angle in decimal degrees
 	QString decDegToDmsStr(const double angle);
+	//! Convert an angle in decimal degrees to a dms formatted string for narration.
+	//! @param sayPlus true if the positivw sign really should be spoken
+	QString decDegToDmsNarration(const double angle, bool sayPlus=false);
+
+	//! Convert latitude in decimal degrees to a dms formatted string or use decimal values.
+	//! @param latitude in decimal degrees
+	//! @param dms set true to use DMS formatted string
+	QString decDegToLatitudeStr(const double latitude, bool dms = true);
+	//! Convert latitude in decimal degrees to a dms formatted string or use decimal values. Interface equals decDegToLatitudeStr().
+	//! @param latitude in decimal degrees
+	//! @param dms set true to use DMS formatted string
+	QString decDegToLatitudeNarration(const double latitude, bool dms = true);
+
+
+	//! Convert longitude in decimal degrees to a dms formatted string.
+	//! @param longitude in decimal degrees
+	//! @param eastPositive set true to counting East direction positive
+	//! @param semiSphere set true to use -180..180 degrees range (0..360 degrees otherwise)
+	//! @param dms set true to use DMS formatted string
+	QString decDegToLongitudeStr(const double longitude, bool eastPositive = true, bool semiSphere = true, bool dms = true);
+	//! Convert longitude in decimal degrees to a narration-ready string. Interface equals decDegToLongitudeStr().
+	//! @param longitude in decimal degrees
+	//! @param eastPositive set true to counting East direction positive
+	//! @param semiSphere set true to use -180..180 degrees range (0..360 degrees otherwise)
+	//! @param dms set true to use DMS formatted string
+	QString decDegToLongitudeNarration(const double longitude, bool eastPositive = true, bool semiSphere = true, bool dms = true);
 
 	//! Convert a dms formatted string to an angle in radian
 	//! @param s The input string
@@ -228,44 +328,61 @@ namespace StelUtils
 	}
 
 	//! Convert from Rectangular direction to spherical coordinate components.
-	//! @param lng double* to store longitude in radian
+	//! @param lng double* to store longitude in radian [-pi, pi]
 	//! @param lat double* to store latitude in radian
 	//! @param v the input 3D vector
 	inline void rectToSphe(double *lng, double *lat, const Vec3d& v){
-		double r = v.length();
-		*lat = asin(v[2]/r);
+		*lat = atan2(v[2], sqrt(v[0]*v[0] + v[1]*v[1]));
 		*lng = atan2(v[1],v[0]);
 	}
 
 	//! Convert from Rectangular direction to spherical coordinate components.
-	//! @param lng float* to store longitude in radian
+	//! @param lng float* to store longitude in radian [-pi, pi]
 	//! @param lat float* to store latitude in radian
 	//! @param v the input 3D vector
 	inline void rectToSphe(float *lng, float *lat, const Vec3d& v){
-		double r = v.length();
-		*lat = static_cast<float>(asin(v[2]/r));
 		*lng = static_cast<float>(atan2(v[1],v[0]));
+		*lat = atan2(v[2], sqrt(v[0]*v[0] + v[1]*v[1]));
 	}
 
 
 	//! Convert from Rectangular direction to spherical coordinate components.
-	//! @param lng float* to store longitude in radian
+	//! @param lng float* to store longitude in radian [-pi, pi]
 	//! @param lat float* to store latitude in radian
 	//! @param v the input 3D vector
 	inline void rectToSphe(float *lng, float *lat, const Vec3f& v){
-		float r = v.length();
-		*lat = asinf(v[2]/r);
+		*lat = atan2(v[2], sqrt(v[0]*v[0] + v[1]*v[1]));
 		*lng = atan2f(v[1],v[0]);
 	}
 
 	//! Convert from Rectangular direction to spherical coordinate components.
-	//! @param lng double* to store longitude in radian
+	//! @param lng double* to store longitude in radian [-pi, pi]
 	//! @param lat double* to store latitude in radian
 	//! @param v the input 3D vector
 	inline void rectToSphe(double *lng, double *lat, const Vec3f &v){
-		double r = static_cast<double>(v.length());
-		*lat = asin(static_cast<double>(v[2])/r);
+		*lat = atan2(static_cast<double>(v[2]), sqrt(static_cast<double>(v[0]*v[0] + v[1]*v[1])));
 		*lng = atan2(static_cast<double>(v[1]),static_cast<double>(v[0]));
+	}
+
+	//! Convert from spherical coordinates (including distance) to Rectangular direction.
+	//! @param lng longitude in radian
+	//! @param lat latitude in radian
+	//! @param r length of radius vector (distance)
+	//! @param v the resulting 3D unit vector
+	inline void spheToRect(const double lng, const double lat, const double r, Vec3d& v){
+		const double cosLat = cos(lat);
+		v.set(cos(lng) * cosLat * r, sin(lng) * cosLat * r, sin(lat) * r);
+	}
+
+	//! Convert from Rectangular direction to spherical coordinate components (including distance).
+	//! @param lng double* to store longitude in radian [-pi, pi]
+	//! @param lat double* to store latitude in radian
+	//! @param r double*   length of radius vector (distance)
+	//! @param v the input 3D vector
+	inline void rectToSphe(double *lng, double *lat, double *r, const Vec3d& v){
+		*r = v.norm();
+		*lat = atan2(v[2], sqrt(v[0]*v[0] + v[1]*v[1]));
+		*lng = atan2(v[1],v[0]);
 	}
 
 	//! Coordinate Transformation from equatorial to ecliptical
@@ -309,13 +426,23 @@ namespace StelUtils
 	//! @return the angle in radians.
 	double getDecAngle(const QString& str);
 
+	//! Natural ("human") comparison of two strings: alternating non-digit and
+	//! digit segments are compared so that e.g. "NGC 9" sorts before "NGC 10".
+	//! Letter comparison is case-insensitive. Does not depend on an ICU-backed
+	//! QCollator, so it behaves identically on all platforms.
+	//! @return true if @p a should be ordered before @p b.
+	bool naturalLessThan(const QString& a, const QString& b);
+
 	//! Check if a number is a power of 2.
 	inline bool isPowerOfTwo(const int value){
 		return (value & -value) == value;
 	}
 
-	//! Return the first power of two bigger than the given value.
+	//! Return the smallest power of two greater than or equal to the given value.
 	int getBiggerPowerOfTwo(int value);
+
+	//! Return the largest power of two smaller than or equal to the given value
+	int getSmallerPowerOfTwo(const int value);
 
 	//! Return the inverse sinus hyperbolic of z.
 	inline double asinh(const double z){
@@ -337,6 +464,13 @@ namespace StelUtils
 			ret+=b;
 		return ret;
 	}
+	//! Integer interval modulo. [a..b)
+	inline int amod(const int x, const int a, const int b){
+		if (a==b)
+			return x;
+		int ret = imod(x-a, b-a);
+		return ret+a;
+	}
 	//! Double modulo where the result is always nonnegative. [0..(b
 	inline double fmodpos(const double a, const double b){
 		double ret = fmod(a, b);
@@ -355,7 +489,7 @@ namespace StelUtils
 	//! Floor integer division provides truncating to the next lower integer, also for negative numerators.
 	//! https://stackoverflow.com/questions/2622441/c-integer-floor-function
 	//! @returns floor(num/den)
-	inline long intFloorDiv (long num, long den)
+	inline int intFloorDiv (int num, int den)
 	{
 	  if (0 < (num^den)) // lgtm [cpp/bitwise-sign-check]
 	    return num/den;
@@ -368,26 +502,37 @@ namespace StelUtils
 	}
 
 	//! version of intFloorDiv() for large integers.
-	inline long intFloorDivLL(long long num, long long den)
+	inline int intFloorDivLL(qint64 num, qint64 den)
 	{
 	  if (0 < (num^den)) // lgtm [cpp/bitwise-sign-check]
-	    return static_cast<long>(num/den);
+	    return int(num/den);
 	  else
 	    {
 	      lldiv_t res = lldiv(num,den);
-	      long long ret=  (res.rem)? res.quot-1
+	      qint64 ret= (res.rem)? res.quot-1
 			      : res.quot;
-	      return static_cast<long>(ret);
+	      return int(ret);
 	    }
 	}
 
 	///////////////////////////////////////////////////
 	// New Qt based General Calendar Functions.
-	//! Make from julianDay a year, month, day for the Julian Date julianDay represents.
+	//! Extract from julianDay a year, month, day for the Julian Date julianDay represents.
+	//! @attention Under rare circumstances with a rounded result where julianDay=*.49999999xyz this will still round off whereas the time is less than a fraction from midnight of the next day.
+	//! Depending on circumstances this may matter or not. If you need a full decoding of a Julian day number, prefer to use getDateTimeFromJulianDay()
 	void getDateFromJulianDay(const double julianDay, int *year, int *month, int *day);
 
-	//! Make from julianDay an hour, minute, second.
-	void getTimeFromJulianDay(const double julianDay, int *hour, int *minute, int *second, int *millis=Q_NULLPTR);
+	//! Extract from julianDay an hour, minute, second.
+	//! @attention Under rare circumstances with a rounded result where julianDay=*.49999999xyz this will lead to a factual result for *.5000000abc, i.e. not 24 but 0 hours, and wrapDay will be true.
+	//! Depending on circumstances this may matter or not. If you need a full decoding of a Julian day number, prefer to use getDateTimeFromJulianDay()
+	void getTimeFromJulianDay(const double julianDay, int *hour, int *minute, int *second, int *millis=Q_NULLPTR, bool *wrapDay=Q_NULLPTR);
+
+	//! Extract from julianDay a year, month, day, hour, minute, second and (optional) millisecond for the Julian Day julianDay represents.
+	//! This is the preferred method of complete decoding of a Julian day number.
+	void getDateTimeFromJulianDay(const double julianDay, int *year, int *month, int *day, int *hour, int *minute, int *second, int *millis=Q_NULLPTR);
+
+	//! Make hours (decimal format) from julianDay
+	double getHoursFromJulianDay(const double julianDay);
 
 	//! Parse an ISO8601 date string.
 	//! Also handles negative and distant years.
@@ -415,18 +560,29 @@ namespace StelUtils
 	//! Return a day number of week for date
 	//! @return number of day: 0 - sunday, 1 - monday,..
 	int getDayOfWeek(int year, int month, int day);
-	inline int getDayOfWeek(double JD){ double d= fmod(JD+1.5, 7); if (d<0) d+=7.0;
+	inline int getDayOfWeek(double JD)
+	{
+		double d= fmodpos(JD+1.5, 7);
 		return std::lround(floor(d));
 	}
+
+	//! Format the discovery date
+	//! @return QString representing the formatted date
+	QString localeDiscoveryDateString(const QString& discovery);
 
 	//! Get the current Julian Date from system time.
 	//! @return the current Julian Date
 	double getJDFromSystem();
 
 	//! Get the Julian Day Number (JD) from Besselian epoch.
-	//! @param epoch Besselian epoch, expressed as year
+	//! @param epoch Besselian epoch, expressed as year with decimal fraction
 	//! @return Julian Day number (JD) for B<Year>
 	double getJDFromBesselianEpoch(const double epoch);
+
+	//! Get the Julian Day Number (JD) from Julian epoch.
+	//! @param epoch Julian epoch, expressed as year with decimal fraction
+	//! @return Julian Day number (JD) for J<Year>
+	double getJDFromJulianEpoch(const double epoch);
 
 	//! Convert a time of day to the fraction of a Julian Day.
 	//! Note that a Julian Day starts at 12:00, not 0:00, and
@@ -440,13 +596,19 @@ namespace StelUtils
 	//! @param dateTime the UTC QDateTime to convert
 	//! @result the matching decimal Julian Day
 	inline double qDateTimeToJd(const QDateTime& dateTime){
+		Q_ASSERT(dateTime.timeSpec()==Qt::UTC);
 		return dateTime.date().toJulianDay()+static_cast<double>(1./(24*60*60*1000))*QTime(0, 0, 0, 0).msecsTo(dateTime.time())-0.5;
 	}
 
-	//! Convert a julian day to a QDateTime.
-	//! @param jd to convert
-	//! @result the matching UTC QDateTime
-	QDateTime jdToQDateTime(const double& jd);
+	//! Convert a Julian Day number to a QDateTime.
+	//! @param jd Julian Day number (with fractions) to convert
+	//! @param timeSpec a @c Qt::TimeSpec constant. Meaningful in this context seem only Qt::UTC (preferred) and Qt::LocalTime (useful in some GUI contexts).
+	//! @note From 2008 to 2022-05 this converted to local time zone, not to UTC as specified and intended.
+	//!        The old behaviour is kept with @p timeSpec set to Qt::LocalTime.
+	//! If you use Qt::LocalTime, you should add StelCore::getUTCOffset(jd)/24 to the current JD before calling this to have @p jd as a "local time zone corrected JD" before conversion.
+	//! @result the matching QDateTime
+	//! @note QDate has no year zero. This and other idiosyncrasies of QDateTime may limit the applicability of program parts which use this method to positive years or may cause other issues.
+	QDateTime jdToQDateTime(const double& jd, const Qt::TimeSpec timeSpec);
 
 	//! Compute Julian day number from calendar date.
 	//! Uses QDate functionality if possible, but also works for negative JD.
@@ -467,6 +629,10 @@ namespace StelUtils
 	//! Find day number for date in year.
 	//! Meeus, Astronomical Algorithms 2nd ed., 1998, ch.7, p.65
 	int dayInYear(const int year, const int month, const int day);
+	//! Find date from day number within year and the year.
+	//! Meeus, AA 2nd, 1998, ch.7 p.66
+	//! @returns Vec3i(year, month, day)
+	Vec3i dateFromDayYear(const int day, const int year);
 	//! Return a fractional year like YYYY.ddddd. For negative years, the year number is decreased. E.g. -500.5 occurs in -501.
 	double yearFraction(const int year, const int month, const double day);
 
@@ -496,14 +662,45 @@ namespace StelUtils
 	//double calculateSiderealPeriod(const double SemiMajorAxis);  MOVED TO Orbit.h
 
 	//! Convert decimal hours to hours, minutes, seconds
-	QString hoursToHmsStr(const double hours, const bool lowprecision = false);
-	QString hoursToHmsStr(const float hours, const bool lowprecision = false);
+	//! Format for:
+	//! @p minutesOnly        |      false     |   true
+	//! ----------------------|----------------|----------
+	//! @p colonFormat=false  |  "HhMMmSS.Ss"  | "HHhMMm"
+	//! @p colonFormat=true   |  "H:MM:SS.S"   | "HH:MM"
+	QString hoursToHmsStr(const double hours, const bool minutesOnly = false, const bool colonFormat=false);
+	QString hoursToHmsStr(const float hours, const bool minutesOnly = false, const bool colonFormat=false);
+
+	//! Convert decimal hours to hours, minutes, seconds in a narrate-ready long format
+	//! Format for:
+	//! @p minutesOnly        |      false                               |   true
+	//! ----------------------|------------------------------------------|----------
+	//!                       |  "H hours, MM minutes and SS.S seconds"  | "HH hours and MM minutes"
+	//! @p colonFormat is ignored (only kept for signature compatibility)
+	QString hoursToHmsNarration(const double hours, const bool minutesOnly = false, const bool colonFormat=false);
+	QString hoursToHmsNarration(const float hours, const bool minutesOnly = false, const bool colonFormat=false);
+
+	//QString hoursToNarration(const double hours, const bool minutesOnly = false); // OBSOLETE? TOO CONFUSE NAME.
+	//QString hoursToNarration(const float hours, const bool minutesOnly = false);
+
+	//! Construct a speech-ready wording for ordinary floating point numbers.
+	//! Accounts for
+	//! - Minus sign
+	//! - dot versus comma
+	QString narrateDecimal(double num, int decimals=2);
+
+	//! Convert JD to hours and minutes
+	QString getHoursMinutesFromJulianDay(const double julianDay);
 
 	//! Convert a hms formatted string to decimal hours
 	double hmsStrToHours(const QString& s);
 
 	//! Convert days (float) to a time string
 	QString daysFloatToDHMS(float days);
+	//! Convert days (float) to a time string ready for speech output
+	QString daysFloatToDHMSnarration(float days);
+
+	//! The method to splitting the text by substrings by some limit of string length
+	QString wrapText(const QString& s, const int limit = 52);
 
 	//! Get Delta-T estimation for a given date.
 	//! This is just an "empty" correction function, returning 0.
@@ -516,6 +713,14 @@ namespace StelUtils
 	//! @param jDay the date and time expressed as a Julian day
 	//! @return Delta-T in seconds
 	double getDeltaTByEspenakMeeus(const double jDay);
+
+	//! Get Delta-T estimation for a given date.
+	//! Note that this method is recommended for the year range:
+	//! -1999 to +3000. It gives details for -500...+2150.
+	//! Implementation of algorithm by Espenak & Meeus (2006) with modified formulae for DeltaT computation
+	//! @param jDay the date and time expressed as a Julian day
+	//! @return Delta-T in seconds
+	double getDeltaTByEspenakMeeusModified(const double jDay);
 
 	//! Get Delta-T estimation for a given date.
 	//! Implementation of algorithm by Schoch (1931) for DeltaT computation,
@@ -637,6 +842,8 @@ namespace StelUtils
 
 	//! Get Delta-T estimation for a given date.
 	//! Implementation of algorithm by Stephenson & Houlden (1986) for DeltaT computation
+	//! Source: STEPHENSON F.R and HOULDEN M.A. - Atlas of Historical Eclipse Maps - Cambridge Univ.Press. (1986)
+	//! [https://assets.cambridge.org/97805212/67236/frontmatter/9780521267236_frontmatter.pdf]
 	//! @param jDay the date and time expressed as a Julian day
 	//! @return Delta-T in seconds or 0 if year > 1600
 	double getDeltaTByStephensonHoulden(const double jDay);
@@ -729,7 +936,7 @@ namespace StelUtils
 	//! Get Delta-T estimation for a given date.
 	//! Implementation of algorithm by Reingold & Dershowitz (1997, 2001, 2002, 2007, 2018) for DeltaT computation.
 	//! This is again mostly a data fit based on the table in Meeus, Astronomical Algorithms (1991).
-	//! This is the version given in the 4rd edition ("the ultimate edition"; 2018) which added the fit
+	//! This is the version given in the 4th edition ("the ultimate edition"; 2018) which added the fit
 	//! for -500..1699 and 2006..2150 omitted from previous editions.
 	//! Calendrical Calculations: The Ultimate Edition / Edward M. Reingold, Nachum Dershowitz - 4th Edition,
 	//! Cambridge University Press, 2018. - 660p. ISBN: 9781107057623, DOI: 10.1017/9781107415058
@@ -762,7 +969,7 @@ namespace StelUtils
 	double getDeltaTByIslamSadiqQureshi(const double jDay);
 
 	//! Get Delta-T estimation for a given date.
-	//! Implementation of polinomial approximation of time period 1620-2013 for DeltaT by M. Khalid, Mariam Sultana and Faheem Zaidi (2014).
+	//! Implementation of polynomial approximation of time period 1620-2013 for DeltaT by M. Khalid, Mariam Sultana and Faheem Zaidi (2014).
 	//! Source: Delta T: Polynomial Approximation of Time Period 1620-2013
 	//! Journal of Astrophysics, Vol. 2014, Article ID 480964
 	//! https://doi.org/10.1155/2014/480964
@@ -771,10 +978,15 @@ namespace StelUtils
 	double getDeltaTByKhalidSultanaZaidi(const double jDay);
 
 	//! Get Delta-T estimation for a given date.
-	//! Implementation of a spline approximation for time period -720-2016.0 for DeltaT by Stephenson, Morrison and Hohenkerk (2016).
-	//! Source: Measurement of the Earth’s rotation: 720 BC to AD 2015
-	//! Proc. R. Soc. A 472: 20160404.
+	//! Implementation of a spline approximation for time period -720-2019.0 for DeltaT by Stephenson, Morrison and Hohenkerk (2016).
+	//! Source: Measurement of the Earth's rotation: 720 BC to AD 2015, published in 2016 in the Royal Society's
+	//! Proceedings A 472, and made freely available via Open Access, by Stephenson, F.R., Morrison, L.V. and
+	//! Hohenkerk, C.Y..
 	//! https://doi.org/10.1098/rspa.2016.0404
+	//! Addendum 2020 to "Measurement of the Earth's Rotation: 720 BC to AD 2015", published in 2021 February
+	//! in the Royal Society's Proceedings A 478, by Morrison, L. V., Stephenson, F.R., Hohenkerk, C.Y. and
+	//! M. Zawilski, M..
+	//! https://doi.org/10.1098/rspa.2020.0776
 	//! @param jDay the date and time expressed as a Julian day
 	//! @return Delta-T in seconds. For times outside the limits, return result from the fitting parabola.
 	double getDeltaTByStephensonMorrisonHohenkerk2016(const double jDay);
@@ -785,10 +997,10 @@ namespace StelUtils
 	//! For adapting from -26 to -23.895, use -0.91072 * (-23.895 + 26.0) = -1.9170656
 	//! @param jDay the JD
 	//! @param ndot value of n-dot (secular acceleration of the Moon) which should be used in the lunar ephemeris instead of the default values.
-	//! @param useDE43x true if function should adapt calculation of the secular acceleration of the Moon to the DE43x ephemeris
+	//! @param useDE4xx true if function should adapt calculation of the secular acceleration of the Moon to the DE43x/DE44x ephemerides
 	//! @return SecularAcceleration in seconds
-	//! @note n-dot for secular acceleration of the Moon in ELP2000-82B is -23.8946 "/cy/cy and for DE43x is -25.8 "/cy/cy
-	double getMoonSecularAcceleration(const double jDay, const double ndot, const bool useDE43x);
+	//! @note n-dot for secular acceleration of the Moon in ELP2000-82B is -23.8946 "/cy/cy and for DE43x/DE44x is -25.8 "/cy/cy
+	double getMoonSecularAcceleration(const double jDay, const double ndot, const bool useDE4xx);
 
 	//! Get the standard error (sigma) for the value of DeltaT
 	//! @param jDay the JD
@@ -831,7 +1043,7 @@ namespace StelUtils
 	//! @param minAngle start angle inside the half-circle. maxAngle=minAngle+segments*phi
 	float* ComputeCosSinRhoZone(const float dRho, const unsigned int segments, const float minAngle);
 
-	//! Calculate fixed days (R.D.) from Gregorian date
+	//! Calculate fixed days (R.D.) from Gregorian date (proleptic Gregorian calendar)
 	//! @param year
 	//! @param month
 	//! @param day
@@ -892,8 +1104,8 @@ namespace StelUtils
 	//! @param y1 Argument 1
 	//! @param y2 Argument 2
 	//! @param y3 Argument 3
-	//! @param y3 Argument 4
-	//! @param y3 Argument 5
+	//! @param y4 Argument 4
+	//! @param y5 Argument 5
 	//! @return interpolation value
 	template<class T> T interpolate5(T n, T y1, T y2, T y3, T y4, T y5)
 	{
@@ -907,12 +1119,23 @@ namespace StelUtils
 		return (((K*(1.0/24.0)*n + (H+J)/12.0)*n  + (F*0.5-K/24.0))*n + ((B+C)*0.5 - (H+J)/12.0))*n +y3;
 	}
 
-	//! Interval test. This checks whether @param value is within [@param low, @param high]
+	//! Interval test. This checks whether @p value is within [@p low, @p high]
 	template <typename T> bool isWithin(const T& value, const T& low, const T& high)
 	{
-	    return !(value < low) && !(high < value);
+		return !(value < low) && !(high < value);
 	}
 
+	template <class Arg1, class Arg2, class Result>
+	struct binary_function
+	{
+		typedef Arg1 first_argument_type;
+		typedef Arg2 second_argument_type;
+		typedef Result result_type;
+	};
+
+	//! Convert otherwise unspeakable (usually) Greek characters from star labels (Bayer, Struve, ...) into speech compatible output.
+	//! When preparing speech output, just apply this as filter.
+	QString narrateGreekChars(const QString &input);
 
 #ifdef _MSC_BUILD
 	inline double trunc(double x)
@@ -927,6 +1150,74 @@ namespace StelUtils
 	inline double trunc(double x) { return ::trunc(x); }
 	inline float trunc(float x) { return ::trunc(x); }
 #endif
+	template<typename T, template<typename> typename Container>
+	void removeDuplicates(Container<T>& data)
+	{
+		using namespace std;
+		std::set<T> set;
+		for(auto it = begin(data); it != end(data); )
+		{
+			if(set.find(*it) == set.end())
+			{
+				set.insert(*it);
+				++it;
+			}
+			else
+			{
+				it = data.erase(it);
+			}
+		}
+	}
+
+	//! Greek letters and strings
+	const QHash<QString, QString> greekLetters = {
+		{"alpha",   QString(QChar(0x03B1))},
+		{"beta",    QString(QChar(0x03B2))},
+		{"beta",    QString(QChar(0x03B2))},
+		{"gamma",   QString(QChar(0x03B3))},
+		{"delta",   QString(QChar(0x03B4))},
+		{"epsilon", QString(QChar(0x03B5))},
+
+		{"zeta",    QString(QChar(0x03B6))},
+		{"eta",     QString(QChar(0x03B7))},
+		{"theta",   QString(QChar(0x03B8))},
+		{"iota",    QString(QChar(0x03B9))},
+		{"kappa",   QString(QChar(0x03BA))},
+
+		{"lambda",  QString(QChar(0x03BB))},
+		{"mu",      QString(QChar(0x03BC))},
+		{"nu",      QString(QChar(0x03BD))},
+		{"xi",      QString(QChar(0x03BE))},
+		{"omicron", QString(QChar(0x03BF))},
+
+		{"pi",      QString(QChar(0x03C0))},
+		{"rho",     QString(QChar(0x03C1))},
+		{"sigma",   QString(QChar(0x03C3))}, // second lower-case sigma shouldn't affect anything
+		{"tau",     QString(QChar(0x03C4))},
+		{"upsilon", QString(QChar(0x03C5))},
+
+		{"phi",     QString(QChar(0x03C6))},
+		{"chi",     QString(QChar(0x03C7))},
+		{"psi",     QString(QChar(0x03C8))},
+		{"omega",   QString(QChar(0x03C9))} };
+	//! Replaces all occurrences of substrings describing Greek letters (i.e. "alpha", "beta", ...)
+	//! with the actual Greek unicode characters.
+	QString substituteGreek(const QString& keyString);
+	//! Returns the Greek unicode character for the specified letter string (i.e. "alpha", "beta", ...)
+	QString getGreekLetterByName(const QString& potentialGreekLetterName);
+
+	//! @brief Computes the area of intersection of two circles with given parameters
+	//!
+	//! @param R1 radius of the second circle
+	//! @param R2 radius of the second circle
+	//! @param d distance between centers of the circles
+	double circlesIntersectionArea(double R1, double R2, double d);
+
+	//! @brief Compute solid angle of the Sun visible taking into account eclipsing by the (assumed spherical) Moon
+	double visibleSolidAngleOfSun(double sunAngularRadius, double moonAngularRadius, double angleBetweenSunAndMoon);
+
+	//! @brief Compute percentage of the Sun visible taking into account eclipsing by the (assumed spherical) Moon
+	double sunVisibilityDueToMoon(double sunAngularRadius, double moonAngularRadius, double angleBetweenSunAndMoon);
 }
 
 #endif // STELUTILS_HPP

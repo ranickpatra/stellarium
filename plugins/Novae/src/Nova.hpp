@@ -22,13 +22,11 @@
 #include <QVariant>
 #include <QString>
 #include <QStringList>
-#include <QFont>
 #include <QList>
 #include <QDateTime>
 
 #include "StelObject.hpp"
-#include "StelFader.hpp"
-#include "StelProjectorType.hpp"
+#include "StelTranslator.hpp"
 
 class StelPainter;
 
@@ -46,25 +44,34 @@ public:
 
 	//! @param id The official designation for a nova, e.g. "........"
 	Nova(const QVariantMap& map);
-	~Nova();
+	~Nova() override;
 
 	//! Get a QVariantMap which describes the nova.  Could be used to create a duplicate.
 	QVariantMap getMap(void) const;
 
-	virtual QString getType(void) const
+	QString getType(void) const override
 	{
 		return NOVA_TYPE;
 	}
 
-	virtual QString getID(void) const
+	QString getObjectType(void) const override
+	{
+		return N_("nova");
+	}
+	QString getObjectTypeI18n(void) const override
+	{
+		return q_(getObjectType());
+	}
+
+	QString getID(void) const override
 	{
 		return getDesignation();
 	}
 
 	//! Get an HTML string to describe the object
 	//! @param core A pointer to the core
-	//! @flags a set of flags with information types to include.
-	virtual QString getInfoString(const StelCore* core, const InfoStringGroup& flags) const;
+	//! @param flags a set of flags with information types to include.
+	QString getInfoString(const StelCore* core, const InfoStringGroup& flags) const override;
 	//! Return a map like StelObject::getInfoMap(), but with a few extra tags also available in getMap().
 	// TODO: Describe the entries!
 	//! - designation
@@ -78,19 +85,12 @@ public:
 	//! - m6
 	//! - m9
 	//! - distance
-	virtual QVariantMap getInfoMap(const StelCore *core) const;
-	virtual Vec3f getInfoColor(void) const;
-	virtual Vec3d getJ2000EquatorialPos(const StelCore*) const
-	{
-		return XYZ;
-	}
-	virtual float getVMagnitude(const StelCore* core) const;
-	virtual double getAngularSize(const StelCore* core) const;
-	virtual QString getNameI18n(void) const;
-	virtual QString getEnglishName(void) const;
+	QVariantMap getInfoMap(const StelCore *core) const override;
+	Vec3d getJ2000EquatorialPos(const StelCore *core) const override;
+	float getVMagnitude(const StelCore* core) const override;
+	QString getNameI18n(void) const override;
+	QString getEnglishName(void) const override;
 	QString getDesignation(void) const;
-
-	void update(double deltaTime);
 
 private:
 	bool initialized;
@@ -114,9 +114,9 @@ private:
 	double Dec;			//! Dec. for the nova
 	double distance;		//! Distance to nova (10^3 ly)
 
-	LinearFader labelsFader;
+	static bool syncShowLabels;
 
-	QString getMaxBrightnessDate(const double JD) const;
+	QString getMaxBrightnessDate(const StelCore *core, const double JD) const;
 };
 
 #endif // NOVA_HPP

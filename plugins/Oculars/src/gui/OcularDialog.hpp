@@ -25,7 +25,6 @@
 #include "Ocular.hpp"
 #include "PropertyBasedTableModel.hpp"
 #include "StelDialog.hpp"
-#include "StelStyle.hpp"
 #include "Telescope.hpp"
 #include "Lens.hpp"
 #include "VecMath.hpp"
@@ -36,7 +35,7 @@ QT_BEGIN_NAMESPACE
 class QDataWidgetMapper;
 class QDoubleValidator;
 class QIntValidator;
-class QRegExpValidator;
+class QRegularExpressionValidator;
 class QModelIndex;
 class QStandardItemModel;
 QT_END_NAMESPACE
@@ -50,7 +49,7 @@ class OcularDialog : public StelDialog
 
 public:
 	OcularDialog(Oculars* plugin, QList<CCD *>* ccds, QList<Ocular *>* oculars, QList<Telescope *>* telescopes, QList<Lens *>* lenses);
-	virtual ~OcularDialog();
+	~OcularDialog() override;
 
 public slots:
 	void closeWindow();
@@ -70,7 +69,7 @@ public slots:
 	void moveDownSelectedOcular();
 	void moveDownSelectedTelescope();
 	void moveDownSelectedLens();
-	void retranslate();
+	void retranslate() override;
 
 	// Mini-methods required to immediately update display
 	void updateOcular();
@@ -84,7 +83,7 @@ public slots:
 
 protected:
 	//! Initialize the dialog widgets and connect the signals/slots
-	virtual void createDialogContent();
+	void createDialogContent() override;
 	Ui_ocularDialogForm* ui;
 
 private slots:
@@ -94,6 +93,7 @@ private slots:
 	void setupTelradFOVspins(Vec4f fov);
 	void updateGuiOptions();
 	void updateCCDRotationAngles();
+	void updateSuffixes();
 
 private:
 	Oculars* plugin;
@@ -110,7 +110,7 @@ private:
 	QDataWidgetMapper*		lensMapper;
 	QList<Lens *>*			lenses;
 	PropertyBasedTableModel*	lensTableModel;
-	QRegExpValidator*		validatorName;
+	QRegularExpressionValidator*	validatorName;
 };
 
 #endif // OCULARDIALOG_HPP

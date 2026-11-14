@@ -17,14 +17,16 @@
  */
 
 #include "StelLocationMgr.hpp"
+#include "LandscapeMgr.hpp"
+#include "SolarSystem.hpp"
 #include "StelLocationMgr_p.hpp"
 
 #include "StelApp.hpp"
 #include "StelCore.hpp"
 #include "StelFileMgr.hpp"
+#include "StelModuleMgr.hpp"
 #include "StelUtils.hpp"
 #include "StelJsonParser.hpp"
-#include "StelLocaleMgr.hpp"
 
 #include <QStringListModel>
 #include <QDebug>
@@ -40,8 +42,19 @@
 #include <QTimeZone>
 #include <QTimer>
 #include <QApplication>
+#include <QRegularExpression>
+#if (QT_VERSION>=QT_VERSION_CHECK(6,6,0))
+#include <QPermissions>
+#endif
+
+Q_LOGGING_CATEGORY(GPS,"stel.GPS", QtInfoMsg)
+Q_LOGGING_CATEGORY(LocIP,"stel.LocIP", QtInfoMsg)
 
 TimezoneNameMap StelLocationMgr::locationDBToIANAtranslations;
+
+QList<GeoRegion> StelLocationMgr::regions;
+QMap<QString, QString> StelLocationMgr::countryCodeToRegionMap;
+QMap<QString, QString> StelLocationMgr::countryNameToCodeMap;
 
 #ifdef ENABLE_GPS
 #ifdef ENABLE_LIBGPS
@@ -54,8 +67,7 @@ LibGPSLookupHelper::LibGPSLookupHelper(QObject *parent)
 	QString gpsdPort=conf->value("gui/gpsd_port", DEFAULT_GPSD_PORT).toString();
 
 	timer.setSingleShot(false);
-	if (qApp->property("verbose").toBool())
-		qDebug() << "Opening GPSD connection to" << gpsdHostname << ":" << gpsdPort;
+	qCDebug(GPS) << "Opening GPSD connection to" << gpsdHostname << ":" << gpsdPort;
 	// Example almost straight from http://www.catb.org/gpsd/client-howto.html
 	gps_rec = new gpsmm(gpsdHostname.toUtf8(), gpsdPort.toUtf8());
 	if(gps_rec->is_open())
@@ -64,10 +76,10 @@ LibGPSLookupHelper::LibGPSLookupHelper(QObject *parent)
 	}
 	if(ready)
 	{
-		connect(&timer, SIGNAL(timeout()), this, SLOT(query()));
+		connect(&timer, &QTimer::timeout, this, &LibGPSLookupHelper::query);
 	}
 	else
-		qWarning()<<"libGPS lookup not ready, GPSD probably not running.";
+		qCWarning(GPS)<<"libGPS lookup not ready, GPSD probably not running.";
 }
 
 LibGPSLookupHelper::~LibGPSLookupHelper()
@@ -91,8 +103,6 @@ void LibGPSLookupHelper::setPeriodicQuery(int interval)
 }
 void LibGPSLookupHelper::query()
 {
-	bool verbose=qApp->property("verbose").toBool();
-
 	if(!ready)
 	{
 		emit queryError("GPSD helper not ready");
@@ -106,17 +116,16 @@ void LibGPSLookupHelper::query()
 	while (tries<10)
 	{
 		tries++;
-		if (verbose)
-			qDebug() << "query(): tries=" << tries;
+		qCDebug(GPS) << "query(): tries=" << tries;
 
 		if (!gps_rec->waiting(750000)) // argument usec. wait 0.75 sec. (example had 50s)
 		{
-			qDebug() << " - waiting timed out after 0.75sec.";
+			qCInfo(GPS) << " - waiting timed out after 0.75sec.";
 			continue;
 		}
 
 		struct gps_data_t* newdata;
-		if ((newdata = gps_rec->read()) == Q_NULLPTR)
+		if ((newdata = gps_rec->read()) == nullptr)
 		{
 			emit queryError("GPSD query: Read error.");
 			return;
@@ -127,7 +136,7 @@ void LibGPSLookupHelper::query()
 //			if (newdata->status==0) // no fix?
 //			{
 //				// This can happen indoors.
-//				qDebug() << "GPS has no fix.";
+//				qCDebug(GPS) << "GPS has no fix.";
 //				emit queryError("GPSD query: No Fix.");
 //				return;
 //			}
@@ -145,49 +154,45 @@ void LibGPSLookupHelper::query()
 
 
 			fixmode=newdata->fix.mode; // 0:not_seen, 1:no_fix, 2:2Dfix(no alt), 3:3Dfix(perfect)
-			if (verbose)
-				qDebug() << "GPSD newdata->fix.mode=" << fixmode;
+			qCDebug(GPS) << "GPSD newdata->fix.mode=" << fixmode;
 
 			if (fixmode==0)
 			{
 				// This may come just after creation of the GPSDhelper.
 				// It seems to take some time to fill the data.
-				if (verbose)
-					qDebug() << "GPSD seems not ready yet. Retry.";
+				qCDebug(GPS) << "GPSD seems not ready yet. Retry.";
 				continue;
 			}
 
-			if (verbose)
-			{
-				//qDebug() << "newdata->online=" << newdata->online;
-				qDebug() << "Solution from " << newdata->satellites_used << "out of " << newdata->satellites_visible << " visible Satellites.";
-				dop_t dop=newdata->dop;
+			//qCDebug(GPS) << "newdata->online=" << newdata->online;
+			qCDebug(GPS) << "Solution from " << newdata->satellites_used << "out of " << newdata->satellites_visible << " visible Satellites.";
+			dop_t dop=newdata->dop;
 #if GPSD_API_MAJOR_VERSION < 9
-				qDebug() << "GPSD data: Long" << newdata->fix.longitude << "Lat" << newdata->fix.latitude << "Alt" << newdata->fix.altitude;
+			qCDebug(GPS) << "GPSD data: Long" << newdata->fix.longitude << "Lat" << newdata->fix.latitude << "Alt" << newdata->fix.altitude;
 #else
-				qDebug() << "GPSD data: Long" << newdata->fix.longitude << "Lat" << newdata->fix.latitude << "Alt" << newdata->fix.altHAE;
+			qCDebug(GPS) << "GPSD data: Long" << newdata->fix.longitude << "Lat" << newdata->fix.latitude << "Alt" << newdata->fix.altHAE;
 #endif
-				qDebug() << "Dilution of Precision:";
-				qDebug() << " - xdop:" << dop.xdop << "ydop:" << dop.ydop;
-				qDebug() << " - pdop:" << dop.pdop << "hdop:" << dop.hdop;
-				qDebug() << " - vdop:" << dop.vdop << "tdop:" << dop.tdop << "gdop:" << dop.gdop;
-				// GPSD API 8.0:
-				// * Remove epe from gps_data_t, it duplicates gps_fix_t eph
-				// * Added sep (estimated spherical error, 3D)
-				// Details: https://github.com/Stellarium/stellarium/issues/733
-				// #if GPSD_API_MAJOR_VERSION >= 8
-				// qDebug() << "Spherical Position Error (sep):" << newdata->fix.sep;
-				// #else
-				// qDebug() << "Spherical Position Error (epe):" << newdata->epe;
-				// #endif
-			}
-			loc.longitude = static_cast<float> (newdata->fix.longitude);
-			loc.latitude  = static_cast<float> (newdata->fix.latitude);
+			qCDebug(GPS) << "Dilution of Precision:";
+			qCDebug(GPS) << " - xdop:" << dop.xdop << "ydop:" << dop.ydop;
+			qCDebug(GPS) << " - pdop:" << dop.pdop << "hdop:" << dop.hdop;
+			qCDebug(GPS) << " - vdop:" << dop.vdop << "tdop:" << dop.tdop << "gdop:" << dop.gdop;
+			// GPSD API 8.0:
+			// * Remove epe from gps_data_t, it duplicates gps_fix_t eph
+			// * Added sep (estimated spherical error, 3D)
+			// Details: https://github.com/Stellarium/stellarium/issues/733
+			// #if GPSD_API_MAJOR_VERSION >= 8
+			// qCDebug(GPS) << "Spherical Position Error (sep):" << newdata->fix.sep;
+			// #else
+			// qCDebug(GPS) << "Spherical Position Error (epe):" << newdata->epe;
+			// #endif
+
+			loc.setLongitude(static_cast<float> (newdata->fix.longitude));
+			loc.setLatitude (static_cast<float> (newdata->fix.latitude));
 			// Frequently hdop, vdop and satellite counts are NaN. Sometimes they show OK. This is minor issue.
-			if ((verbose) && (fixmode<3))
+			if (fixmode<3)
 			{
-				qDebug() << "GPSDfix " << fixmode << ": Location" << QString("lat %1, long %2, alt %3").arg(loc.latitude).arg(loc.longitude).arg(loc.altitude);
-				qDebug() << "    Estimated HDOP " << newdata->dop.hdop << "m from " << newdata->satellites_used << "(of" << newdata->satellites_visible  << "visible) satellites";
+				qCDebug(GPS) << "GPSDfix " << fixmode << ": Location" << QString("lat %1, long %2, alt %3").arg(loc.getLatitude()).arg(loc.getLongitude()).arg(loc.altitude);
+				qCDebug(GPS) << "    Estimated HDOP " << newdata->dop.hdop << "m from " << newdata->satellites_used << "(of" << newdata->satellites_visible  << "visible) satellites";
 			}
 			else
 			{
@@ -196,11 +201,8 @@ void LibGPSLookupHelper::query()
 #else
 				loc.altitude=static_cast<int>(newdata->fix.altHAE);
 #endif
-				if (verbose)
-				{
-					qDebug() << "GPSDfix " << fixmode << ": Location" << QString("lat %1, long %2, alt %3").arg(loc.latitude).arg(loc.longitude).arg(loc.altitude);
-					qDebug() << "    Estimated HDOP " << newdata->dop.hdop << "m, VDOP " << newdata->dop.vdop <<  "m from " << newdata->satellites_used << "(of" << newdata->satellites_visible  << "visible) satellites";
-				}
+				qCDebug(GPS) << "GPSDfix " << fixmode << ": Location" << QString("lat %1, long %2, alt %3").arg(loc.getLatitude()).arg(loc.getLongitude()).arg(loc.altitude);
+				qCDebug(GPS) << "    Estimated HDOP " << newdata->dop.hdop << "m, VDOP " << newdata->dop.vdop <<  "m from " << newdata->satellites_used << "(of" << newdata->satellites_visible  << "visible) satellites";
 				break; // escape from the tries loop
 			}
 		}
@@ -211,28 +213,20 @@ void LibGPSLookupHelper::query()
 		emit queryError("GPSD: Could not get valid position.");
 		return;
 	}
-	if ((verbose) && (fixmode<3))
+	if (fixmode<3)
 	{
-		qDebug() << "Fix only quality " << fixmode << " after " << tries << " tries";
+		qCInfo(GPS) << "Fix only quality " << fixmode << " after " << tries << " tries";
 	}
-	if (verbose)
-		qDebug() << "GPSD location" << QString("lat %1, long %2, alt %3").arg(loc.latitude).arg(loc.longitude).arg(loc.altitude);
+	qCDebug(GPS) << "GPSD location" << QString("lat %1, long %2, alt %3").arg(loc.getLatitude()).arg(loc.getLongitude()).arg(loc.altitude);
 
-	loc.bortleScaleIndex=StelLocation::DEFAULT_BORTLE_SCALE_INDEX;
-	// Usually you don't leave your time zone with GPS.
-	loc.ianaTimeZone=StelApp::getInstance().getCore()->getCurrentTimeZone();
-	loc.isUserLocation=true;
-	loc.planetName="Earth";
-	loc.name=QString("GPS %1%2 %3%4")
-			.arg(loc.latitude<0?"S":"N").arg(floor(loc.latitude))
-			.arg(loc.longitude<0?"W":"E").arg(floor(loc.longitude));
+	loc.role = 'X';
 	emit queryFinished(loc);
 }
 
 #endif
 
 NMEALookupHelper::NMEALookupHelper(QObject *parent)
-	: GPSLookupHelper(parent), serial(Q_NULLPTR), nmea(Q_NULLPTR)
+	: GPSLookupHelper(parent), serial(nullptr), nmea(nullptr)
 {
 	//use RAII
 	// Getting a list of ports may enable auto-detection!
@@ -240,7 +234,7 @@ NMEALookupHelper::NMEALookupHelper(QObject *parent)
 
 	if (portInfoList.size()==0)
 	{
-		qDebug() << "No connected devices found. NMEA GPS lookup failed.";
+		qDebug() << "No serial port found. NMEA GPS lookup failed.";
 		return;
 	}
 
@@ -272,7 +266,9 @@ NMEALookupHelper::NMEALookupHelper(QObject *parent)
 			qDebug() << "  VendorID:"       << pi.vendorIdentifier();
 			qDebug() << "  ProductID:"      << pi.productIdentifier();
 			qDebug() << "  SerialNumber:"   << pi.serialNumber();
+#if (QT_VERSION<QT_VERSION_CHECK(5,14,0))
 			qDebug() << "  Busy:"           << pi.isBusy();
+#endif
 			qDebug() << "  Null:"           << pi.isNull();
 			if (pi.portName()==portName)
 			{
@@ -303,9 +299,13 @@ NMEALookupHelper::NMEALookupHelper(QObject *parent)
 	{
 		nmea->setDevice(serial);
 		qDebug() << "Query GPS NMEA device at port " << serial->portName();
-		connect(nmea, SIGNAL(error(QGeoPositionInfoSource::Error)), this, SLOT(nmeaError(QGeoPositionInfoSource::Error)));
-		connect(nmea, SIGNAL(positionUpdated(const QGeoPositionInfo)),this,SLOT(nmeaUpdated(const QGeoPositionInfo)));
-		connect(nmea, SIGNAL(updateTimeout()),this,SLOT(nmeaTimeout()));
+		connect(nmea, &QNmeaPositionInfoSource::positionUpdated,this, &NMEALookupHelper::nmeaUpdated);
+		#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+		connect(nmea, &QNmeaPositionInfoSource::errorOccurred, this, &NMEALookupHelper::nmeaError);
+		#else
+		connect(nmea, qOverload<QGeoPositionInfoSource::Error>(&QGeoPositionInfoSource::error), this, &NMEALookupHelper::nmeaError);
+		connect(nmea, &QNmeaPositionInfoSource::updateTimeout, this, &NMEALookupHelper::nmeaTimeout);
+		#endif
 	}
 	else qWarning() << "Cannot open serial port to NMEA device at port " << serial->portName();
 	// This may leave an un-ready object. Must be cleaned-up later.
@@ -315,7 +315,7 @@ NMEALookupHelper::~NMEALookupHelper()
 	if(nmea)
 	{
 		delete nmea;
-		nmea=Q_NULLPTR;
+		nmea=nullptr;
 	}
 	if (serial)
 	{
@@ -326,7 +326,7 @@ NMEALookupHelper::~NMEALookupHelper()
 			serial->close();
 		}
 		delete serial;
-		serial=Q_NULLPTR;
+		serial=nullptr;
 	}
 }
 
@@ -358,67 +358,72 @@ void NMEALookupHelper::setPeriodicQuery(int interval)
 
 void NMEALookupHelper::nmeaUpdated(const QGeoPositionInfo &update)
 {
-	bool verbose=qApp->property("verbose").toBool();
-	if (verbose)
-		qDebug() << "NMEA updated";
+	qCDebug(GPS) << "NMEA updated";
 
 	QGeoCoordinate coord=update.coordinate();
 	QDateTime timestamp=update.timestamp();
 
-	if (verbose)
-	{
-		qDebug() << " - time: " << timestamp.toString();
-		qDebug() << " - location: Long=" << coord.longitude() << " Lat=" << coord.latitude() << " Alt=" << coord.altitude();
-	}
+	qCDebug(GPS) << " - time: " << timestamp.toString();
+	qCDebug(GPS) << " - location: Long=" << coord.longitude() << " Lat=" << coord.latitude() << " Alt=" << coord.altitude();
+
 	if (update.isValid()) // emit queryFinished(loc) with new location
 	{
-		StelCore *core=StelApp::getInstance().getCore();
 		StelLocation loc;
-		loc.longitude=static_cast<float>(coord.longitude());
-		loc.latitude=static_cast<float>(coord.latitude());
+		loc.setLongitude(static_cast<float>(coord.longitude()));
+		loc.setLatitude(static_cast<float>(coord.latitude()));
 		// 2D fix may have only long/lat, invalid altitude.
-		loc.altitude=( qIsNaN(coord.altitude()) ? 0 : static_cast<int>(floor(coord.altitude())));
-		if (verbose)
-			qDebug() << "Location in progress: Long=" << loc.longitude << " Lat=" << loc.latitude << " Alt" << loc.altitude;
-		loc.bortleScaleIndex=StelLocation::DEFAULT_BORTLE_SCALE_INDEX;
-		// Usually you don't leave your time zone with GPS.
-		loc.ianaTimeZone=core->getCurrentTimeZone();
-		loc.isUserLocation=true;
-		loc.planetName="Earth";
-		loc.name=QString("GPS %1%2 %3%4")
-				.arg(loc.longitude<0?"W":"E").arg(floor(loc.longitude))
-				.arg(loc.latitude<0?"S":"N").arg(floor(loc.latitude));
-		if (verbose)
-			qDebug() << "New location named " << loc.name;
-
+		loc.altitude=( qIsNaN(coord.altitude()) ? 0 : static_cast<int>(std::floor(coord.altitude())));
+		loc.role='X';
 		emit queryFinished(loc);
 	}
 	else
 	{
-		if (verbose)
-			qDebug() << "(This position update was an invalid package)";
+		qCWarning(GPS) << "(This position update was an invalid package)";
 		emit queryError("NMEA update: invalid package");
 	}
 }
 
 void NMEALookupHelper::nmeaError(QGeoPositionInfoSource::Error error)
 {
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+	emit queryError(QString("NMEA general error: %1").arg(QVariant::fromValue(error).toString()));
+#else
 	emit queryError(QString("NMEA general error: %1").arg(error));
+#endif
 }
-
+#if (QT_VERSION<QT_VERSION_CHECK(6,0,0))
 void NMEALookupHelper::nmeaTimeout()
 {
 	emit queryError("NMEA timeout");
 }
 #endif
+#endif
 
 StelLocationMgr::StelLocationMgr()
-	: nmeaHelper(Q_NULLPTR), libGpsHelper(Q_NULLPTR)
+	: nmeaHelper(nullptr), libGpsHelper(nullptr), qGeoPositionInfoSource(nullptr)
 {
 	// initialize the static QMap first if necessary.
 	// The first entry is the DB name, the second is as we display it in the program.
-	if (locationDBToIANAtranslations.count()==0)
+	if (locationDBToIANAtranslations.isEmpty())
 	{
+		// Seen in V25.3
+		locationDBToIANAtranslations.insert("America/Coyhaique", "UTC-03:00");
+		// Reported July 7, 2023 (#3316)
+		locationDBToIANAtranslations.insert("Asia/Calcutta", "Asia/Kolkata");
+		// Reported April 25, 2023. (#3200)
+		locationDBToIANAtranslations.insert("America/Yellowknife","America/Edmonton");
+		// Seen February 06, 2023.
+		locationDBToIANAtranslations.insert("America/Ciudad_Juarez","America/Ojinaga");
+		// Seen November 11, 2022.
+		locationDBToIANAtranslations.insert("America/Thunder_Bay","America/Toronto");
+		locationDBToIANAtranslations.insert("Europe/Uzhgorod",  "Europe/Kyiv");
+		// Seen on October 27, 2022. TZ Removed?
+		locationDBToIANAtranslations.insert("Europe/Zaporozhye","Europe/Kyiv");
+		// Seen on September 26, 2022. Officially renamed.
+		locationDBToIANAtranslations.insert("Europe/Kyiv",      "Europe/Kiev");
+		locationDBToIANAtranslations.insert("Europe/Kiev",      "Europe/Kyiv");
+		// Seen in an unrelated bug report, 2022-08-30
+		locationDBToIANAtranslations.insert("Asia/Pyongyang",   "UTC+09:00");
 		// reported in SF forum on 2017-03-27
 		locationDBToIANAtranslations.insert("Europe/Minsk",     "UTC+03:00");
 		locationDBToIANAtranslations.insert("Europe/Samara",    "UTC+04:00");
@@ -456,21 +461,41 @@ StelLocationMgr::StelLocationMgr()
 		locationDBToIANAtranslations.insert( "", "UTC");
 		// Missing on Qt5.9.5/Ubuntu 18.04.4
 		locationDBToIANAtranslations.insert("America/Godthab",   "UTC-03:00");
+		// Missing on Qt5.12.10/Win7
+		locationDBToIANAtranslations.insert("Asia/Qostanay",   "UTC+06:00"); // no DST; https://www.zeitverschiebung.net/en/timezone/asia--qostanay
+		locationDBToIANAtranslations.insert("Europe/Saratov",  "UTC+04:00"); // no DST; https://www.zeitverschiebung.net/en/timezone/europe--saratov
+		locationDBToIANAtranslations.insert("Asia/Atyrau",     "UTC+05:00"); // no DST; https://www.zeitverschiebung.net/en/timezone/asia--atyrau
+		locationDBToIANAtranslations.insert("Asia/Famagusta",  "Asia/Nicosia"); // Asia/Nicosia has no DST, but Asia/Famagusta has DST!
+		locationDBToIANAtranslations.insert("America/Punta_Arenas",  "UTC-03:00"); // no DST; https://www.zeitverschiebung.net/en/timezone/america--punta_arenas
+		// Missing on Qt5.15.2/Win10
+		locationDBToIANAtranslations.insert("America/Nuuk",      "America/Godthab");
+		// GH: #3953
+		locationDBToIANAtranslations.insert("Asia/Choibalsan",   "Asia/Ulaanbaatar");
 		// N.B. Further missing TZ names will be printed out in the log.txt. Resolve these by adding into this list.
 		// TODO later: create a text file in user data directory, and auto-update it weekly.
 	}
 
 	QSettings* conf = StelApp::getInstance().getSettings();
 
+	loadCountries();
+	loadRegions();
 	// The line below allows to re-generate the location file, you still need to gunzip it manually afterward.
 	if (conf->value("devel/convert_locations_list", false).toBool())
 		generateBinaryLocationFile("data/base_locations.txt", false, "data/base_locations.bin");
 
 	locations = loadCitiesBin("data/base_locations.bin.gz");
+#if QT_VERSION >= QT_VERSION_CHECK(5,15,0)
+	locations.insert(loadCities("data/user_locations.txt", true));
+#else
 	locations.unite(loadCities("data/user_locations.txt", true));
-	
+#endif
 	// Init to Paris France because it's the center of the world.
-	lastResortLocation = locationForString(conf->value("init_location/last_location", "Paris, France").toString());
+	lastResortLocation = locationForString(conf->value("init_location/last_location", "Paris, Western Europe").toString());
+
+	planetName="Earth";
+	planetSurfaceMap=QImage(":/graphicGui/miscWorldMap.jpg");
+	connect(StelApp::getInstance().getCore(), &StelCore::locationChanged, this, &StelLocationMgr::changePlanetMapForLocation);
+
 }
 
 StelLocationMgr::~StelLocationMgr()
@@ -478,23 +503,28 @@ StelLocationMgr::~StelLocationMgr()
 	if (nmeaHelper)
 	{
 		delete nmeaHelper;
-		nmeaHelper=Q_NULLPTR;
+		nmeaHelper=nullptr;
 	}
 	if (libGpsHelper)
 	{
 		delete libGpsHelper;
-		libGpsHelper=Q_NULLPTR;
+		libGpsHelper=nullptr;
+	}
+	if (qGeoPositionInfoSource)
+	{
+		delete qGeoPositionInfoSource;
+		qGeoPositionInfoSource=nullptr;
 	}
 }
 
 StelLocationMgr::StelLocationMgr(const LocationList &locations)
-	: nmeaHelper(Q_NULLPTR), libGpsHelper(Q_NULLPTR)
+	: nmeaHelper(nullptr), libGpsHelper(nullptr), qGeoPositionInfoSource(nullptr)
 {
 	setLocations(locations);
 
 	QSettings* conf = StelApp::getInstance().getSettings();
 	// Init to Paris France because it's the center of the world.
-	lastResortLocation = locationForString(conf->value("init_location/last_location", "Paris, France").toString());
+	lastResortLocation = locationForString(conf->value("init_location/last_location", "Paris, Western Europe").toString());
 }
 
 void StelLocationMgr::setLocations(const LocationList &locations)
@@ -510,7 +540,7 @@ void StelLocationMgr::setLocations(const LocationList &locations)
 
 void StelLocationMgr::generateBinaryLocationFile(const QString& fileName, bool isUserLocation, const QString& binFilePath) const
 {
-	qDebug() << "Generating a locations list...";
+	qInfo() << "Generating a locations list...";
 	const QMap<QString, StelLocation>& cities = loadCities(fileName, isUserLocation);
 	QFile binfile(StelFileMgr::findFile(binFilePath, StelFileMgr::New));
 	if(binfile.open(QIODevice::WriteOnly))
@@ -521,7 +551,7 @@ void StelLocationMgr::generateBinaryLocationFile(const QString& fileName, bool i
 		binfile.flush();
 		binfile.close();
 	}
-	qDebug() << "[...] Please use 'gzip -nc base_locations.bin > base_locations.bin.gz' to pack a locations list.";
+	qInfo() << "[...] Please use 'gzip -nc base_locations.bin > base_locations.bin.gz' to pack a locations list.";
 }
 
 LocationMap StelLocationMgr::loadCitiesBin(const QString& fileName)
@@ -566,20 +596,22 @@ LocationMap StelLocationMgr::loadCitiesBin(const QString& fileName)
 			}
 			else
 			{
-				qDebug() << "StelLocationMgr::loadCitiesBin(): TimeZone for " << loc.name <<  " not found: " << loc.ianaTimeZone;
-				unknownTZlist.append(loc.ianaTimeZone);
+				if (!unknownTZlist.contains(loc.ianaTimeZone))
+				{
+					qDebug() << "StelLocationMgr::loadCitiesBin(): TimeZone for " << loc.name <<  " not found: " << loc.ianaTimeZone;
+					unknownTZlist.append(loc.ianaTimeZone);
+				}
 			}
 		}
 	}
 	if (unknownTZlist.length()>0)
 	{
-		unknownTZlist.removeDuplicates();
-		qDebug() << "StelLocationMgr::loadCitiesBin(): Summary of unknown TimeZones:";
+		qInfo() << "StelLocationMgr::loadCitiesBin(): Summary of unknown TimeZones:";
 		for (const auto& tz : unknownTZlist)
 		{
-			qDebug() << tz;
+			qInfo() << tz;
 		}
-		qDebug() << "Please report these timezone names (this logfile) to the Stellarium developers.";
+		qInfo() << "Please report these timezone names (this logfile) to the Stellarium developers.";
 		// Note to developers: Fill those names and replacements to the map above.
 	}
 
@@ -596,21 +628,25 @@ LocationMap StelLocationMgr::loadCities(const QString& fileName, bool isUserLoca
 	{
 		// Note it is quite normal not to have a user locations file (e.g. first run)
 		if (!isUserLocation)
-			qWarning() << "WARNING: Failed to locate location data file: " << QDir::toNativeSeparators(fileName);
+			qWarning().noquote() << "Failed to locate location data file: " << QDir::toNativeSeparators(fileName);
 		return locations;
 	}
 
 	QFile sourcefile(cityDataPath);
 	if (!sourcefile.open(QIODevice::ReadOnly | QIODevice::Text))
 	{
-		qWarning() << "ERROR: Could not open location data file: " << QDir::toNativeSeparators(cityDataPath);
+		qWarning().noquote() << "ERROR: Could not open location data file: " << QDir::toNativeSeparators(cityDataPath);
 		return locations;
 	}
 
 	// Read the data serialized from the file.
 	// Code below borrowed from Marble (http://edu.kde.org/marble/)
 	QTextStream sourcestream(&sourcefile);
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+	sourcestream.setEncoding(QStringConverter::Utf8);
+#else
 	sourcestream.setCodec("UTF-8");
+#endif
 	StelLocation loc;
 	while (!sourcestream.atEnd())
 	{
@@ -651,58 +687,86 @@ static float parseAngle(const QString& s, bool* ok)
 	ret = s.toFloat(ok);
 	if (*ok) return ret;
 	// Try GPS coordinate like +121°33'38.28"
-	QRegExp reg("([+-]?[\\d.]+)°(?:([\\d.]+)')?(?:([\\d.]+)\")?");
-	if (reg.exactMatch(s))
+	static const QRegularExpression reg("([+-]?[\\d.]+)°(?:([\\d.]+)')?(?:([\\d.]+)\")?");
+	QRegularExpressionMatch match=reg.match(s);
+	if (match.hasMatch())
 	{
-		float deg = reg.cap(1).toFloat(ok);
+		float deg = match.captured(1).toFloat(ok);
 		if (!*ok) return 0;
-		float min = reg.cap(2).isEmpty()? 0 : reg.cap(2).toFloat(ok);
+		float min = match.captured(2).isEmpty()? 0 : match.captured(2).toFloat(ok);
 		if (!*ok) return 0;
-		float sec = reg.cap(3).isEmpty()? 0 : reg.cap(3).toFloat(ok);
+		float sec = match.captured(3).isEmpty()? 0 : match.captured(3).toFloat(ok);
 		if (!*ok) return 0;
-		return deg + min / 60 + sec / 3600;
+		if (deg < 0)
+			return deg - min / 60 - sec / 3600;
+		else
+			return deg + min / 60 + sec / 3600;
 	}
 	return 0;
 }
 
 const StelLocation StelLocationMgr::locationForString(const QString& s) const
 {
-	auto iter = locations.find(s);
-	if (iter!=locations.end())
+	if (locations.contains(s))
+		return locations.value(s);
+
+	// Maybe this is a city and country names (old format of the data)?
+	static const QRegularExpression cnreg("(.+),\\s+(.+)$");
+	QRegularExpressionMatch cnMatch=cnreg.match(s);
+	if (cnMatch.hasMatch())
 	{
-		return iter.value();
+		// NOTE: This method will give wrong data for some Russians and U.S. locations
+		//       (Asian locations for Russia and for locations on Hawaii for U.S.)
+		QString city = cnMatch.captured(1).trimmed();
+		QString country = cnMatch.captured(2).trimmed();
+		QString candLoc=QString("%1, %2").arg(city, pickRegionFromCountry(country));
+		if (locations.contains(candLoc))
+			return locations.value(candLoc);
 	}
+	// Maybe a full Location line? (e.g. ObservationLists)
+	if (s.count("\t")>6) // heuristic. Regular locations should not have tabs in the name.
+		return StelLocation::createFromLine(s);
+
 	StelLocation ret;
 	// Maybe it is a coordinate set with elevation?
-	QRegExp csreg("(.+),\\s*(.+),\\s*(.+)");
-	if (csreg.exactMatch(s))
+	static const QRegularExpression csreg("(.+),\\s*(.+),\\s*(.+)");
+	QRegularExpressionMatch csMatch=csreg.match(s);
+	if (csMatch.hasMatch())
 	{
+		// let's first assume the data will parse OK.
+		ret.role='X';
 		bool ok;
 		// We have a set of coordinates
-		ret.latitude = parseAngle(csreg.cap(1).trimmed(), &ok);
+		ret.setLatitude(parseAngle(csMatch.captured(1).trimmed(), &ok));
 		if (!ok) ret.role = '!';
-		ret.longitude = parseAngle(csreg.cap(2).trimmed(), &ok);
+		ret.setLongitude(parseAngle(csMatch.captured(2).trimmed(), &ok));
 		if (!ok) ret.role = '!';
-		ret.altitude = csreg.cap(3).trimmed().toInt(&ok);
+		ret.altitude = csMatch.captured(3).trimmed().toInt(&ok);
 		if (!ok) ret.role = '!';
-		ret.name = QString("%1, %2").arg(QString::number(ret.latitude, 'f', 2), QString::number(ret.longitude, 'f', 2));
+		ret.name = QString("%1, %2").arg(QString::number(ret.getLatitude(), 'f', 2), QString::number(ret.getLongitude(), 'f', 2));
 		ret.planetName = "Earth";
 		return ret;
 	}
 	// Maybe it is a coordinate set without elevation? (e.g. GPS 25.107363,121.558807 )
-	QRegExp reg("(?:(.+)\\s+)?(.+),\\s*(.+)"); // FIXME: Seems regexp is not very good
-	if (reg.exactMatch(s))
+	static const QRegularExpression reg("(?:(.+)\\s+)?(.+),\\s*(.+)"); // FIXME: Seems regexp is not very good
+	QRegularExpressionMatch match=reg.match(s);
+	if (match.hasMatch())
 	{
+		// let's first assume the data will parse OK.
+		ret.role='X';
 		bool ok;
 		// We have a set of coordinates
-		ret.latitude = parseAngle(reg.cap(2).trimmed(), &ok);
+		ret.setLatitude(parseAngle(match.captured(2).trimmed(), &ok));
 		if (!ok) ret.role = '!';
-		ret.longitude = parseAngle(reg.cap(3).trimmed(), &ok);
+		ret.setLongitude(parseAngle(match.captured(3).trimmed(), &ok));
 		if (!ok) ret.role = '!';
-		ret.name = reg.cap(1).trimmed();
+		ret.name = match.captured(1).trimmed();
 		ret.planetName = "Earth";
 		return ret;
 	}
+	// All attempts to decode have failed. Return invalid location with this name.
+	ret.name=s;
+	ret.planetName = "Earth";
 	ret.role = '!';
 	return ret;
 }
@@ -711,12 +775,23 @@ const StelLocation StelLocationMgr::locationFromCLI() const
 {
 	StelLocation ret;
 	QSettings* conf = StelApp::getInstance().getSettings();
-	bool ok;
 	conf->beginGroup("location_run_once");
-	ret.latitude = parseAngle(StelUtils::radToDmsStr(conf->value("latitude").toDouble(), true), &ok);
-	if (!ok) ret.role = '!';
-	ret.longitude = parseAngle(StelUtils::radToDmsStr(conf->value("longitude").toDouble(), true), &ok);
-	if (!ok) ret.role = '!';
+
+	const auto latVar = conf->value("latitude");
+	if (latVar.isValid())
+	{
+		ret.setLatitude(180/M_PI * latVar.toDouble());
+		ret.role = 'X';
+	}
+
+	const auto lonVar = conf->value("longitude");
+	if (lonVar.isValid())
+	{
+		ret.setLongitude(180/M_PI * lonVar.toDouble());
+		ret.role = 'X';
+	}
+
+	bool ok;
 	ret.altitude = conf->value("altitude", 0).toInt(&ok);
 	ret.planetName = conf->value("home_planet", "Earth").toString();
 	ret.landscapeKey = conf->value("landscape_name", "guereins").toString();
@@ -729,7 +804,7 @@ const StelLocation StelLocationMgr::locationFromCLI() const
 // Get whether a location can be permanently added to the list of user locations
 bool StelLocationMgr::canSaveUserLocation(const StelLocation& loc) const
 {
-	return loc.isValid() && locations.find(loc.getID())==locations.end();
+	return loc.isValid() && !locations.contains(loc.getID());
 }
 
 // Add permanently a location to the list of user locations
@@ -770,7 +845,11 @@ bool StelLocationMgr::saveUserLocation(const StelLocation& loc)
 	}
 
 	QTextStream outstream(&sourcefile);
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+	outstream.setEncoding(QStringConverter::Utf8);
+#else
 	outstream.setCodec("UTF-8");
+#endif
 	outstream << loc.serializeToLine() << '\n';
 	sourcefile.close();
 
@@ -828,7 +907,11 @@ bool StelLocationMgr::deleteUserLocation(const QString& id)
 	}
 
 	QTextStream outstream(&sourcefile);
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+	outstream.setEncoding(QStringConverter::Utf8);
+#else
 	outstream.setCodec("UTF-8");
+#endif
 
 	for (QMap<QString, StelLocation>::ConstIterator iter=locations.constBegin();iter!=locations.constEnd();++iter)
 	{
@@ -842,28 +925,168 @@ bool StelLocationMgr::deleteUserLocation(const QString& id)
 	return true;
 }
 
-// lookup location from IP address.
-void StelLocationMgr::locationFromIP()
+void StelLocationMgr::locationFromIpOldMethod()
 {
+	qCDebug(LocIP) << "permission not granted or no QGeoPositionInfoSource, doing freegeoIP service lookup for location";
+
 	QSettings* conf = StelApp::getInstance().getSettings();
 	QNetworkRequest req( QUrl( conf->value("main/geoip_api_url", "https://freegeoip.stellarium.org/json/").toString() ) );
 	req.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::PreferCache);
 	req.setRawHeader("User-Agent", StelUtils::getUserAgentString().toLatin1());
 	QNetworkReply* networkReply=StelApp::getInstance().getNetworkAccessManager()->get(req);
-	connect(networkReply, SIGNAL(finished()), this, SLOT(changeLocationFromNetworkLookup()));
+	connect(networkReply, &QNetworkReply::finished, this, &StelLocationMgr::changeLocationFromNetworkLookup);
+}
+
+void StelLocationMgr::doGetLocationFromIP()
+{
+	if (!qGeoPositionInfoSource)
+	{
+		qGeoPositionInfoSource = QGeoPositionInfoSource::createDefaultSource(this);
+		connect(qGeoPositionInfoSource, &QGeoPositionInfoSource::positionUpdated, this, &StelLocationMgr::positionUpdatedFromOS);
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0)
+		connect(qGeoPositionInfoSource, &QGeoPositionInfoSource::errorOccurred, this,
+#else
+		connect(qGeoPositionInfoSource, qOverload<QGeoPositionInfoSource::Error>(&QGeoPositionInfoSource::error), this,
+#endif
+			[this](QGeoPositionInfoSource::Error error)
+			{
+				qCWarning(LocIP) << "Failed to get location from the OS:" << error;
+				if (qGeoPositionInfoSource)
+				{
+					qGeoPositionInfoSource->deleteLater();
+					qGeoPositionInfoSource=nullptr;
+				}
+				locationFromIpOldMethod();
+			});
+
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+		// Qt5 also emits a separate timeout error (Qt6 uses QGeoPositionInfoSource::Error::UpdateTimeoutError)
+		connect(qGeoPositionInfoSource, &QGeoPositionInfoSource::updateTimeout, this,
+			[this]()
+			{
+				qCWarning(LocIP) << "Failed to get location from the OS: update timeout";
+				if (qGeoPositionInfoSource)
+				{
+					qGeoPositionInfoSource->deleteLater();
+					qGeoPositionInfoSource=nullptr;
+				}
+				locationFromIpOldMethod();
+			});
+#endif
+	}
+
+	if (qGeoPositionInfoSource)
+	{
+		qCDebug(LocIP) << "Doing OS service lookup for location...";
+		qCDebug(LocIP) << "Location provider:" << qGeoPositionInfoSource->sourceName();
+		qCDebug(LocIP) << "Location provider supported caps (may be none initially for geoclue):"
+		               << qGeoPositionInfoSource->supportedPositioningMethods();
+		// Trigger the actual Qt Location lookup from OS
+		qGeoPositionInfoSource->requestUpdate();
+		qCDebug(LocIP) << "Doing OS service lookup for location... postRequest ";
+	}
+	else
+	{
+		qWarning() << "No valid QPositionInfoSource. Old IP queries should still work.";
+		delete qGeoPositionInfoSource;
+		qGeoPositionInfoSource=nullptr;
+
+		locationFromIpOldMethod();
+	}
+
+}
+
+// lookup location from OS location service or IP address.
+void StelLocationMgr::locationFromIP()
+{
+# if QT_VERSION>=QT_VERSION_CHECK(6,6,0) // Qt<6.6 handles permissions by itself; since 6.6 user code is responsible for this
+	QLocationPermission locationPermission;
+	// Try to get high-precision location first
+	locationPermission.setAccuracy(QLocationPermission::Precise);
+	qCDebug(LocIP) << "Requesting permission to access precise location...";
+	qApp->requestPermission(locationPermission, [this](const QPermission &permission)
+	{
+		if (permission.status() == Qt::PermissionStatus::Granted)
+		{
+			qCDebug(LocIP) << "Precise location permission GRANTED";
+			doGetLocationFromIP();
+			return;
+		}
+
+		// Fall back to configure low-precision
+		qCDebug(LocIP) << "Precise location permission DENIED, trying coarse location...";
+		QLocationPermission locationPermission;
+		locationPermission.setAccuracy(QLocationPermission::Approximate);
+		qApp->requestPermission(locationPermission, [this](const QPermission &permission)
+		{
+			if (permission.status() == Qt::PermissionStatus::Granted)
+			{
+				qCDebug(LocIP) << "Coarse location permission GRANTED";
+				doGetLocationFromIP();
+			}
+			else
+			{
+				locationFromIpOldMethod();
+			}
+		});
+	});
+# else
+	doGetLocationFromIP();
+# endif
+}
+
+// Private slot that is called when position info arrives
+void StelLocationMgr::positionUpdatedFromOS(const QGeoPositionInfo &info)
+{
+	static StelCore *core=StelApp::getInstance().getCore();
+	qDebug() << "Position received from OS query:" << info;
+	QGeoCoordinate gCoord=info.coordinate();
+	if (!gCoord.isValid())
+		return;
+
+	// Assuming we are moving only around a bit, we can take the current location (providing timezone, population, lightPollutionLuminance, ...)
+	// and only update available fields.
+	StelLocation loc=core->getCurrentLocation();
+	loc.setLatitude  (static_cast<float>(gCoord.latitude()));
+	loc.setLongitude (static_cast<float>(gCoord.longitude()));
+	loc.altitude = gCoord.type() == QGeoCoordinate::Coordinate3D ? int(gCoord.altitude()) : 0;
+	loc.name = QString("%1%2, %3%4").arg(gCoord.latitude() <0 ? "S" : "N", QString::number(gCoord.latitude(), 'g', 6),
+	                                     gCoord.longitude()<0 ? "W" : "E", QString::number(fabs(gCoord.longitude()), 'g', 6));
+	loc.role = 'X'; // User-defined
+	//loc.population = 0;
+	// TODO: Consider LP map lookup?
+	//loc.lightPollutionLuminance = StelLocation::DEFAULT_LIGHT_POLLUTION_LUMINANCE;
+
+	// The location we got reflects the location of the machine to the best knowledge of the OS. So it makes sense to use the system TZ.
+	// We try to find the actual TZ name rather than "System default" just to make it explicit in the UI; otherwise simply "system_default" would work too.
+	const QString tz = QString::fromUtf8(QTimeZone::systemTimeZoneId());
+	loc.ianaTimeZone = !tz.isEmpty() && getAllTimezoneNames().contains(tz) ? tz : QStringLiteral("system_default");
+
+	loc.planetName = "Earth";
+	loc.landscapeKey = "";
+
+	LandscapeMgr *lMgr=GETSTELMODULE_SILENT(LandscapeMgr); // This may fail during StelApp:init() (GH:#3550)
+	QString landscapeAutoName;
+	if (lMgr && lMgr->getFlagLandscapeAutoSelection())
+	{
+		QColor color=getColorForCoordinates(loc.getLongitude(), loc.getLatitude());
+		landscapeAutoName=QString("ZeroColor(%1)").arg(Vec3f(color).toStr());
+	}
+	core->moveObserverTo(loc, 0.0, 0.0, landscapeAutoName);
+
+	QSettings* conf = StelApp::getInstance().getSettings();
+	conf->setValue("init_location/last_location", QString("%1, %2").arg(QString::number(gCoord.latitude()), QString::number(gCoord.longitude())));
 }
 
 #ifdef ENABLE_GPS
 void StelLocationMgr::locationFromGPS(int interval)
 {
-	bool verbose=qApp->property("verbose").toBool();
-
 #ifdef ENABLE_LIBGPS
 	if(!libGpsHelper)
 	{
 		libGpsHelper = new LibGPSLookupHelper(this);
-		connect(libGpsHelper, SIGNAL(queryFinished(StelLocation)), this, SLOT(changeLocationFromGPSQuery(StelLocation)));
-		connect(libGpsHelper, SIGNAL(queryError(QString)), this, SLOT(gpsQueryError(QString)));
+		connect(libGpsHelper, &LibGPSLookupHelper::queryFinished, this, &StelLocationMgr::changeLocationFromGPSQuery);
+		connect(libGpsHelper, &LibGPSLookupHelper::queryError, this, &StelLocationMgr::gpsQueryError);
 	}
 	if(libGpsHelper->isReady())
 	{
@@ -879,36 +1102,32 @@ void StelLocationMgr::locationFromGPS(int interval)
 			// It seems better to also destroy it after finish of queries here and in case of non-readiness below.
 			if (interval==0)
 			{
-				if (verbose)
-					qDebug() << "Deactivating and deleting LibGPShelper...";
+				qCDebug(GPS) << "Deactivating and deleting LibGPShelper...";
 				delete libGpsHelper;
-				libGpsHelper=Q_NULLPTR;
+				libGpsHelper=nullptr;
 				emit gpsQueryFinished(true); // signal "successful operation", avoid showing any error in GUI.
-				if (verbose)
-					qDebug() << "Deactivating and deleting LibGPShelper... DONE";
+				qCDebug(GPS) << "Deactivating and deleting LibGPShelper... DONE";
 			}
 		}
 		return;
 	}
 	else
 	{
-		qDebug() << "LibGPSHelper not ready. Attempting a direct NMEA connection instead.";
+		qCWarning(GPS) << "LibGPSHelper not ready. Attempting a direct NMEA connection instead.";
 		delete libGpsHelper;
-		libGpsHelper=Q_NULLPTR;
+		libGpsHelper=nullptr;
 	}
 #endif
 	if(!nmeaHelper)
 	{
-		if (verbose)
-			qDebug() << "Creating new NMEAhelper...";
+		qCDebug(GPS) << "Creating new NMEAhelper...";
 		nmeaHelper = new NMEALookupHelper(this);
-		connect(nmeaHelper, SIGNAL(queryFinished(StelLocation)), this, SLOT(changeLocationFromGPSQuery(StelLocation)));
-		connect(nmeaHelper, SIGNAL(queryError(QString)), this, SLOT(gpsQueryError(QString)));
-		if (verbose)
-			qDebug() << "Creating new NMEAhelper...done";
+		qCDebug(GPS) << "Creating new NMEAhelper...done";
 	}
-	if(nmeaHelper->isReady())
+	if(nmeaHelper && nmeaHelper->isReady())
 	{
+		connect(nmeaHelper, &NMEALookupHelper::queryFinished, this, &StelLocationMgr::changeLocationFromGPSQuery);
+		connect(nmeaHelper, &NMEALookupHelper::queryError, this, &StelLocationMgr::gpsQueryError);
 		if (interval<0)
 			nmeaHelper->query();
 		else
@@ -916,39 +1135,80 @@ void StelLocationMgr::locationFromGPS(int interval)
 			nmeaHelper->setPeriodicQuery(interval);
 			if (interval==0)
 			{
-				if (verbose)
-					qDebug() << "Deactivating and deleting NMEAhelper...";
+				qCDebug(GPS) << "Deactivating and deleting NMEAhelper...";
 				delete nmeaHelper;
-				nmeaHelper=Q_NULLPTR;
+				nmeaHelper=nullptr;
 				emit gpsQueryFinished(true); // signal "successful operation", avoid showing any error in GUI.
-				if (verbose)
-					qDebug() << "Deactivating and deleting NMEAhelper... DONE";
+				qCDebug(GPS) << "Deactivating and deleting NMEAhelper... DONE";
 			}
 		}
+		return;
 	}
 	else
 	{
 		// something went wrong. However, a dysfunctional nmeaHelper may still exist, better delete it.
-		if (verbose)
-			qDebug() << "nmeaHelper not ready. Something went wrong.";
-		delete nmeaHelper;
-		nmeaHelper=Q_NULLPTR;
+		qCDebug(GPS) << "nmeaHelper not ready. Something went wrong.";
+		if (nmeaHelper)
+		{
+			delete nmeaHelper;
+			nmeaHelper=nullptr;
+		}
+	}
+	emit gpsQueryFinished(false);
+	qCDebug(GPS) << "Neither GPSD nor NMEAhelper";
+}
+
+//#ifdef Q_OS_WIN
+// uwes-ufo's new solution for QtPosition
+void StelLocationMgr::positionUpdated(QGeoPositionInfo info)
+{
+	StelLocation loc;
+	if (info.isValid())
+	{
+		loc.setLongitude(info.coordinate().longitude());
+		loc.setLatitude(info.coordinate().latitude());
+		double a = info.coordinate().altitude();
+		loc.altitude = qIsNaN(a) ? 0 : qRound(a);
+		loc.role='X';
+		changeLocationFromGPSQuery(loc);
+	}
+	else
+	{
+		qCWarning(GPS) << "GPS not ready. Something went wrong.";
 		emit gpsQueryFinished(false);
 	}
 }
+//#endif
 
-void StelLocationMgr::changeLocationFromGPSQuery(const StelLocation &loc)
+void StelLocationMgr::changeLocationFromGPSQuery(const StelLocation &locin)
 {
-	bool verbose=qApp->property("verbose").toBool();
-
-	StelApp::getInstance().getCore()->moveObserverTo(loc, 0.0, 0.0);
-	if (nmeaHelper)
+	StelCore *core=StelApp::getInstance().getCore();
+	StelLocation loc=locin;
+	const float latitude = loc.getLatitude();
+	const float longitude = loc.getLongitude();
+	loc.lightPollutionLuminance=StelLocation::DEFAULT_LIGHT_POLLUTION_LUMINANCE;
+	// Usually you don't leave your time zone with GPS.
+	loc.ianaTimeZone=core->getCurrentTimeZone();
+	loc.isUserLocation=true;
+	loc.planetName="Earth";
+	loc.name=QString("GPS %1%2 %3%4")
+		.arg(latitude<0.f?"S":"N").arg(qRound(qAbs(latitude)))
+		.arg(longitude<0.f?"W":"E").arg(qRound(qAbs(longitude)));
+	LandscapeMgr *lMgr=GETSTELMODULE(LandscapeMgr);
+	QString landscapeAutoName;
+	if (lMgr->getFlagLandscapeAutoSelection())
 	{
-		if (verbose)
-			qDebug() << "Change location from NMEA... successful. NMEAhelper stays active.";
+		QColor color=getColorForCoordinates(longitude, latitude);
+		landscapeAutoName=QString("ZeroColor(%1)").arg(Vec3f(color).toStr());
 	}
-	if (verbose)
-		qDebug() << "queryOK, resetting GUI";
+	core->moveObserverTo(loc, 0.0, 0.0, landscapeAutoName);
+	if (nmeaHelper)
+		qCDebug(GPS) << "Change location from NMEA... successful. NMEAhelper stays active.";
+
+	qCDebug(GPS) << "Location in progress: Long=" << longitude << " Lat=" << latitude << " Alt" << loc.altitude;
+	qCDebug(GPS) << "New location named " << loc.name;
+	qCDebug(GPS) << "queryOK, resetting GUI";
+
 	emit gpsQueryFinished(true);
 }
 
@@ -961,7 +1221,7 @@ void StelLocationMgr::gpsQueryError(const QString &err)
 		//qDebug() << "Would Close nmeaHelper during error...";
 		// We should close the serial line to let other programs use the GPS device. (Not needed for the GPSD solution!)
 		//delete nmeaHelper;
-		//nmeaHelper=Q_NULLPTR;
+		//nmeaHelper=nullptr;
 		//qDebug() << "Would Close nmeaHelper during error.....successful";
 	}
 	qDebug() << "GPS queryError, resetting GUI";
@@ -993,21 +1253,65 @@ void StelLocationMgr::changeLocationFromNetworkLookup()
 			QString ipTimeZone = locMap.value("time_zone").toString();
 			if (ipTimeZone.isEmpty())
 				ipTimeZone = locMap.value("timezone").toString();
-			float latitude=locMap.value("latitude").toFloat();
-			float longitude=locMap.value("longitude").toFloat();
+			double latitude=locMap.value("latitude").toDouble();
+			double longitude=locMap.value("longitude").toDouble();
 
-			qDebug() << "Got location" << QString("%1, %2, %3 (%4, %5; %6)").arg(ipCity).arg(ipRegion).arg(ipCountry).arg(latitude).arg(longitude).arg(ipTimeZone) << "for IP" << locMap.value("ip").toString();
+			qCInfo(LocIP) << "Got location" << QString("%1, %2, %3 (%4, %5; %6)").arg(ipCity, ipRegion, ipCountry).arg(latitude).arg(longitude).arg(ipTimeZone) << "for IP" << locMap.value("ip").toString();
+
+			if (latitude==0.0 && longitude==0.0 && ipTimeZone.isEmpty() && ipCountry.isEmpty() && ipCountryCode.isEmpty())
+				throw std::runtime_error("IP lookup provided bogus result.");
+
+			QString regionName = pickRegionFromCountryCode(ipCountryCode.toLower());
+			float luminance = StelLocation::DEFAULT_LIGHT_POLLUTION_LUMINANCE;
+
+			// Check location in our database and fetch light pollution luminance if it possible
+			StelLocation ipLoc;
+			ipLoc.role = '!'; // the location is not valid by default
+			if (!ipCity.isEmpty())
+				ipLoc = locationForString(QString("%1, %2").arg(ipCity, regionName));
+			else
+			{
+				auto closeLocations = pickLocationsNearby("Earth", longitude, latitude, 0.5f);
+				// find closest location to (longitude,latitude) to grab light pollution info from.
+				// This is a bit awkward to begin with. Consider being 40km from an isolated larger city.
+				// Sky is good, and you take LP value for the city?
+				double minDistanceKm=1E12;
+				StelLocation candLoc;
+				candLoc.role = '!'; // the location is not valid by default
+				QMapIterator<QString, StelLocation> it(closeLocations);
+				while (it.hasNext()) {
+					it.next();
+					const double distanceKm=it.value().distanceKm(longitude, latitude);
+					qCDebug(LocIP) << "Close location: " << it.value().name << " -- " << int(distanceKm) << "km";
+					if (distanceKm < minDistanceKm)
+					{
+						minDistanceKm=distanceKm;
+						candLoc=it.value();
+						qCDebug(LocIP) << "-- TAKEN!";
+					}
+				}
+				if (candLoc.isValid() && closeLocations.size()>0)
+				{
+					qCInfo(LocIP) << "Closest known place:" << candLoc.name << "at" << candLoc.distanceKm(longitude, latitude) << "km";
+					// Consider result valid only in a meaningful distance. Light pollution is changing rapidly.
+					// Try 25 km, YMMV.
+					if (minDistanceKm < 25)
+						ipLoc = candLoc;
+				}
+			}
+			if (ipLoc.isValid())
+				luminance = ipLoc.lightPollutionLuminance.toFloat();
 
 			StelLocation loc;
 			loc.name    = (ipCity.isEmpty() ? QString("%1, %2").arg(latitude).arg(longitude) : ipCity);
 			loc.state   = (ipRegion.isEmpty() ? "IPregion"  : ipRegion);
-			loc.country = StelLocaleMgr::countryCodeToString(ipCountryCode.isEmpty() ? "" : ipCountryCode.toLower());
-			loc.role    = QChar(0x0058); // char 'X'
+			loc.region = regionName;
+			loc.role    = 'X';
 			loc.population = 0;
-			loc.latitude = latitude;
-			loc.longitude = longitude;
+			loc.setLatitude  (static_cast<float>(latitude));
+			loc.setLongitude (static_cast<float>(longitude));
 			loc.altitude = 0;
-			loc.bortleScaleIndex = StelLocation::DEFAULT_BORTLE_SCALE_INDEX;
+			loc.lightPollutionLuminance = luminance;
 			loc.ianaTimeZone = (ipTimeZone.isEmpty() ? "" : ipTimeZone);
 			loc.planetName = "Earth";
 			loc.landscapeKey = "";
@@ -1015,15 +1319,24 @@ void StelLocationMgr::changeLocationFromNetworkLookup()
 			// Ensure that ipTimeZone is a valid IANA timezone name!
 			QTimeZone ipTZ(ipTimeZone.toUtf8());
 			core->setCurrentTimeZone( !ipTZ.isValid() || ipTimeZone.isEmpty() ? "LMST" : ipTimeZone);
-			core->moveObserverTo(loc, 0.0, 0.0);
+			LandscapeMgr *lMgr=GETSTELMODULE_SILENT(LandscapeMgr); // This may fail during StelApp:init() (GH:#3550)
+			QString landscapeAutoName;
+			if (lMgr && lMgr->getFlagLandscapeAutoSelection())
+			{
+				QColor color=getColorForCoordinates(loc.getLongitude(), loc.getLatitude());
+				landscapeAutoName=QString("ZeroColor(%1)").arg(Vec3f(color).toStr());
+			}
+			core->moveObserverTo(loc, 0.0, 0.0, landscapeAutoName);
+
+
 			QSettings* conf = StelApp::getInstance().getSettings();
 			conf->setValue("init_location/last_location", QString("%1, %2").arg(latitude).arg(longitude));
 		}
 		catch (const std::exception& e)
 		{
-			qDebug() << "Failure getting IP-based location: answer is in not acceptable format! Error: " << e.what()
-					<< "\nLet's use Paris, France as default location...";
-			core->moveObserverTo(getLastResortLocation(), 0.0, 0.0); // Answer is not in JSON format! A possible block by DNS server or firewall
+			qCWarning(LocIP) << "Failure getting IP-based location: answer is in not acceptable format! Error:" << e.what();
+			qCWarning(LocIP) << "Moving to the fallback location";
+			core->moveObserverTo(getLastResortLocation(), 0.0, 0.0, "guereins"); // Answer is not in JSON format! A possible block by DNS server or firewall
 		}
 	}
 	else
@@ -1034,7 +1347,7 @@ void StelLocationMgr::changeLocationFromNetworkLookup()
 	networkReply->deleteLater();
 }
 
-LocationMap StelLocationMgr::pickLocationsNearby(const QString planetName, const float longitude, const float latitude, const float radiusDegrees)
+LocationMap StelLocationMgr::pickLocationsNearby(const QString &planetName, const float longitude, const float latitude, const float radiusDegrees)
 {
 	QMap<QString, StelLocation> results;
 	QMapIterator<QString, StelLocation> iter(locations);
@@ -1043,7 +1356,7 @@ LocationMap StelLocationMgr::pickLocationsNearby(const QString planetName, const
 		iter.next();
 		const StelLocation *loc=&iter.value();
 		if ( (loc->planetName == planetName) &&
-				(StelLocation::distanceDegrees(longitude, latitude, loc->longitude, loc->latitude) <= radiusDegrees) )
+				(StelLocation::distanceDegrees(longitude, latitude, loc->getLongitude(), loc->getLatitude()) <= radiusDegrees) )
 		{
 			results.insert(iter.key(), iter.value());
 		}
@@ -1051,7 +1364,7 @@ LocationMap StelLocationMgr::pickLocationsNearby(const QString planetName, const
 	return results;
 }
 
-LocationMap StelLocationMgr::pickLocationsInCountry(const QString country)
+LocationMap StelLocationMgr::pickLocationsInRegion(const QString &region)
 {
 	QMap<QString, StelLocation> results;
 	QMapIterator<QString, StelLocation> iter(locations);
@@ -1059,12 +1372,297 @@ LocationMap StelLocationMgr::pickLocationsInCountry(const QString country)
 	{
 		iter.next();
 		const StelLocation *loc=&iter.value();
-		if (loc->country == country)
+		if (loc->region == region)
 		{
 			results.insert(iter.key(), iter.value());
 		}
 	}
 	return results;
+}
+
+void StelLocationMgr::loadCountries()
+{
+	// Load ISO 3166-1 two-letter country codes from file
+	// The format is "[code][tab][country name containing spaces][newline]"
+	countryNameToCodeMap.clear();
+	QFile textFile(StelFileMgr::findFile("data/iso3166.tab"));
+	if(textFile.open(QFile::ReadOnly | QFile::Text))
+	{
+		QString line;
+		int readOk=0;
+		while(!textFile.atEnd())
+		{
+			line = QString::fromUtf8(textFile.readLine());
+			if (line.startsWith("//") || line.startsWith("#") || line.isEmpty())
+				continue;
+
+			if (!line.isEmpty())
+			{
+				#if (QT_VERSION>=QT_VERSION_CHECK(5, 14, 0))
+				QStringList list=line.split("\t", Qt::KeepEmptyParts);
+				#else
+				QStringList list=line.split("\t", QString::KeepEmptyParts);
+				#endif
+				QString code = list.at(0).trimmed().toLower();
+				QString country = list.at(1).trimmed().replace("&", "and");
+				countryNameToCodeMap.insert(country, code);
+				readOk++;
+			}
+		}
+		textFile.close();
+		if (readOk>0)
+			qInfo().noquote() << "Loaded" << readOk << "countries";
+		else
+			qDebug() << "ERROR: List of countries was not loaded!";
+	}
+	// aliases for some countries to backward compatibility
+	countryNameToCodeMap.insert("Russian Federation", "ru");
+	countryNameToCodeMap.insert("Taiwan (Province of China)", "tw");
+}
+
+void StelLocationMgr::loadRegions()
+{
+	QFile geoFile(StelFileMgr::findFile("data/regions-geoscheme.tab"));
+	if(geoFile.open(QFile::ReadOnly | QFile::Text))
+	{
+		QString line;
+		int readOk=0;
+		regions.clear();
+		countryCodeToRegionMap.clear();
+		while(!geoFile.atEnd())
+		{
+			line = QString::fromUtf8(geoFile.readLine());
+			if (line.startsWith("//") || line.startsWith("#") || line.isEmpty())
+				continue;
+
+			if (!line.isEmpty())
+			{
+				#if (QT_VERSION>=QT_VERSION_CHECK(5, 14, 0))
+				QStringList list=line.split("\t", Qt::KeepEmptyParts);
+				#else
+				QStringList list=line.split("\t", QString::KeepEmptyParts);
+				#endif
+
+				QString regionName = list.at(2).trimmed();
+				QString countries;
+				if (list.size()>3)
+					countries = list.at(3).trimmed().toLower();
+				GeoRegion region;
+				region.code = list.at(0).trimmed().toInt();
+				region.planet = list.at(1).trimmed();
+				region.regionName = regionName;
+				region.countries = countries;
+
+				if (!countries.isEmpty())
+				{
+					#if (QT_VERSION>=QT_VERSION_CHECK(5, 14, 0))
+					QStringList country=countries.split(",", Qt::KeepEmptyParts);
+					#else
+					QStringList country=countries.split(",", QString::KeepEmptyParts);
+					#endif
+					for (int i = 0; i<country.size(); i++)
+					{
+						countryCodeToRegionMap.insert(country.at(i), regionName);
+					}
+				}
+
+				regions.push_back(region);
+				readOk++;
+			}
+		}
+		geoFile.close();
+		if (readOk>0)
+			qInfo().noquote() << "Loaded" << readOk << "regions";
+		else
+			qDebug() << "ERROR: List of regions was not loaded!";
+	}
+}
+
+QStringList StelLocationMgr::getRegionNames(const QString& planet) const
+{
+	QStringList allregions;
+	if (planet.isEmpty())
+	{
+		for (int i=0;i<regions.size();i++)
+			allregions.append(regions.at(i).regionName);
+	}
+	else
+	{
+		for (int i=0;i<regions.size();i++)
+		{
+			if (planet.contains(regions.at(i).planet, Qt::CaseInsensitive) && !planet.contains("Observer", Qt::CaseInsensitive))
+				allregions.append(regions.at(i).regionName);
+		}
+	}
+
+	return allregions;
+}
+
+QString StelLocationMgr::pickRegionFromCountryCode(const QString &countryCode)
+{
+	QMap<QString, QString>::ConstIterator i = countryCodeToRegionMap.find(countryCode);
+	return (i!=countryCodeToRegionMap.constEnd()) ? i.value() : QString();
+}
+
+QString StelLocationMgr::pickRegionFromCountry(const QString &country)
+{
+	QMap<QString, QString>::ConstIterator i = countryNameToCodeMap.find(country);
+	QString code = (i!=countryNameToCodeMap.constEnd()) ? i.value() : QString();
+	return pickRegionFromCountryCode(code);
+}
+
+QString StelLocationMgr::pickRegionFromCode(int regionCode)
+{
+	QString region;
+	for(int i=0;i<regions.size();i++)
+	{
+		if (regions.at(i).code == regionCode)
+			region = regions.at(i).regionName;
+	}
+	return region;
+}
+
+// https://en.wikipedia.org/wiki/Universal_Transverse_Mercator_coordinate_system
+QPair<Vec3d,Vec2d> StelLocationMgr::geo2utm(const double longitude, const double latitude, const int zone)
+{
+	Q_ASSERT(zone<=60);
+	if ((latitude>84) || (latitude<-80))
+	{
+		qCritical() << "UTM Polar area not implemented. Returning zero result.";
+		return {Vec3d(0.), Vec2d(0.)};
+	}
+	static const double a=6378.137; // earth radius
+	static const double f=1./298.257223563;
+	static const double k0=0.9996;
+	static const double E0=500;
+	const double N0=latitude > 0 ? 0. : 10000.;
+	// preliminaries
+	static const double n = f/(2.-f);
+	static const double n2 = n*n;
+	static const double n3 = n2*n;
+	static const double n4 = n3*n;
+	static const double A = a/(1.+n) * (1.+n2/4. + n4/64.);
+	static const double k0A=k0*A;
+	static const Vec3d alpha = {n/2.-2./3.*n2+ 5./16.*n3, 13./48.*n2-3./5.*n3, 61./240.*n3};
+	const double utmZne= (zone!=0) ? zone : utmZone(longitude, latitude).first;
+	const double refLongitude=utmZne*6.-183.;
+	const double sinPhi=sin(latitude*M_PI_180);
+	const double dLong=(longitude-refLongitude)*M_PI_180;
+	const double cosDLong=cos(dLong);
+	const double tanDLong=tan(dLong);
+	const double tFac=2.*sqrt(n)/(1.+n);
+	const double t    = sinh(atanh(sinPhi)-tFac*atanh(tFac*sinPhi));
+	const double xiP  = atan(t/cosDLong);
+	const double etaP = atanh(sin(dLong)/sqrt(1.+t*t));
+	double sigma=1.;
+	for (int j=1; j<=3; ++j)
+		sigma += 2.*j*alpha[j-1]*cos(2.*j*xiP)*cosh(2.*j*etaP);
+	double tau=0.;
+	for (int j=1; j<=3; ++j)
+		tau   += 2.*j*alpha[j-1]*sin(2.*j*xiP)*sinh(2.*j*etaP);
+	double E=etaP;
+	for (int j=1; j<=3; ++j)
+		E += alpha[j-1]*cos(2.*j*xiP)*sinh(2.*j*etaP);
+	E *= k0A;
+	E += E0;
+	double N=xiP;
+	for (int j=1; j<=3; ++j)
+		N += alpha[j-1]*sin(2.*j*xiP)*cosh(2.*j*etaP);
+	N *= k0A;
+	N += N0;
+	const double kFac=(1.-n)/(1.+n)*tan(latitude*M_PI_180);
+	const double k=k0A/a * sqrt((1.+kFac*kFac) * (sigma*sigma+tau*tau) / (t*t + cosDLong*cosDLong));
+	const double gamma = atan((tau*sqrt(1.+t*t)+sigma*t*tanDLong)/(sigma*sqrt(1.+t*t)-tau*t*tanDLong));
+	return {Vec3d(E*1000., N*1000., refLongitude), Vec2d(gamma, k)};
+}
+
+// https://en.wikipedia.org/wiki/Universal_Transverse_Mercator_coordinate_system
+QPair<Vec3d,Vec2d> StelLocationMgr::utm2geo(const double easting, const double northing, const int zone, const bool north)
+{
+	Q_ASSERT(zone<=60);
+	static const double a=6378.137; // earth radius
+	static const double f=1./298.257223563;
+	static const double k0=0.9996;
+	static const double E0=500;
+	const double N0=north ? 0. : 10000.;
+	const double Hemi=north ? 1. : -1.;
+	// preliminaries
+	static const double n = f/(2.-f);
+	static const double n2 = n*n;
+	static const double n3 = n2*n;
+	static const double n4 = n3*n;
+	static const double A = a/(1.+n) * (1.+n2/4. + n4/64.);
+	static const double k0A=k0*A;
+	static const Vec3d beta  = {n/2.-2./3.*n2+37./96.*n3,  1./48.*n2+1./15.*n3, 17./480.*n3};
+	static const Vec3d delta = {2.*n-2./3.*n2-2.*n3,       7./3. *n2-8./ 5.*n3, 56./15. *n3};
+	const double xi=(northing*0.001-N0)/k0A;
+	const double eta=(easting*0.001-E0)/k0A;
+	double xiP=xi;
+	for (int j=1; j<=3; ++j)
+		xiP -= beta[j-1]*sin(2.*j*xi)*cosh(2.*j*eta);
+	double etaP=eta;
+	for (int j=1; j<=3; ++j)
+		etaP   -= beta[j-1]*cos(2.*j*xi)*sinh(2.*j*eta);
+	double sigmaP=1.;
+	for (int j=1; j<=3; ++j)
+		sigmaP -= 2.*j*beta[j-1]*cos(2.*j*xi)*cosh(2.*j*eta);
+	double tauP=0.;
+	for (int j=1; j<=3; ++j)
+		tauP   += 2.*j*beta[j-1]*sin(2.*j*xi)*sinh(2.*j*eta);
+	const double chi=asin(sin(xiP)/cosh(etaP));
+	double phi=chi;
+	for (int j=1; j<=3; ++j)
+		phi += delta[j-1]*sin(2.*j*chi);
+	const double refLongitude=zone*6.-183.;
+	const double sinhEtaP=sinh(etaP);
+	const double cosXiP=cos(xiP);
+	const double lng=refLongitude+atan(sinhEtaP/cosXiP)*M_180_PI;
+	const double kFac=(1.-n)/(1.+n)*tan(phi);
+	const double k=k0A/a * sqrt((1.+kFac*kFac) * (cosXiP*cosXiP+sinhEtaP*sinhEtaP) / (sigmaP*sigmaP + tauP*tauP));
+	const double tanXiPtanhEtaP=tan(xiP)*tanh(etaP);
+	const double gamma = Hemi * atan((tauP+sigmaP*tanXiPtanhEtaP)/(sigmaP-tauP*tanXiPtanhEtaP));
+	return {Vec3d(lng, phi*M_180_PI, refLongitude), Vec2d(gamma, k)};
+}
+
+// https://stackoverflow.com/questions/9186496/determining-utm-zone-to-convert-from-longitude-latitude
+QPair<int, QChar> StelLocationMgr::utmZone(const double longitude, const double latitude)
+{
+	QChar letter='I'; // I does not exist as letter code. It signifies "invalid".
+	int zone=0; // remains 0 for polar zones
+	// Special zones for Svalbard
+	if (latitude >= 72.0 && latitude <= 84.0 ) {
+		if (longitude >= 0.0  && longitude <  9.0)
+			zone=31;
+		if (longitude >= 9.0  && longitude < 21.0)
+			zone=33;
+		if (longitude >= 21.0 && longitude < 33.0)
+			zone=35;
+		if (longitude >= 33.0 && longitude < 42.0)
+			zone=37;
+		letter='X';
+	}
+	// Special zones for Norway
+	else if (latitude >= 56.0 && latitude < 64.0 ) {
+		if (longitude >= 0.0  && longitude <  3.0)
+			zone=31;
+		if (longitude >= 3.0  && longitude < 12.0)
+			zone=32;
+		letter='V';
+	}
+	// Everything in the middle
+	else if ( (latitude>-80.0) && (latitude<=84.0) ){
+		static const QString mid_zones("CDEFGHJKLMNPQRSTUVWX"); // C to X, skip I and O
+		letter = mid_zones[ qMin((int(std::floor(latitude)) + 80) / 8 , 19) ];
+		zone   = StelUtils::amod((int(std::floor(longitude)) + 180) / 6 , 60) + 1; // modulo in case longitude is 0 to 360 instead of -180 to 180
+	}
+	// North + South Poles
+	else if (latitude > 84.0)
+		letter = StelUtils::fmodpos(longitude + 180, 360) < 180 ? 'Y' : 'Z';
+	else if (latitude < -80.0)
+		letter = StelUtils::fmodpos(longitude + 180, 360) < 180 ? 'A' : 'B';
+	else
+		qCritical() << "Cannot determine UTM zone for long" << longitude << "/ lat" << latitude;
+	return QPair<int, QChar>(zone, letter);
 }
 
 // Check timezone string and return either the same or the corresponding string that we use in the Stellarium location database.
@@ -1115,7 +1713,7 @@ QStringList StelLocationMgr::getAllTimezoneNames() const
 	// Accept others after testing against sanitized names, and especially all UT+/- names!
 
 	auto tzList = QTimeZone::availableTimeZoneIds(); // System dependent set of IANA timezone names.
-	for (const auto& tz : tzList)
+	for (const auto& tz : std::as_const(tzList))
 	{
 		QString tzcand=sanitizeTimezoneStringFromLocationDB(tz); // try to find name as we use it in the program.
 		if (!ret.contains(tzcand))
@@ -1131,4 +1729,51 @@ QStringList StelLocationMgr::getAllTimezoneNames() const
 	ret.append("system_default");
 	ret.sort();
 	return ret;
+}
+
+// To be connected from StelCore::locationChanged(loc)
+void StelLocationMgr::changePlanetMapForLocation(StelLocation loc)
+{
+	if (loc.planetName==planetName)
+		return;
+	
+	if(loc.planetName.contains("spaceship", Qt::CaseInsensitive) || loc.planetName.contains("->"))
+		return;
+
+	planetName=loc.planetName;
+	if (planetName=="Earth")
+		planetSurfaceMap=QImage(":/graphicGui/miscWorldMap.jpg");
+	else
+	{
+		SolarSystem *ssm=GETSTELMODULE(SolarSystem);
+		PlanetP p=ssm->searchByEnglishName(loc.planetName);
+		QString mapName="textures/" + (p ? p->getTextMapName() : planetName) + ".png";
+
+		if (!planetSurfaceMap.load(StelFileMgr::findFile(mapName, StelFileMgr::File)))
+		{
+			// texture not found. Use a gray pixel.
+			planetSurfaceMap=QImage(16,16,QImage::Format_RGB32);
+			planetSurfaceMap.fill(QColor(64, 64, 64));
+		}
+	}
+}
+
+QColor StelLocationMgr::getColorForCoordinates(const double lng, const double lat) const
+{
+	QPoint imgPoint( (lng+180.)/ 360. * planetSurfaceMap.width(),
+			 (90.-lat) / 180. * planetSurfaceMap.height());
+
+	// Sample the map pixel color. Use a small box to avoid 1-pixel surprises.
+	QImage sampledPix=planetSurfaceMap.copy(QRect(imgPoint-QPoint(1,1), QSize(2,2))).scaled(1,1);
+	return sampledPix.pixelColor(0,0);
+}
+
+//! Return a valid location when no valid one was found.
+const StelLocation& StelLocationMgr::getLastResortLocation()
+{
+	// Unfortunately the isValid test is super lame.
+	if (!lastResortLocation.isValid())
+		// Fallback to Paris France because it's the center of the world.
+		lastResortLocation = locationForString("Paris, Western Europe");
+	return lastResortLocation;
 }

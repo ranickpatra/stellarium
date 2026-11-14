@@ -63,28 +63,26 @@ void MSSearchDialog::createDialogContent()
 	if (gui)
 	{
 		enableKineticScrolling(gui->getFlagUseKineticScrolling());
-		connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+		connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &MSSearchDialog::enableKineticScrolling);
 	}
 
-	connect(this, SIGNAL(visibleChanged(bool)), this, SLOT(refreshRangeDates()));
+	connect(this, &MSSearchDialog::visibleChanged, this, &MSSearchDialog::refreshRangeDates);
 
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &MSSearchDialog::retranslate);
 
-	connect(m_ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(m_ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(m_ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(m_ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
-	connect(m_ui->searchButton, SIGNAL(clicked()), this, SLOT(checkDates()));
+	connect(m_ui->searchButton, &QPushButton::clicked, this, &MSSearchDialog::searchEvents);
 
-	connect(m_ui->listEvents, SIGNAL(doubleClicked(QModelIndex)), this, SLOT(selectEvent(QModelIndex)));
+	connect(m_ui->listEvents, &QTreeWidget::doubleClicked, this, &MSSearchDialog::selectEvent);
 
 	// bug #1350669 (https://bugs.launchpad.net/stellarium/+bug/1350669)
-	connect(m_ui->listEvents, SIGNAL(currentItemChanged(QTreeWidgetItem*,QTreeWidgetItem*)),
-		m_ui->listEvents, SLOT(repaint()));
+	connect(m_ui->listEvents, &QTreeWidget::currentItemChanged, m_ui->listEvents, qOverload<>(&QTreeWidget::repaint));
 
-	// TODO: Switch a QDateTimeEdit to StelDateTimeEdit widget to apply wide range of dates
-	QDate min = QDate(100,1,1);
-	m_ui->dateFrom->setMinimumDate(min);
-	m_ui->dateTo->setMinimumDate(min);
+	int year = QDate::fromJulianDay(StelApp::getInstance().getCore()->getJD()).year();
+	m_ui->fromYearSpinBox->setValue(year);
+	m_ui->fromYearSpinBox->setToolTip(QString("%1 %2..%3").arg(q_("Valid range years:"), QString::number(m_ui->fromYearSpinBox->minimum()), QString::number(m_ui->fromYearSpinBox->maximum())));
 
 	refreshRangeDates();
 	initListEvents();
@@ -99,39 +97,26 @@ void MSSearchDialog::initListEvents()
 	m_ui->listEvents->header()->setStretchLastSection(true);
 }
 
-void MSSearchDialog::checkDates()
-{
-	double jdFrom = m_ui->dateFrom->date().toJulianDay();
-	double jdTo = m_ui->dateTo->date().toJulianDay();
-
-	if (jdFrom > jdTo)
-	{
-		QMessageBox::warning(&StelMainView::getInstance(), "Stellarium", q_("Start date greater than end date!"));
-	}
-	else if (jdTo-jdFrom > 365)
-	{
-		QMessageBox::warning(&StelMainView::getInstance(), "Stellarium", q_("Time interval must be less than one year!"));
-	}
-	else
-	{
-		searchEvents();
-	}
-}
-
 void MSSearchDialog::searchEvents()
 {
 	QList<MeteorShowers::SearchResult> searchResult;
-	searchResult = m_mgr->getMeteorShowers()->searchEvents(m_ui->dateFrom->date(), m_ui->dateTo->date());
+	searchResult = m_mgr->getMeteorShowers()->searchEvents(m_ui->fromYearSpinBox->value());
 
 	//Fill list of events
 	initListEvents();
-	for (const auto& r : searchResult)
+	for (const auto& r : std::as_const(searchResult))
 	{
 		MSTreeWidgetItem* treeItem = new MSTreeWidgetItem(m_ui->listEvents);
 		treeItem->setText(ColumnCode, r.code);
 		treeItem->setText(ColumnName, r.name);
 		treeItem->setText(ColumnDataType, r.type);
-		treeItem->setText(ColumnPeak, QString("%1 %2").arg(r.peak.day()).arg(StelLocaleMgr::longGenitiveMonthName(r.peak.month())));
+		// peak JD from solar longitude
+		double peakJD = MeteorShower::JDfromSolarLongitude(r.peak, r.peakyear);
+		StelCore* core = StelApp::getInstance().getCore();
+		const double utcShift = core->getUTCOffset(core->getJD()) / 24.;
+		int Year, Month, Day;
+		StelUtils::getDateFromJulianDay(peakJD+utcShift, &Year, &Month, &Day);
+		treeItem->setText(ColumnPeak, QString("%1 %2").arg(Day).arg(StelLocaleMgr::longGenitiveMonthName(Month)));
 		if (r.zhrMin != r.zhrMax)
 			treeItem->setText(ColumnZHR, QString("%1-%2").arg(r.zhrMin).arg(r.zhrMax));
 		else
@@ -142,7 +127,7 @@ void MSSearchDialog::searchEvents()
 		treeItem->setData(ColumnCode, Qt::UserRole, r.code);
 		treeItem->setData(ColumnName, Qt::UserRole, r.name);
 		treeItem->setData(ColumnDataType, Qt::UserRole, r.type);
-		treeItem->setData(ColumnPeak, Qt::UserRole, r.peak);
+		treeItem->setData(ColumnPeak, Qt::UserRole, peakJD);
 		treeItem->setData(ColumnZHR, Qt::UserRole, r.zhrMax);
 	}
 
@@ -163,9 +148,9 @@ void MSSearchDialog::selectEvent(const QModelIndex &modelIndex)
 		m_mgr->setEnablePlugin(true);
 
 	// Change date
-	StelCore *core = StelApp::getInstance().getCore();
-	QDate peak = modelIndex.sibling(modelIndex.row(), ColumnPeak).data(Qt::UserRole).toDate();
-	core->setJD(peak.toJulianDay());
+	StelCore *core = StelApp::getInstance().getCore();	
+	double JD = modelIndex.sibling(modelIndex.row(), ColumnPeak).data(Qt::UserRole).toDouble();
+	core->setJD(JD - core->getUTCOffset(JD)/24.);
 
 	// Find the object
 	QString nameI18n = modelIndex.sibling(modelIndex.row(), ColumnName).data().toString();
@@ -175,10 +160,8 @@ void MSSearchDialog::selectEvent(const QModelIndex &modelIndex)
 
 	if (obj) // Set time near transit...
 	{
-		Vec3f rts = obj->getRTSTime(core);
-		double JD = core->getJD();
-		JD = static_cast<int>(JD) + 0.5 + rts[1]/24.f - core->getUTCOffset(JD)/24.;
-		core->setJD(JD);
+		Vec4d rts = obj->getRTSTime(core);
+		core->setJD(rts[1]);
 	}
 
 	// Move to object
@@ -189,8 +172,7 @@ void MSSearchDialog::selectEvent(const QModelIndex &modelIndex)
 void MSSearchDialog::refreshRangeDates()
 {
 	int year = QDate::fromJulianDay(StelApp::getInstance().getCore()->getJD()).year();
-	m_ui->dateFrom->setDate(QDate(year, 1, 1));
-	m_ui->dateTo->setDate(QDate(year, 12, 31));
+	m_ui->fromYearSpinBox->setValue(year);
 }
 
 void MSSearchDialog::setHeaderNames()

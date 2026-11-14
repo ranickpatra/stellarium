@@ -40,7 +40,7 @@
 #include <QDebug>
 #include <QByteArray>
 
-gSatWrapper::gSatWrapper(QString designation, QString tle1,QString tle2)
+gSatWrapper::gSatWrapper(const QString &designation, const QString &tle1, const QString &tle2)
 {
 	// The TLE library actually modifies the TLE strings, which is annoying (because
 	// when we get updates, we want to check if there has been a change by using ==
@@ -59,14 +59,14 @@ gSatWrapper::gSatWrapper(QString designation, QString tle1,QString tle2)
 
 gSatWrapper::~gSatWrapper()
 {
-	if (pSatellite != Q_NULLPTR)
+	if (pSatellite)
 		delete pSatellite;
 }
 
 Vec3d gSatWrapper::getTEMEPos() const
 {
 	Vec3d returnedVector;
-	if (pSatellite != Q_NULLPTR)
+	if (pSatellite)
 		returnedVector = pSatellite->getPos();
 	else
 		qWarning() << "gSatWrapper::getTEMEPos Method called without pSatellite initialized";
@@ -77,7 +77,7 @@ Vec3d gSatWrapper::getTEMEPos() const
 Vec3d gSatWrapper::getTEMEVel() const
 {
 	Vec3d returnedVector;
-	if (pSatellite != Q_NULLPTR)
+	if (pSatellite)
 		returnedVector = pSatellite->getVel();
 	else
 		qWarning() << "gSatWrapper::getTEMEVel Method called without pSatellite initialized";
@@ -88,10 +88,10 @@ Vec3d gSatWrapper::getTEMEVel() const
 Vec3d gSatWrapper::getSubPoint() const
 {
 	Vec3d returnedVector;
-	if (pSatellite != Q_NULLPTR)
+	if (pSatellite)
 		returnedVector = pSatellite->getSubPoint();
 	else
-		qWarning() << "gSatWrapper::getTEMEVel Method called without pSatellite initialized";
+		qWarning() << "gSatWrapper::getSubPoint Method called without pSatellite initialized";
 
 	return returnedVector;
 }
@@ -109,21 +109,19 @@ void gSatWrapper::calcObserverECIPosition(Vec3d& ao_position, Vec3d& ao_velocity
 	{
 		StelLocation loc   = StelApp::getInstance().getCore()->getCurrentLocation();
 
-		double radLatitude	= loc.latitude * KDEG2RAD;
-		double theta		= epoch.toThetaLMST(loc.longitude * KDEG2RAD);
-		double r;
-		double c,sq;
+		const double radLatitude	= loc.getLatitude() * M_PI_180;
+		const double theta		= epoch.toThetaLMST(loc.getLongitude() * M_PI_180);
 
 		/* Reference:  Explanatory supplement to the Astronomical Almanac 1992, page 209-210. */
-		/* Elipsoid earth model*/
-		/* c = Nlat/a */
-		c = 1/std::sqrt(1 + __f*(__f - 2)*Sqr(sin(radLatitude)));
-		sq = Sqr(1 - __f)*c;
+		/* Ellipsoid earth model*/
+		/* C = Nlat/a */
+		const double C = 1/std::sqrt(1 + __f*(__f - 2.)*Sqr(sin(radLatitude)));
+		const double S = Sqr(1 - __f)*C;
 
-		r = (KEARTHRADIUS*c + (loc.altitude/1000))*cos(radLatitude);
+		double r = (EARTH_RADIUS*C + (loc.altitude/1000.))*cos(radLatitude);
 		ao_position[0] = r * cos(theta);/*kilometers*/
 		ao_position[1] = r * sin(theta);
-		ao_position[2] = (KEARTHRADIUS*sq + (loc.altitude/1000))*sin(radLatitude);
+		ao_position[2] = (EARTH_RADIUS*S + (loc.altitude/1000.))*sin(radLatitude);
 		ao_velocity[0] = -KMFACTOR*ao_position[1];/*kilometers/second*/
 		ao_velocity[1] =  KMFACTOR*ao_position[0];
 		ao_velocity[2] =  0;
@@ -134,22 +132,22 @@ void gSatWrapper::calcObserverECIPosition(Vec3d& ao_position, Vec3d& ao_velocity
 
 Vec3d gSatWrapper::getAltAz() const
 {
-	StelLocation loc   = StelApp::getInstance().getCore()->getCurrentLocation();
-	Vec3d topoSatPos;
+	const StelLocation loc   = StelApp::getInstance().getCore()->getCurrentLocation();
 
-	const double  radLatitude	= loc.latitude * KDEG2RAD;
-	const double  theta		= epoch.toThetaLMST(loc.longitude * KDEG2RAD);
-	const double sinRadLatitude	= sin(radLatitude);
-	const double cosRadLatitude	= cos(radLatitude);
-	const double sinTheta	= sin(theta);
-	const double cosTheta	= cos(theta);
+	const double radLatitude    = loc.getLatitude() * M_PI_180;
+	const double sinRadLatitude = sin(radLatitude);
+	const double cosRadLatitude = cos(radLatitude);
+	const double theta          = epoch.toThetaLMST(loc.getLongitude() * M_PI_180);
+	const double sinTheta       = sin(theta);
+	const double cosTheta       = cos(theta);
 
 	// This now only updates if required.
 	calcObserverECIPosition(observerECIPos, observerECIVel);
 
-	Vec3d satECIPos	= getTEMEPos();
-	Vec3d slantRange	= satECIPos - observerECIPos;
+	const Vec3d satECIPos	= getTEMEPos();
+	const Vec3d slantRange	= satECIPos - observerECIPos;
 
+	Vec3d topoSatPos;
 	//top_s
 	topoSatPos[0] = (sinRadLatitude * cosTheta*slantRange[0]
 			 + sinRadLatitude* sinTheta*slantRange[1]
@@ -170,12 +168,12 @@ void  gSatWrapper::getSlantRange(double &ao_slantRange, double &ao_slantRangeRat
 {
 	calcObserverECIPosition(observerECIPos, observerECIVel);
 
-	Vec3d satECIPos		= getTEMEPos();
-	Vec3d satECIVel		= getTEMEVel();
-	Vec3d slantRange		= satECIPos - observerECIPos;
-	Vec3d slantRangeVelocity = satECIVel - observerECIVel;
+	const Vec3d satECIPos		= getTEMEPos();
+	const Vec3d satECIVel		= getTEMEVel();
+	const Vec3d slantRange		= satECIPos - observerECIPos;
+	const Vec3d slantRangeVelocity = satECIVel - observerECIVel;
 
-	ao_slantRange		= slantRange.length();
+	ao_slantRange		= slantRange.norm();
 	ao_slantRangeRate	= slantRange.dot(slantRangeVelocity)/ao_slantRange;
 }
 
@@ -185,12 +183,11 @@ void gSatWrapper::updateSunECIPos()
 	// All positions in ECI system are positions referenced in a StelCore::EquinoxEq system centered in the earth centre
 	calcObserverECIPosition(observerECIPos, observerECIVel);
 
-	static const SolarSystem *solsystem = (SolarSystem*)StelApp::getInstance().getModuleMgr().getModule("SolarSystem");
+	static const SolarSystem *solsystem = GETSTELMODULE(SolarSystem);
 	Vec3d sunEquinoxEqPos = solsystem->getSun()->getEquinoxEquatorialPos(StelApp::getInstance().getCore());
 
 	//sunEquinoxEqPos is measured in AU. we need measure it in Km
-	sunECIPos.set(sunEquinoxEqPos[0]*AU, sunEquinoxEqPos[1]*AU, sunEquinoxEqPos[2]*AU);
-	sunECIPos = sunECIPos + observerECIPos; //Change ref system centre
+	sunECIPos=sunEquinoxEqPos*AU + observerECIPos; //Change ref system centre
 }
 
 Vec3d gSatWrapper::getSunECIPos()
@@ -207,42 +204,48 @@ Vec3d gSatWrapper::getSunECIPos()
 // @brief This operation predicts the satellite visibility conditions.
 gSatWrapper::Visibility gSatWrapper::getVisibilityPredict() const
 {
-	Vec3d satAltAzPos = getAltAz();
-
+	gSatWrapper::Visibility rval = BELOW_HORIZON;
+	const Vec3d satAltAzPos = getAltAz();
 	if (satAltAzPos[2] > 0)
 	{
-		Vec3d satECIPos = getTEMEPos();
-		static const SolarSystem *solsystem = (SolarSystem*)StelApp::getInstance().getModuleMgr().getModule("SolarSystem");
+		static const SolarSystem* solsystem = (SolarSystem*)StelApp::getInstance().getModuleMgr().getModule("SolarSystem");
 		Vec3d sunAltAzPos = solsystem->getSun()->getAltAzPosGeometric(StelApp::getInstance().getCore());
-		Vec3d sunECIPos = getSunECIPos();
-
 		if (sunAltAzPos[2] > 0.0)
 		{
-			return RADAR_SUN;
+			rval = RADAR_SUN;
 		}
 		else
 		{
-			double sunSatAngle = sunECIPos.angle(satECIPos);
-			double Dist = satECIPos.length()*cos(sunSatAngle - (M_PI/2));
-
-			if (Dist > KEARTHRADIUS)
+			const Vec3d sunECIPos = getSunECIPos();
+			const Vec3d satECIPos = getTEMEPos();
+			rval = VISIBLE;
+			/*
+			Satellites in umbra/penumbra based on:-
+			Visually Observing Earth Satellites By Dr. T.S. Kelso
+			https://celestrak.org/columns/v03n01/
+			*/
+			const double psun = std::sqrt(pow(satECIPos[0] - sunECIPos[0], 2) + pow(satECIPos[1] - sunECIPos[1], 2) + pow(satECIPos[2] - sunECIPos[2], 2) );
+			const double pearth = std::sqrt(std::pow(satECIPos[0], 2) + std::pow(satECIPos[1], 2) + std::pow(satECIPos[2], 2));
+			const double theta_e = std::asin((12742. / 2.) / pearth);
+			const double theta_s = std::asin((1391000. / 2.) / psun);
+			const double dotproduct_peps = std::abs((satECIPos[0] * sunECIPos[0]) + (satECIPos[1] * sunECIPos[1]) + (satECIPos[2] * sunECIPos[2]));
+			const double theta = std::acos(dotproduct_peps / (psun * pearth));
+			if (theta_e > theta_s && theta < (theta_e - theta_s))
 			{
-				return VISIBLE;
+				rval = RADAR_NIGHT;
 			}
-			else
+			else if (std::abs(theta_e - theta_s) < theta && theta < (theta_e + theta_s))
 			{
-				return RADAR_NIGHT;
+				rval = PENUMBRAL;
+			}
+			else if (theta_s > theta_e && theta < (theta_s - theta_e))
+			{
+				rval = ANNULAR;
 			}
 		}
 	}
-	else
-		return NOT_VISIBLE;
-}
 
-double gSatWrapper::getPhaseAngle() const
-{
-	Vec3d sunECIPos = getSunECIPos();
-	return sunECIPos.angle(getTEMEPos());
+	return rval;
 }
 
 double gSatWrapper::getOrbitalPeriod() const

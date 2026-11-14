@@ -21,10 +21,8 @@
 
 #include "StelObjectModule.hpp"
 #include "StelObject.hpp"
-#include "StelFader.hpp"
 #include "StelTextureTypes.hpp"
 #include "Pulsar.hpp"
-#include <QFont>
 #include <QVariantMap>
 #include <QDateTime>
 #include <QList>
@@ -73,21 +71,11 @@ typedef QSharedPointer<Pulsar> PulsarP;
 class Pulsars : public StelObjectModule
 {
 	Q_OBJECT
-	Q_PROPERTY(bool pulsarsVisible
-		   READ getFlagShowPulsars
-		   WRITE setFlagShowPulsars
-		   NOTIFY flagPulsarsVisibilityChanged
-		   )
-	Q_PROPERTY(Vec3f markerColor
-		   READ getMarkerColor
-		   WRITE setMarkerColor
-		   NOTIFY markerColorChanged
-		   )
-	Q_PROPERTY(Vec3f glitchColor
-		   READ getGlitchColor
-		   WRITE setGlitchColor
-		   NOTIFY glitchColorChanged
-		   )
+	Q_PROPERTY(bool pulsarsVisible  READ getFlagShowPulsars  WRITE setFlagShowPulsars   NOTIFY flagPulsarsVisibilityChanged)
+	Q_PROPERTY(Vec3f markerColor    READ getMarkerColor      WRITE setMarkerColor       NOTIFY markerColorChanged)
+	Q_PROPERTY(Vec3f glitchColor    READ getGlitchColor      WRITE setGlitchColor       NOTIFY glitchColorChanged)
+	Q_PROPERTY(bool flagDisplayMode READ getDisplayMode      WRITE setDisplayMode       NOTIFY displayModeChanged)
+	Q_PROPERTY(bool flagGlitchMode  READ getGlitchFlag       WRITE setGlitchFlag        NOTIFY glitchFlagChanged)
 public:
 	//! @enum UpdateState
 	//! Used for keeping for track of the download/update status
@@ -100,16 +88,15 @@ public:
 	};
 
 	Pulsars();
-	virtual ~Pulsars();
+	~Pulsars() override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in the StelModule class
-	virtual void init();
-	virtual void deinit();
-	virtual void update(double) {;}
-	virtual void draw(StelCore* core);
+	void init() override;
+	void deinit() override;
+	void draw(StelCore* core) override;
 	virtual void drawPointer(StelCore* core, StelPainter& painter);
-	virtual double getCallOrder(StelModuleActionName actionName) const;
+	double getCallOrder(StelModuleActionName actionName) const override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in StelObjectModule class
@@ -118,19 +105,19 @@ public:
 	//! @param limitFov the field of view around the position v in which to search for pulsars.
 	//! @param core the StelCore to use for computations.
 	//! @return a list containing the pulsars located inside the limitFov circle around position v.
-	virtual QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const;
+	QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const override;
 
 	//! Return the matching Pulsar object's pointer if exists or Q_NULLPTR.
 	//! @param nameI18n The case in-sensitive localized Pulsar name
-	virtual StelObjectP searchByNameI18n(const QString& nameI18n) const;
+	StelObjectP searchByNameI18n(const QString& nameI18n) const override;
 
 	//! Return the matching Pulsar if exists or Q_NULLPTR.
 	//! @param name The case in-sensitive english Pulsar name
-	virtual StelObjectP searchByName(const QString& name) const;
+	StelObjectP searchByName(const QString& name) const override;
 
 	//! Return the matching Pulsar if exists or Q_NULLPTR.
 	//! @param id The Pulsar id
-	virtual StelObjectP searchByID(const QString &id) const
+	StelObjectP searchByID(const QString &id) const override
 	{
 		return qSharedPointerCast<StelObject>(getByID(id));
 	}
@@ -140,17 +127,17 @@ public:
 	//! @param maxNbItem the maximum number of returned object names
 	//! @param useStartOfWords the autofill mode for returned objects names
 	//! @return a list of matching object name by order of relevance, or an empty list if nothing match
-	virtual QStringList listMatchingObjects(const QString& objPrefix, int maxNbItem=5, bool useStartOfWords=false) const;
-	virtual QStringList listAllObjects(bool inEnglish) const;
-	virtual QString getName() const { return "Pulsars"; }
-	virtual QString getStelObjectType() const { return Pulsar::PULSAR_TYPE; }
+	QVector<QPair<QString,StelObjectP>> listMatchingObjects(const QString& objPrefix, int maxNbItem=5, bool useStartOfWords=false) const override;
+	QVector<QPair<QString,StelObjectP>> listAllObjects(bool inEnglish) const override;
+	QString getName() const override { return "Pulsars"; }
+	QString getStelObjectType() const override { return Pulsar::PULSAR_TYPE; }
 
 	//! get a Pulsar object by identifier
 	PulsarP getByID(const QString& id) const;
 
 	//! Implement this to tell the main Stellarium GUI that there is a GUI element to configure this
 	//! plugin.
-	virtual bool configureGui(bool show=true);
+	bool configureGui(bool show=true) override;
 
 	//! Set up the plugin with default values.  This means clearing out the Pulsars section in the
 	//! main config.ini (if one already exists), and populating it with default values.  It also
@@ -199,6 +186,8 @@ signals:
 
 	void flagPulsarsVisibilityChanged(bool b);
 	void flagUsingFilterChanged(bool b);
+	void displayModeChanged(bool b);
+	void glitchFlagChanged(bool b);
 	void markerColorChanged(Vec3f);
 	void glitchColorChanged(Vec3f);
 
@@ -250,8 +239,9 @@ public slots:
 	//! @param c color
 	//! @param mtype set false if you want set color for pulsars with glitches
 	//! @code
-	//! // example of usage in scripts
-	//! Pulsars.setMarkerColor(Vec3f(1.0,0.0,0.0), true);
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! Pulsars.setMarkerColor(c.toVec3f(), true);
 	//! @endcode
 	void setMarkerColor(const Vec3f& c);
 
@@ -262,8 +252,9 @@ public slots:
 	//! Set markers color for pulsars with glitches
 	//! @param c color
 	//! @code
-	//! // example of usage in scripts
-	//! Pulsars.setGlitchColor(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! Pulsars.setGlitchColor(c.toVec3f());
 	//! @endcode
 	void setGlitchColor(const Vec3f& c);
 
@@ -271,15 +262,15 @@ public slots:
 	//! @return count of pulsars
 	int getCountPulsars(void) const {return PsrCount;}
 
-	//! Download JSON from web recources described in the module section of the
+	//! Download JSON from web resources described in the module section of the
 	//! module.ini file and update the local JSON file.
 	void updateJSON(void);
 
 	//! Connect this to StelApp font size.
-	void setFontSize(int s){font.setPixelSize(s);}
+	void setFontSize(int s){fontSize = s;}
 private:
-	// Font used for displaying our text
-	QFont font;
+	// Fontsize used for displaying our text
+	int fontSize;
 
 	// if existing, delete Satellites section in main config.ini, then create with default values
 	void restoreDefaultConfigIni(void);
@@ -307,7 +298,7 @@ private:
 	bool checkJsonFileFormat(void);
 
 	//! parse JSON file and load pulsars to map
-	QVariantMap loadPSRMap(QString path=QString());
+	QVariantMap loadPSRMap();
 
 	//! set items for list of struct from data map
 	void setPSRMap(const QVariantMap& map);
@@ -331,13 +322,14 @@ private:
 	int updateFrequencyDays;	
 	bool enableAtStartup;
 
-	void startDownload(QString url);
+	void startDownload(const QString &url);
 	void deleteDownloadProgressBar();
 
 	QSettings* conf;
 
-	// GUI
+#ifndef NO_GUI
 	PulsarsDialog* configDialog;
+#endif
 	bool flagShowPulsars;
 	bool flagShowPulsarsButton;	
 	QPixmap* OnIcon;
@@ -361,7 +353,7 @@ private slots:
 	void 	saveSettings() { saveSettingsToConfig(); }
 
 	//! Display a message. This is used for plugin-specific warnings and such
-	void displayMessage(const QString& message, const QString hexColor="#999999");
+	void displayMessage(const QString& message, const QString &hexColor="#999999");
 };
 
 
@@ -376,9 +368,9 @@ class PulsarsStelPluginInterface : public QObject, public StelPluginInterface
 	Q_PLUGIN_METADATA(IID StelPluginInterface_iid)
 	Q_INTERFACES(StelPluginInterface)
 public:
-	virtual StelModule* getStelModule() const;
-	virtual StelPluginInfo getPluginInfo() const;
-	virtual QObjectList getExtensionList() const { return QObjectList(); }
+	StelModule* getStelModule() const override;
+	StelPluginInfo getPluginInfo() const override;
+	//QObjectList getExtensionList() const override { return QObjectList(); }
 };
 
 #endif /* PULSARS_HPP */

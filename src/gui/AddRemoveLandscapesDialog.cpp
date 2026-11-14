@@ -56,20 +56,20 @@ void AddRemoveLandscapesDialog::createDialogContent()
 	ui->setupUi(dialog);
 	
 	//Signals and slots
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &AddRemoveLandscapesDialog::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &AddRemoveLandscapesDialog::handleMovedTo);
 
-	connect(ui->pushButtonBrowseForArchive, SIGNAL(clicked()), this, SLOT(browseForArchiveClicked()));
-	connect(ui->listWidgetUserLandscapes, SIGNAL(currentRowChanged(int)), this, SLOT(updateSidePane(int)));
-	connect(ui->pushButtonRemove, SIGNAL(clicked()), this, SLOT(removeClicked()));
-	connect(ui->pushButtonMessageOK, SIGNAL(clicked()), this, SLOT(messageAcknowledged()));
+	connect(ui->pushButtonBrowseForArchive, &QPushButton::clicked, this, &AddRemoveLandscapesDialog::browseForArchiveClicked);
+	connect(ui->listWidgetUserLandscapes, &QListWidget::currentRowChanged, this, &AddRemoveLandscapesDialog::updateSidePane);
+	connect(ui->pushButtonRemove,    &QPushButton::clicked, this, &AddRemoveLandscapesDialog::removeClicked);
+	connect(ui->pushButtonMessageOK, &QPushButton::clicked, this, &AddRemoveLandscapesDialog::messageAcknowledged);
 
-	connect(landscapeManager, SIGNAL(landscapesChanged()), this, SLOT(populateLists()));
-	connect(landscapeManager, SIGNAL(errorUnableToOpen(QString)), this, SLOT(messageUnableToOpen(QString)));
-	connect(landscapeManager, SIGNAL(errorNotArchive()), this, SLOT(messageNotArchive()));
-	connect(landscapeManager, SIGNAL(errorNotUnique(QString)), this, SLOT(messageNotUnique(QString)));
-	connect(landscapeManager, SIGNAL(errorRemoveManually(QString)), this, SLOT(messageRemoveManually(QString)));
+	connect(landscapeManager, &LandscapeMgr::landscapesChanged, this, &AddRemoveLandscapesDialog::populateLists);
+	connect(landscapeManager, &LandscapeMgr::errorUnableToOpen, this, &AddRemoveLandscapesDialog::messageUnableToOpen);
+	connect(landscapeManager, &LandscapeMgr::errorNotArchive, this, &AddRemoveLandscapesDialog::messageNotArchive);
+	connect(landscapeManager, &LandscapeMgr::errorNotUnique, this, &AddRemoveLandscapesDialog::messageNotUnique);
+	connect(landscapeManager, &LandscapeMgr::errorRemoveManually, this, &AddRemoveLandscapesDialog::messageRemoveManually);
 
 	ui->groupBoxMessage->setVisible(false);
 
@@ -100,7 +100,7 @@ void AddRemoveLandscapesDialog::populateLists()
 		}
 		else
 		{
-			ui->listWidgetUserLandscapes->setCurrentItem(ui->listWidgetUserLandscapes->findItems(landscapeManager->getCurrentLandscapeID(), Qt::MatchExactly).first());
+			ui->listWidgetUserLandscapes->setCurrentItem(ui->listWidgetUserLandscapes->findItems(landscapeManager->getCurrentLandscapeID(), Qt::MatchExactly).constFirst());
 		}
 	}
 	else
@@ -116,7 +116,7 @@ void AddRemoveLandscapesDialog::browseForArchiveClicked()
 	// TRANSLATORS: This string is displayed in the "Files of type:" drop-down list in the standard file selection dialog.
 	QString filter = q_("ZIP archives");
 	filter += " (*.zip)";
-	QString sourceArchivePath = QFileDialog::getOpenFileName(Q_NULLPTR, caption, lastUsedDirectoryPath, filter);
+	QString sourceArchivePath = QFileDialog::getOpenFileName(&StelMainView::getInstance(), caption, lastUsedDirectoryPath, filter);
 	bool useLandscape = ui->checkBoxUseLandscape->isChecked();
 	if (!sourceArchivePath.isEmpty() && QFile::exists(sourceArchivePath))
 	{
@@ -132,7 +132,7 @@ void AddRemoveLandscapesDialog::browseForArchiveClicked()
 
 			//Make the new landscape selected in the list
 			//populateLists(); //No longer needed after the migration to signals/slots
-			ui->listWidgetUserLandscapes->setCurrentItem((ui->listWidgetUserLandscapes->findItems(newLandscapeID, Qt::MatchExactly)).first());
+			ui->listWidgetUserLandscapes->setCurrentItem((ui->listWidgetUserLandscapes->findItems(newLandscapeID, Qt::MatchExactly)).constFirst());
 		}
 		else
 		{
@@ -194,7 +194,7 @@ void AddRemoveLandscapesDialog::updateSidePane(int newRow)
 	//Name
 	ui->labelLandscapeName->setText("<h3>"+landscapeManager->loadLandscapeName(landscapeID)+"</h3>");
 	//Size in MiB
-	double landscapeSize = landscapeManager->loadLandscapeSize(landscapeID) / (double)(1024*1024);
+	double landscapeSize = static_cast<double>(landscapeManager->loadLandscapeSize(landscapeID)) / static_cast<double>(1024*1024);
 	// TRANSLATORS: MiB = mebibytes (IEC 60027-2 standard for 2^20 bytes)
 	ui->labelLandscapeSize->setText(QString(q_("Size on disk: %1 MiB")).arg(landscapeSize, 0, 'f', 2));
 }

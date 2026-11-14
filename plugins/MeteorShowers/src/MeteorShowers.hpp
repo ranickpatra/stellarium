@@ -20,6 +20,7 @@
 #ifndef METEORSHOWERS_HPP
 #define METEORSHOWERS_HPP
 
+#include "StelObjectModule.hpp"
 #include "MeteorShower.hpp"
 #include "MeteorShowersMgr.hpp"
 
@@ -41,7 +42,8 @@ public:
 		QString code;
 		QString name;
 		QString type;
-		QDate peak;
+		double peak;
+		int peakyear;
 		int zhrMax;
 		int zhrMin;
 	};
@@ -49,17 +51,17 @@ public:
 	//! Constructor
 	MeteorShowers(MeteorShowersMgr *mgr);
 
-	virtual void init(void) {}
+	void init(void) override {}
 
 	//! Destructor
-	virtual ~MeteorShowers();
+	~MeteorShowers() override;
 
 	//! Update
 	//! @param deltaTime the time increment in seconds since the last call.
-	virtual void update(double deltaTime);
+	void update(double deltaTime) override;
 
 	//! Draw
-	virtual void draw(StelCore* core);
+	void draw(StelCore* core) override;
 
 	//! Loads all meteor showers contained in a QVariantMap.
 	//! @param map
@@ -69,19 +71,19 @@ public:
 	//! @param dateFrom
 	//! @param dateTo
 	//! @return list
-	QList<SearchResult> searchEvents(QDate dateFrom, QDate dateTo) const;
+	QList<SearchResult> searchEvents(int year) const;
 
 	//
 	// Methods defined in StelObjectModule class
 	//
-	virtual QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const;
-	virtual StelObjectP searchByNameI18n(const QString& nameI18n) const;
-	virtual StelObjectP searchByName(const QString& name) const;
-	virtual StelObjectP searchByID(const QString &id) const;
+	QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const override;
+	StelObjectP searchByNameI18n(const QString& nameI18n) const override;
+	StelObjectP searchByName(const QString& name) const override;
+	StelObjectP searchByID(const QString &id) const override;
 
-	virtual QStringList listAllObjects(bool inEnglish) const;
-	virtual QString getName() const { return "Meteor Showers"; }
-	virtual QString getStelObjectType() const { return MeteorShower::METEORSHOWER_TYPE; }
+	QVector<QPair<QString,StelObjectP>> listAllObjects(bool inEnglish) const override;
+	QString getName() const  override{ return "Meteor Showers"; }
+	QString getStelObjectType() const override { return MeteorShower::METEORSHOWER_TYPE; }
 
 private:
 	MeteorShowersMgr* m_mgr;

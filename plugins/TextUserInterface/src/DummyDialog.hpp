@@ -23,6 +23,8 @@
 #include <QObject>
 #include <QString>
 
+class QDialog;
+
 //! The TextUserInterface wants to intercept all key presses including those which
 //! are assigned to global key bindings in the main GUI definition (i.e. keys
 //! used for actions which are associated with toolbar buttons).
@@ -36,7 +38,7 @@ class DummyDialog : public QObject
 	Q_OBJECT
 public:
 	DummyDialog(StelModule* eventHandler);
-	~DummyDialog();
+	~DummyDialog() override;
 
 public slots:
 	void setVisible(bool);
@@ -46,10 +48,10 @@ signals:
         void visibleChanged(bool);
 
 protected:
-	bool eventFilter(QObject *obj, QEvent *event);
+	bool eventFilter(QObject *obj, QEvent *event) override;
 	void createDialogContent();
-	class CustomProxy* proxy;
-	QWidget* dialog;
+	class DummyCustomProxy* proxy;
+	QDialog* dialog;
 	StelModule* evtHandler;
 };
 

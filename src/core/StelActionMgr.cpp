@@ -26,11 +26,10 @@
 #include <QMetaProperty>
 #include <QStringList>
 #include <QSettings>
+#include <QRegularExpression>
 
-#ifndef USE_QUICKVIEW
 #include <QAction>
 #include "StelMainView.hpp"
-#endif
 
 StelAction::StelAction(const QString& actionId,
 		       const QString& groupId,
@@ -48,40 +47,35 @@ StelAction::StelAction(const QString& actionId,
 	, defaultAltKeySequence(altKey)
 	, target(Q_NULLPTR)
 	, boolProperty(Q_NULLPTR)
-#ifndef USE_QUICKVIEW
 	, qAction(Q_NULLPTR)
-#endif
 {
 	setObjectName(actionId);
 	// Check the global conf for custom shortcuts.
 	QSettings* conf = StelApp::getInstance().getSettings();
 	QString cfgOpt = "shortcuts/" + actionId;
+	static const QRegularExpression spaceExp("\\s+");
 	if (conf->contains(cfgOpt)) // Check existence of shortcut to allow removing shortcuts
 	{
-		QStringList shortcuts = conf->value(cfgOpt).toString().split(QRegExp("\\s+")); // empty shortcuts allows stay primary and alternative shortcuts as they was defined
+		QStringList shortcuts = conf->value(cfgOpt).toString().split(spaceExp); // empty shortcuts allows stay primary and alternative shortcuts as they was defined
 		if (shortcuts.size() > 2)
 			qWarning() << actionId << ": does not support more than two shortcuts per action";		
 		setShortcut(shortcuts[0]);
 		if (shortcuts.size() > 1)
 			setAltShortcut(shortcuts[1]);		
 	}
-#ifndef USE_QUICKVIEW
 	QWidget* mainView = &StelMainView::getInstance();
 	qAction = new QAction(this);
 	onChanged();
 	mainView->addAction(qAction);
-	connect(qAction, SIGNAL(triggered()), this, SLOT(trigger()));
-	connect(this, SIGNAL(changed()), this, SLOT(onChanged()));
-#endif
+	connect(qAction, &QAction::triggered, this, &StelAction::trigger);
+	connect(this, &StelAction::changed, this, &StelAction::onChanged);
 }
 
-#ifndef USE_QUICKVIEW
 void StelAction::onChanged()
 {
 	qAction->setShortcuts(QList<QKeySequence>() << keySequence << altKeySequence);
 	qAction->setShortcutContext(global ? Qt::ApplicationShortcut : Qt::WidgetShortcut);
 }
-#endif
 
 void StelAction::setShortcut(const QString& key)
 {
@@ -139,7 +133,11 @@ void StelAction::connectToObject(QObject* obj, const char* slot)
 	QVariant prop = obj->property(slot);
 	if (prop.isValid()) // Connect to a bool property, use a StelProperty if possible
 	{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+		Q_ASSERT(prop.metaType() == QMetaType(QMetaType::Bool));
+#else
 		Q_ASSERT(prop.type() == QVariant::Bool);
+#endif
 
 		// Listen to the property notified signal if there is one.
 		int propIndex = obj->metaObject()->indexOfProperty(slot);
@@ -148,7 +146,7 @@ void StelAction::connectToObject(QObject* obj, const char* slot)
 		//can use a StelProperty for the connection, property name is action name
 		boolProperty = StelApp::getInstance().getStelPropertyManager()->registerProperty(objectName(),obj,slot);
 		StelPropertyBoolProxy* prox = new StelPropertyBoolProxy(boolProperty,this);
-		connect(prox,SIGNAL(propertyChanged(bool)),this,SLOT(propertyChanged(bool)));
+		connect(prox, &StelPropertyBoolProxy::propertyChanged, this, &StelAction::propertyChanged);
 
 		if(!metaProp.hasNotifySignal())
 		{
@@ -203,7 +201,7 @@ StelAction* StelActionMgr::addAction(const QString& id, const QString& groupId, 
 				     bool global)
 {
 	StelAction* action = new StelAction(id, groupId, text, shortcut, altShortcut, global);
-	connect(action,SIGNAL(toggled(bool)),this,SLOT(onStelActionToggled(bool)));
+	connect(action, &StelAction::toggled, this, &StelActionMgr::onStelActionToggled);
 	action->connectToObject(target, slot);
 	return action;
 }
@@ -227,7 +225,8 @@ StelAction* StelActionMgr::findAction(const QString& id)
 StelAction* StelActionMgr::findActionFromShortcut(const QString& shortcut)
 {
 	StelAction* ret=Q_NULLPTR;
-	for (auto* action : findChildren<StelAction*>())
+	const QList<StelAction *>actionChildren = findChildren<StelAction*>();
+	for (auto* action : actionChildren)
 	{
 		if ((action->getShortcut().toString()==shortcut) || (action->getAltShortcut().toString()==shortcut))
 			ret=action;
@@ -245,7 +244,8 @@ bool StelActionMgr::pushKey(int key, bool global)
 			      keySequence.size() > 2 ? keySequence[2] : 0,
 			      keySequence.size() > 3 ? keySequence[3] : 0);
 	bool hasPartialMatch = false;
-	for (auto* action : findChildren<StelAction*>())
+	const QList<StelAction *>actionChildren = findChildren<StelAction*>();
+	for (auto* action : actionChildren)
 	{
 		if (global && !action->global) continue;
 		QKeySequence::SequenceMatch match = action->matches(sequence);
@@ -265,7 +265,8 @@ bool StelActionMgr::pushKey(int key, bool global)
 QStringList StelActionMgr::getGroupList() const
 {
 	QStringList ret;
-	for (auto* action : findChildren<StelAction*>())
+	const QList<StelAction *>actionChildren = findChildren<StelAction*>();
+	for (auto* action : actionChildren)
 	{
 		if (!ret.contains(action->group))
 			ret.append(action->group);
@@ -276,7 +277,8 @@ QStringList StelActionMgr::getGroupList() const
 QList<StelAction*> StelActionMgr::getActionList(const QString& group) const
 {
 	QList<StelAction*> ret;
-	for (auto* action : findChildren<StelAction*>())
+	const QList<StelAction *>actionChildren = findChildren<StelAction*>();
+	for (auto* action : actionChildren)
 	{
 		if (action->group == group)
 			ret.append(action);
@@ -293,7 +295,8 @@ QStringList StelActionMgr::getShortcutsList() const
 {
 	QStringList shortcuts;
 	QString shortcut;
-	for (const auto* action : getActionList())
+	const QList<StelAction *>actionChildren = findChildren<StelAction*>();
+	for (const auto* action : actionChildren)
 	{
 		shortcut = action->getShortcut().toString();
 		if (!shortcut.isEmpty())
@@ -307,10 +310,12 @@ QStringList StelActionMgr::getShortcutsList() const
 
 void StelActionMgr::saveShortcuts()
 {
+	static const QRegularExpression spaceExp("\\s+");
 	QSettings* conf = StelApp::getInstance().getSettings();
 	conf->beginGroup("shortcuts");
 	conf->remove("");
-	for (auto* action : findChildren<StelAction*>())
+	const QList<StelAction *>actionChildren = findChildren<StelAction*>();
+	for (auto* action : actionChildren)
 	{
 		if (action->keySequence == action->defaultKeySequence &&
 		    action->altKeySequence == action->defaultAltKeySequence)
@@ -322,7 +327,7 @@ void StelActionMgr::saveShortcuts()
 			seq += " " + action->altKeySequence.toString().replace(" ", "");
 		if (action->altKeySequence.toString()=="")
 			seq += " \"\"";		
-		conf->setValue(action->objectName(), seq.replace(QRegExp("\\s+")," "));
+		conf->setValue(action->objectName(), seq.replace(spaceExp," "));
 	}
 	conf->endGroup();
 	// Apparently shortcuts was changed
@@ -331,7 +336,8 @@ void StelActionMgr::saveShortcuts()
 
 void StelActionMgr::restoreDefaultShortcuts()
 {
-	for (auto* action : findChildren<StelAction*>())
+	const QList<StelAction *>actionChildren = findChildren<StelAction*>();
+	for (auto* action : actionChildren)
 	{
 		action->keySequence = action->defaultKeySequence;
 		action->altKeySequence = action->defaultAltKeySequence;

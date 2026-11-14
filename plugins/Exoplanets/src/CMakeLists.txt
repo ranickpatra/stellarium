@@ -5,13 +5,16 @@ INCLUDE_DIRECTORIES(
      ${CMAKE_BINARY_DIR}/plugins/Exoplanets/src/gui
 )
 
-LINK_DIRECTORIES(${BUILD_DIR}/src)
+LINK_DIRECTORIES(${CMAKE_BINARY_DIR}/src)
 
 SET(Exoplanets_SRCS
      Exoplanets.hpp
      Exoplanets.cpp
      Exoplanet.hpp
      Exoplanet.cpp
+)
+IF (STELLARIUM_GUI_MODE STREQUAL "Standard")
+LIST(APPEND Exoplanets_SRCS
      gui/ExoplanetsDialog.hpp
      gui/ExoplanetsDialog.cpp
 )
@@ -19,13 +22,23 @@ SET(Exoplanets_SRCS
 SET(ExoplanetsDialog_UIS
      gui/exoplanetsDialog.ui
 )
-QT5_WRAP_UI(ExoplanetsDialog_UIS_H ${ExoplanetsDialog_UIS})
+ENDIF (STELLARIUM_GUI_MODE STREQUAL "Standard")
 
 SET(Exoplanets_RES ../resources/Exoplanets.qrc)
-QT5_ADD_RESOURCES(Exoplanets_RES_CXX ${Exoplanets_RES})
+IF (${QT_VERSION_MAJOR} EQUAL "5")
+     IF (STELLARIUM_GUI_MODE STREQUAL "Standard")
+          QT5_WRAP_UI(ExoplanetsDialog_UIS_H ${ExoplanetsDialog_UIS})
+     ENDIF()
+     QT5_ADD_RESOURCES(Exoplanets_RES_CXX ${Exoplanets_RES})
+ELSE()
+     IF (STELLARIUM_GUI_MODE STREQUAL "Standard")
+          QT_WRAP_UI(ExoplanetsDialog_UIS_H ${ExoplanetsDialog_UIS})
+     ENDIF()
+     QT_ADD_RESOURCES(Exoplanets_RES_CXX ${Exoplanets_RES})
+ENDIF()
 
 ADD_LIBRARY(Exoplanets-static STATIC ${Exoplanets_SRCS} ${Exoplanets_RES_CXX} ${ExoplanetsDialog_UIS_H})
-TARGET_LINK_LIBRARIES(Exoplanets-static Qt5::Core Qt5::Network Qt5::Widgets qcustomplot_stel)
+TARGET_LINK_LIBRARIES(Exoplanets-static Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Charts)
 SET_TARGET_PROPERTIES(Exoplanets-static PROPERTIES OUTPUT_NAME "Exoplanets")
 SET_TARGET_PROPERTIES(Exoplanets-static PROPERTIES COMPILE_FLAGS "-DQT_STATICPLUGIN")
 ADD_DEPENDENCIES(AllStaticPlugins Exoplanets-static)

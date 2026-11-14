@@ -101,7 +101,7 @@ QStringList FrenchArithmeticCalendar::getDateStrings() const
 	}
 	else
 	{
-		list << QString("%1 %2").arg(qc_("Décade", "French Revolution Calendar 'week'")).arg(RomanCalendar::romanNumber(decade)); // 4
+		list << QString("%1 %2").arg(qc_("Décade", "French Revolution Calendar 'week'"), RomanCalendar::romanNumber(decade)); // 4
 		list << dayNames.value(dInDecade, "ERROR_dayNames");               // 5
 	}
 
@@ -125,23 +125,22 @@ QString FrenchArithmeticCalendar::getFormattedDateString() const
 
 		QString dela=qc_("de la", "French Revolution Calendar: of the");
 
-		return QString("%1 %2 %3 %4 (%5) %6 %7, %8")
-				.arg(str.at(5)) // weekday
-				.arg(dela) // day
-				.arg(decadeMap.value((parts.at(2)-1)/10 + 1)) // decadeNr
-				.arg(qc_("décade", "French Revolution Calendar 'week'"))
-				.arg(str.at(3))
-				.arg(qc_("du", "French Revolution Calendar: 'of'"))
-				.arg(monthNames.value(parts.at(1))) // monthname
-				.arg(year);// year
-
+		return QString("%1 %2 %3 %4 (%5) %6 %7, %8").arg(
+				str.at(5), // weekday
+				dela, // day
+				decadeMap.value((parts.at(2)-1)/10 + 1), // decadeNr
+				qc_("décade", "French Revolution Calendar 'week'"),
+				str.at(3),
+				qc_("du", "French Revolution Calendar: 'of'"),
+				monthNames.value(parts.at(1)), // monthname
+				year);// year
 	}
 }
 
 // set date from a vector of calendar date elements sorted from the largest to the smallest.
 // Year-Month[1...13]-Day[1...30]
 // Time is not changed!
-void FrenchArithmeticCalendar::setDate(QVector<int> parts)
+void FrenchArithmeticCalendar::setDate(const QVector<int> &parts)
 {
 	//qDebug() << "FrenchArithmeticCalendar::setDate:" << parts;
 	this->parts=parts;
@@ -162,11 +161,11 @@ bool FrenchArithmeticCalendar::isLeap(int fYear)
 		&& StelUtils::imod(fYear, 4000) !=0 );
 }
 
-int FrenchArithmeticCalendar::fixedFromFrenchArithmetic(QVector<int> french)
+int FrenchArithmeticCalendar::fixedFromFrenchArithmetic(const QVector<int> &french)
 {
-	const int year=french.at(0);
-	const int month=french.at(1);
-	const int day=french.at(2);
+	const int year =french.value(0);
+	const int month=french.value(1);
+	const int day  =french.value(2);
 
 	return frenchEpoch-1+365*(year-1)
 		+StelUtils::intFloorDiv(year-1, 4)

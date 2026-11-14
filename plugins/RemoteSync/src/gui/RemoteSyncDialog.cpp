@@ -23,22 +23,22 @@
 #include "ui_remoteSyncDialog.h"
 
 #include "StelApp.hpp"
-#include "StelCore.hpp"
-#include "StelLocaleMgr.hpp"
 #include "StelModule.hpp"
 #include "StelModuleMgr.hpp"
 #include "StelPropertyMgr.hpp"
+#include "StelGui.hpp"
+#include "StelTranslator.hpp"
 
 RemoteSyncDialog::RemoteSyncDialog()
 	: StelDialog("RemoteSync")
-	, rs(Q_NULLPTR)
+	, rs(nullptr)
 {
 	ui = new Ui_remoteSyncDialog();
 }
 
 RemoteSyncDialog::~RemoteSyncDialog()
 {
-	delete ui; ui=Q_NULLPTR;
+	delete ui; ui=nullptr;
 }
 
 void RemoteSyncDialog::retranslate()
@@ -61,35 +61,35 @@ void RemoteSyncDialog::createDialogContent()
 	if (gui)
 	{
 		enableKineticScrolling(gui->getFlagUseKineticScrolling());
-		connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+		connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &RemoteSyncDialog::enableKineticScrolling);
 	}
 
 	ui->pushButtonSelectProperties->setText(QChar(0x2192));
 	ui->pushButtonDeselectProperties->setText(QChar(0x2190));
 
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &RemoteSyncDialog::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
-	connect(rs, SIGNAL(stateChanged(RemoteSync::SyncState)), this, SLOT(updateState()));
+	connect(rs, &RemoteSync::stateChanged, this, &RemoteSyncDialog::updateState);
 	updateState();
 
-	connect(rs, SIGNAL(errorOccurred(QString)), this, SLOT(printErrorMessage(QString)));
+	connect(rs, &RemoteSync::errorOccurred, this, &RemoteSyncDialog::printErrorMessage);
 
 	ui->clientServerHostEdit->setText(rs->getClientServerHost());
-	connect(ui->clientServerHostEdit, SIGNAL(textChanged(QString)), rs, SLOT(setClientServerHost(QString)));
+	connect(ui->clientServerHostEdit, &QLineEdit::textChanged, rs, &RemoteSync::setClientServerHost);
 	ui->clientServerPortSpinBox->setValue(rs->getClientServerPort());
-	connect(ui->clientServerPortSpinBox, SIGNAL(valueChanged(int)), rs, SLOT(setClientServerPort(int)));
+	connect(ui->clientServerPortSpinBox, qOverload<int>(&QSpinBox::valueChanged), rs, &RemoteSync::setClientServerPort);
 
 	ui->serverPortSpinBox->setValue(rs->getServerPort());
-	connect(ui->serverPortSpinBox, SIGNAL(valueChanged(int)), rs, SLOT(setServerPort(int)));
+	connect(ui->serverPortSpinBox, qOverload<int>(&QSpinBox::valueChanged), rs, &RemoteSync::setServerPort);
 
 	ui->comboBoxClientServerQuits->setModel(ui->comboBoxClientConnectionLost->model());
 	ui->comboBoxClientConnectionLost->setCurrentIndex(rs->getConnectionLostBehavior());
 	ui->comboBoxClientServerQuits->setCurrentIndex(rs->getQuitBehavior());
-	connect(ui->comboBoxClientConnectionLost, SIGNAL(activated(int)), this, SLOT(setConnectionLostBehavior(int)));
+	connect(ui->comboBoxClientConnectionLost, qOverload<int>(&QComboBox::activated), this, &RemoteSyncDialog::setConnectionLostBehavior);
 	connect(rs, &RemoteSync::connectionLostBehaviorChanged, ui->comboBoxClientConnectionLost, &QComboBox::setCurrentIndex);
-	connect(ui->comboBoxClientServerQuits, SIGNAL(activated(int)), this, SLOT(setQuitBehavior(int)));
+	connect(ui->comboBoxClientServerQuits, qOverload<int>(&QComboBox::activated), this, &RemoteSyncDialog::setQuitBehavior);
 	connect(rs, &RemoteSync::quitBehaviorChanged, ui->comboBoxClientServerQuits, &QComboBox::setCurrentIndex);
 
 	ui->buttonGroupSyncOptions->setId(ui->checkBoxOptionTime, SyncClient::SyncTime);
@@ -97,18 +97,21 @@ void RemoteSyncDialog::createDialogContent()
 	ui->buttonGroupSyncOptions->setId(ui->checkBoxOptionSelection, SyncClient::SyncSelection);
 	ui->buttonGroupSyncOptions->setId(ui->checkBoxOptionStelProperty, SyncClient::SyncStelProperty);
 	ui->buttonGroupSyncOptions->setId(ui->checkBoxOptionView, SyncClient::SyncView);
-	ui->buttonGroupSyncOptions->setId(ui->checkBoxOptionFov, SyncClient::SyncFov);
 	ui->buttonGroupSyncOptions->setId(ui->checkBoxExcludeGUIProps, SyncClient::SkipGUIProps);
 	updateCheckboxesFromSyncOptions();
-	connect(rs, SIGNAL(clientSyncOptionsChanged(SyncClient::SyncOptions)), this, SLOT(updateCheckboxesFromSyncOptions()));
-	connect(ui->buttonGroupSyncOptions, SIGNAL(buttonToggled(int,bool)), this, SLOT(checkboxToggled(int,bool)));
+	connect(rs, &RemoteSync::clientSyncOptionsChanged, this, &RemoteSyncDialog::updateCheckboxesFromSyncOptions);
+#if (QT_VERSION>=QT_VERSION_CHECK(5,15,0))
+	connect(ui->buttonGroupSyncOptions, &QButtonGroup::idToggled, this, &RemoteSyncDialog::checkboxToggled);
+#else
+	connect(ui->buttonGroupSyncOptions, qOverload<int,bool>(&QButtonGroup::buttonToggled), this, &RemoteSyncDialog::checkboxToggled);
+#endif
 
-	connect(ui->saveSettingsButton, SIGNAL(clicked()), rs, SLOT(saveSettings()));	
-	connect(ui->restoreDefaultsButton, SIGNAL(clicked()), this, SLOT(restoreDefaults()));
+	connect(ui->saveSettingsButton, &QPushButton::clicked, rs, &RemoteSync::saveSettings);
+	connect(ui->restoreDefaultsButton, &QPushButton::clicked, this, &RemoteSyncDialog::restoreDefaults);
 
 	populateExclusionLists();
-	connect(ui->pushButtonSelectProperties, SIGNAL(clicked()), this, SLOT(addPropertiesForExclusion()));
-	connect(ui->pushButtonDeselectProperties, SIGNAL(clicked()), this, SLOT(removePropertiesForExclusion()));
+	connect(ui->pushButtonSelectProperties, &QPushButton::clicked, this, &RemoteSyncDialog::addPropertiesForExclusion);
+	connect(ui->pushButtonDeselectProperties, &QPushButton::clicked, this, &RemoteSyncDialog::removePropertiesForExclusion);
 
 	setAboutHtml();
 }
@@ -124,7 +127,7 @@ void RemoteSyncDialog::restoreDefaults()
 		qCDebug(remoteSync) << "restore defaults is canceled...";
 }
 
-void RemoteSyncDialog::printErrorMessage(const QString error)
+void RemoteSyncDialog::printErrorMessage(const QString &error)
 {
 	ui->statusLabel->setText(QString(q_("ERROR: %1")).arg(error));
 	ui->statusLabel->setStyleSheet("color: Red;");
@@ -135,8 +138,8 @@ void RemoteSyncDialog::updateState()
 	RemoteSync::SyncState state = rs->getState();
 
 	//disconnect the click signals from whatever is connected
-	disconnect(ui->serverButton, SIGNAL(clicked(bool)), Q_NULLPTR, Q_NULLPTR);
-	disconnect(ui->clientButton, SIGNAL(clicked(bool)), Q_NULLPTR, Q_NULLPTR);
+	disconnect(ui->serverButton, &QPushButton::clicked, nullptr, nullptr);
+	disconnect(ui->clientButton, &QPushButton::clicked, nullptr, nullptr);
 	ui->statusLabel->setStyleSheet("");
 
 	if(state == RemoteSync::IDLE)
@@ -144,12 +147,12 @@ void RemoteSyncDialog::updateState()
 		ui->serverGroupBox->setEnabled(true);
 		ui->serverControls->setEnabled(true);
 		ui->serverButton->setText(q_("Start server"));
-		connect(ui->serverButton, SIGNAL(clicked(bool)), rs, SLOT(startServer()));
+		connect(ui->serverButton, &QPushButton::clicked, rs, &RemoteSync::startServer);
 
 		ui->clientGroupBox->setEnabled(true);
 		ui->clientControls->setEnabled(true);
 		ui->clientButton->setText(q_("Connect to server"));
-		connect(ui->clientButton, SIGNAL(clicked(bool)), rs, SLOT(connectToServer()));
+		connect(ui->clientButton, &QPushButton::clicked, rs, &RemoteSync::connectToServer);
 
 		ui->statusLabel->setText(q_("Not running"));
 		updateIPlabel(false);
@@ -158,7 +161,7 @@ void RemoteSyncDialog::updateState()
 	{
 		ui->serverButton->setText(q_("Stop server"));
 		ui->serverControls->setEnabled(false);
-		connect(ui->serverButton, SIGNAL(clicked(bool)), rs, SLOT(stopServer()));
+		connect(ui->serverButton, &QPushButton::clicked, rs, &RemoteSync::stopServer);
 		ui->clientGroupBox->setEnabled(false);
 
 		ui->statusLabel->setText(QString(q_("Running as server on port %1")).arg(rs->getServerPort()));
@@ -166,7 +169,7 @@ void RemoteSyncDialog::updateState()
 	}
 	else
 	{
-		connect(ui->clientButton, SIGNAL(clicked(bool)), rs, SLOT(disconnectFromServer()));
+		connect(ui->clientButton, &QPushButton::clicked, rs, &RemoteSync::disconnectFromServer);
 
 		ui->serverGroupBox->setEnabled(false);
 		ui->clientGroupBox->setEnabled(true);
@@ -200,11 +203,8 @@ void RemoteSyncDialog::updateState()
 
 void RemoteSyncDialog::setAboutHtml(void)
 {
-	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
-
 	QString html = "<html><head></head><body>";
-	html += "<h2>" + q_("Remote Sync Plug-in") + "</h2><table width=\"90%\">";
+	html += "<h2>" + q_("Remote Sync Plug-in") + "</h2><table class='layout' width=\"90%\">";
 	html += "<tr width=\"30%\"><td><strong>" + q_("Version") + ":</strong></td><td>" + REMOTESYNC_PLUGIN_VERSION + "</td></tr>";
 	html += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + REMOTESYNC_PLUGIN_LICENSE + "</td></tr>";
 	html += "<tr><td rowspan=2><strong>" + q_("Authors") + ":</strong></td><td>Florian Schaukowitsch</td></tr>";
@@ -222,7 +222,7 @@ void RemoteSyncDialog::setAboutHtml(void)
 	html += "</body></html>";
 
 	StelGui* gui = dynamic_cast<StelGui*>(StelApp::getInstance().getGui());
-	if(gui!=Q_NULLPTR)
+	if(gui!=nullptr)
 	{
 		QString htmlStyleSheet(gui->getStelStyle().htmlStyleSheet);
 		ui->aboutTextBrowser->document()->setDefaultStyleSheet(htmlStyleSheet);
@@ -237,7 +237,7 @@ void RemoteSyncDialog::updateIPlabel(bool running)
 		QString localHostName=QHostInfo::localHostName();
 		QHostInfo hostInfo = QHostInfo::fromName(localHostName);
 		QString ipString("");
-		for (auto a : hostInfo.addresses())
+		for (auto &a : hostInfo.addresses())
 		{
 			if ((a.protocol() == QAbstractSocket::IPv4Protocol) && a != QHostAddress(QHostAddress::LocalHost))
 			{
@@ -288,7 +288,7 @@ void RemoteSyncDialog::populateExclusionLists()
 	excluded.removeOne(""); // Special case
 	ui->listWidgetSelectedProperties->addItems(excluded);
 	QStringList allProps=StelApp::getInstance().getStelPropertyManager()->getPropertyList();
-	for (auto str : excluded)
+	for (auto &str : excluded)
 	{
 		allProps.removeOne(str);
 	}	
@@ -301,7 +301,7 @@ void RemoteSyncDialog::populateExclusionLists()
 void RemoteSyncDialog::addPropertiesForExclusion()
 {
 	QStringList strings;
-	if (ui->listWidgetAllProperties->selectedItems().length()>0)
+	if (!ui->listWidgetAllProperties->selectedItems().isEmpty())
 	{
 		for (const auto* item : ui->listWidgetAllProperties->selectedItems())
 		{
@@ -324,7 +324,7 @@ void RemoteSyncDialog::addPropertiesForExclusion()
 void RemoteSyncDialog::removePropertiesForExclusion()
 {
 	QStringList strings;
-	if (ui->listWidgetSelectedProperties->selectedItems().length()>0)
+	if (!ui->listWidgetSelectedProperties->selectedItems().isEmpty())
 	{
 		for (const auto* item : ui->listWidgetSelectedProperties->selectedItems())
 		{
@@ -334,7 +334,7 @@ void RemoteSyncDialog::removePropertiesForExclusion()
 
 		QStringList currentFilter=rs->getStelPropFilter();
 		// Remove the selected from currentFilter...
-		for (auto str : strings)
+		for (auto &str : strings)
 		{
 			currentFilter.removeOne(str);
 		}

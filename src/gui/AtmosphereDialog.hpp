@@ -18,14 +18,11 @@
 */
 
 
-// GZ: Methods copied largely from AddRemoveLandscapesDialog
-
 #ifndef ATMOSPHEREDIALOG_HPP
 #define ATMOSPHEREDIALOG_HPP
 
 #include <QObject>
 #include "StelDialog.hpp"
-#include "RefractionExtinction.hpp"
 
 class Ui_atmosphereDialogForm;
 
@@ -35,22 +32,31 @@ class AtmosphereDialog : public StelDialog
 
 public:
 	AtmosphereDialog();
-	virtual ~AtmosphereDialog() Q_DECL_OVERRIDE;
+	~AtmosphereDialog() override;
 
 public slots:
-	virtual void retranslate() Q_DECL_OVERRIDE;
+	void retranslate() override;
 
 protected:
         //! Initialize the dialog widgets and connect the signals/slots.
-	virtual void createDialogContent() Q_DECL_OVERRIDE;
+	void createDialogContent() override;
         Ui_atmosphereDialogForm *ui;
 
 private:
-        Refraction *refraction;
-        Extinction *extinction;
+	bool hasValidModelPath() const;
+	void onModelChoiceChanged(const QString& model);
+	void onPathToModelEditingFinished();
+	void onPathToModelChanged();
+	void updatePathToModelStyle();
+	void onErrorStateChanged(bool error);
+	void browsePathToModel();
+	void setCurrentValues();
+	void clearStatus();
+	bool eventFilter(QObject* object, QEvent* event) override;
 
 private slots:
 	void setStandardAtmosphere();
+	void setTfromK(double k);
 };
 
 #endif // ATMOSPHEREDIALOG_HPP

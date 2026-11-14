@@ -20,11 +20,12 @@
 #ifndef STELTEXTURE_HPP
 #define STELTEXTURE_HPP
 
-#include "StelTextureTypes.hpp"
-#include "StelOpenGL.hpp"
-
+#include <QOpenGLFunctions>
+#include <QSharedPointer>
+#include <QPointer>
 #include <QObject>
 #include <QImage>
+#include <QLoggingCategory>
 
 class QFile;
 class StelTextureMgr;
@@ -35,6 +36,8 @@ template <class T> class QFuture;
 #define GL_CLAMP_TO_EDGE 0x812F
 #endif
 
+Q_DECLARE_LOGGING_CATEGORY(Tex)
+
 //! @class StelTexture
 //! Base texture class. For creating an instance, use StelTextureMgr::createTexture() and StelTextureMgr::createTextureThread()
 //! @sa StelTextureSP
@@ -43,22 +46,46 @@ class StelTexture: public QObject, public QEnableSharedFromThis<StelTexture>
 	Q_OBJECT
 
 public:
-	//! Contains the parameters defining how a texture is created.
-	struct StelTextureParams
+	enum class ColorSpace
 	{
-		StelTextureParams(bool qgenerateMipmaps=false, GLint afiltering=GL_LINEAR, GLint awrapMode=GL_CLAMP_TO_EDGE, bool qfilterMipmaps=false) :
-				generateMipmaps(qgenerateMipmaps),
-				filterMipmaps(qfilterMipmaps),
-				filtering(afiltering),
-				wrapMode(awrapMode){;}
+		sRGB,
+		LinearSRGB,
+	};
+	//! Contains the parameters defining how a texture is created.
+	struct Params
+	{
+		constexpr Params() {} // disable aggregate initialization
+
+		constexpr Params& enableMipmapGen() { generateMipmaps = true; return *this; }
+		constexpr Params& enableMipmapFilter() { filterMipmaps = true; return *this; }
+		constexpr Params& setFiltering(GLint newFiltering) { filtering = newFiltering; return *this; }
+		constexpr Params& setWrapMode(GLint newWrapMode) { wrapMode = newWrapMode; return *this; }
+		constexpr Params& setDecimation(int newDecim) { decimation = newDecim; return *this; }
+		constexpr Params& disallowHttp2() { allowHttp2 = false; return *this; }
+		constexpr Params& useLinearSRGB() { colorSpace = ColorSpace::LinearSRGB; return *this; }
+
 		//! Define if mipmaps must be created.
-		bool generateMipmaps;
-		//! If true, mipmapped textures are filtered with GL_LINEAR_MIPMAP_LINEAR instead of GL_LINEAR_MIPMAP_NEAREST (i.e. enabling "trilinear" filtering)
-		bool filterMipmaps;
+		bool generateMipmaps = false;
+		//! If true, mipmapped textures are filtered with GL_LINEAR_MIPMAP_LINEAR instead
+		//! of GL_LINEAR_MIPMAP_NEAREST (i.e. enabling "trilinear" filtering)
+		bool filterMipmaps = false;
 		//! Define the scaling filter to use. Must be one of GL_NEAREST or GL_LINEAR
-		GLint filtering;
+		GLint filtering = GL_LINEAR;
 		//! Define the wrapping mode to use. Must be one of GL_CLAMP_TO_EDGE, or GL_REPEAT.
-		GLint wrapMode;
+		GLint wrapMode = GL_CLAMP_TO_EDGE;
+		//! Allow a reduction of the size of the texture image (useful for very limited hardware)
+		//! The image size will be divided by this factor (e.g. 2, 3, 4, ...)
+		int decimation = 1;
+		//! If set to ColorSpace::sRGB, the texture samples will automatically convert
+		//! the values sampled to linear color. This is intended only for high graphics mode,
+		//! it must be set to LinearSRGB in legacy mode.
+		ColorSpace colorSpace = ColorSpace::sRGB;
+		//! Allow the use of HTTP/2 when loading this texture. If set to \p false, HTTP/1.1 will
+		//! be used by Qt, limiting maximum concurrency of downloads to 6 and avoiding HTTP 420
+		//! error when we abort many downloads at once. The error is due to CVE-2023-44487, but
+		//! our use case is when a HiPS is downloading many tiles that then go out of the
+		//! viewport before the download is completed.
+		bool allowHttp2 = true;
 	};
 
 	//! Destructor
@@ -66,7 +93,7 @@ public:
 
 	//! Bind the texture so that it can be used for openGL drawing (calls glBindTexture).
 	//! If the texture is lazyly loaded, this starts the loading and return false immediately.
-	//! @return true if the binding successfully occured, false if the texture is not yet loaded.
+	//! @return true if the binding successfully occurred, false if the texture is not yet loaded.
 	bool bind(uint slot=0);
 
 	//! Releases the currently bound texture without testing if it is currently bound,
@@ -80,7 +107,7 @@ public:
 	//! Return whether the texture can be binded, i.e. it is fully loaded
 	bool canBind() const {return id!=0;}
 
-	//! Return the width and heigth of the texture in pixels
+	//! Return the width and height of the texture in pixels
 	bool getDimensions(int &width, int &height);
 
 	//! Returns whether the texture has an alpha channel (GL_RGBA or GL_LUMINANCE_ALPHA format)
@@ -88,7 +115,7 @@ public:
 	bool hasAlphaChannel() const { return alphaChannel ; }
 
 	//! Get the error message which caused the texture loading to fail
-	//! @return the human friendly error message or empty string if no errors occured
+	//! @return the human friendly error message or empty string if no errors occurred
 	const QString& getErrorMessage() const {return errorMessage;}
 
 	//! Returns true if a loading error occurred
@@ -106,9 +133,9 @@ public:
 
 signals:
 	//! Emitted when the texture is ready to be bind(), i.e. when downloaded, imageLoading and	glLoading is over
-	//! or when an error occured and the texture will never be available
+	//! or when an error occurred and the texture will never be available
 	//! In case of error, you can query what the problem was by calling getErrorMessage()
-	//! @param error is equal to true if an error occured while loading the texture
+	//! @param error is equal to true if an error occurred while loading the texture
 	void loadingProcessFinished(bool error);
 
 private slots:
@@ -121,27 +148,31 @@ private:
 	//! data and information to create the OpenGL texture.
 	struct GLData
 	{
-		GLData() : width(0), height(0), format(0), type(0) {}
 		QString loaderError; //! can contain an error message if data is null
 		QByteArray data;
-		int width;
-		int height;
-		GLint format;
-		GLint type;
+		int width = 0;
+		int height = 0;
+		GLint format = 0;
+		GLint type = 0;
 	};
 	//! Those static methods can be called by QtConcurrent::run
-	static GLData imageToGLData(const QImage &image);
-	static GLData loadFromPath(const QString &path);
-	static GLData loadFromData(const QByteArray& data);
+	//! @param decimateBy: On limited platforms we must be able to reduce texture sizes. Divide
+	//! texture size in both dimensions by this number.
+	static GLData imageToGLData(const QImage    &image, const int decimateBy);
+	static GLData loadFromPath( const QString    &path, const int decimateBy);
+	static GLData loadFromData( const QByteArray &data, const QString& path, const int decimateBy);
 
 	//! Private constructor
-	StelTexture(StelTextureMgr* mgr);
+	StelTexture();
 
 	//! Wrap an existing GL texture with this object
 	void wrapGLTexture(GLuint texId);
 
-	//! Convert a QImage into opengl compatible format.
-	static QByteArray convertToGLFormat(const QImage& image, GLint* format, GLint* type);
+	//! Convert a QImage into OpenGL compatible format.
+	//! The texture will be at most as large as GL_MAX_TEXTURE_SIZE
+	//! @param decimate divide image size by this factor: reduce texture sizes to conserve
+	//! texture memory (required on e.g. Raspberry Pi 3).
+	static QByteArray convertToGLFormat(QImage image, GLint& format, GLint& type, int decimate, int& width, int& height);
 
 	//! This method should be called if the texture loading failed for any reasons
 	//! @param errorMessage the human friendly error message
@@ -149,7 +180,7 @@ private:
 
 	//! Load the texture already in the RAM to the openGL memory
 	//! This function uses openGL routines and must be called in the main thread
-	//! @return false if an error occured
+	//! @return false if an error occurred
 	bool glLoad(const QImage& image);
 	//! Same as glLoad(QImage), but with an image already in OpenGl format
 	bool glLoad(const GLData& data);
@@ -158,41 +189,41 @@ private:
 	//! Returns true if the data was loaded, false if not yet ready.
 	bool load();
 
-	template <typename T, typename Param1, typename Arg1>
-	void startAsyncLoader(T (*functionPointer)(Param1), const Arg1 &arg1);
+	template <typename T, typename...FuncParams, typename...Args>
+	void startAsyncLoader(T (*functionPointer)(FuncParams...), Args&&...args);
 
 	//! The parent texture manager
-	StelTextureMgr* textureMgr;
+	static QPointer<StelTextureMgr> textureMgr;
 
-	QOpenGLFunctions* gl;
-	StelTextureParams loadParams;
+	QOpenGLFunctions* gl = nullptr;
+	Params loadParams;
 
 	//! Used to handle the connection for remote textures.
-	QNetworkReply *networkReply;
+	QNetworkReply *networkReply = nullptr;
 
 	//! The loader object
-	QFuture<GLData>* loader;
+	QFuture<GLData>* loader = nullptr;
 
 	//! The URL where to download the file
 	QString fullPath;
 
 	//! True when something when wrong in the loading process
-	bool errorOccured;
+	bool errorOccured = false;
 
 	//! True if this texture contains an alpha channel
-	bool alphaChannel;
+	bool alphaChannel = false;
 
 	//! Human friendly error message if loading failed
 	QString errorMessage;
 
 	//! OpenGL id
-	GLuint id;
+	GLuint id = 0;
 
-	GLsizei width;	//! Texture image width
-	GLsizei height;	//! Texture image height
+	GLsizei width = -1;	//! Texture image width
+	GLsizei height = -1;	//! Texture image height
 
 	//! Size in GL memory
-	unsigned int glSize;
+	unsigned int glSize = 0;
 };
 
 

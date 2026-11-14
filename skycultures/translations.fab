@@ -291,6 +291,9 @@ _("Pandora","minor planet")
 # TRANSLATORS: Asteroid (74) Galatea
 # TRANSLATORS: https://en.wikipedia.org/wiki/74_Galatea
 _("Galatea","minor planet")
+# TRANSLATORS: Asteroid (85) Io
+# TRANSLATORS: https://en.wikipedia.org/wiki/85_Io
+_("Io","minor planet")
 # TRANSLATORS: Asteroid (106) Dione
 # TRANSLATORS: https://en.wikipedia.org/wiki/106_Dione
 _("Dione","minor planet")
@@ -300,12 +303,18 @@ _("Ophelia","minor planet")
 # TRANSLATORS: Asteroid (218) Bianca
 # TRANSLATORS: https://en.wikipedia.org/wiki/218_Bianca
 _("Bianca","minor planet")
+# TRANSLATORS: Asteroid (491) Carina
+# TRANSLATORS: https://en.wikipedia.org/wiki/491_Carina
+_("Carina","minor planet")
 # TRANSLATORS: Asteroid (593) Titania
 # TRANSLATORS: https://en.wikipedia.org/wiki/593_Titania
 _("Titania","minor planet")
 # TRANSLATORS: Asteroid (666) Desdemona
 # TRANSLATORS: https://en.wikipedia.org/wiki/666_Desdemona
 _("Desdemona","minor planet")
+# TRANSLATORS: Asteroid (849) Ara
+# TRANSLATORS: https://en.wikipedia.org/wiki/849_Ara
+_("Ara","minor planet")
 # TRANSLATORS: Asteroid (1162) Larissa
 # TRANSLATORS: https://en.wikipedia.org/wiki/1162_Larissa
 _("Larissa","minor planet")
@@ -478,6 +487,9 @@ _("Davida","minor planet")
 # TRANSLATORS: Asteroid (532) Herculina
 # TRANSLATORS: https://en.wikipedia.org/wiki/532_Herculina
 _("Herculina","minor planet")
+# TRANSLATORS: Asteroid (555) Norma
+# TRANSLATORS: https://en.wikipedia.org/wiki/555_Norma
+_("Norma","minor planet")
 # TRANSLATORS: Asteroid (588) Achilles
 # TRANSLATORS: https://en.wikipedia.org/wiki/588_Achilles
 _("Achilles","minor planet")
@@ -772,12 +784,18 @@ _("Duende","minor planet")
 # TRANSLATORS: Asteroid (385571) Otrera [2004 UP10]
 # TRANSLATORS: https://en.wikipedia.org/wiki/385571_Otrera
 _("Otrera","minor planet")
+# TRANSLATORS: Asteroid (469219) Kamo`oalewa [2016 HO3]
+_("Kamo`oalewa","asteroid")
+# TRANSLATORS: Asteroid (225088) Gonggong [2007 OR10]
+_("Gonggong","scattered disc object")
+# TRANSLATORS: Asteroid (229762) G!kun||'homdima [2007 UK126]
+_("G!kun||'homdima","scattered disc object")
 
 #
 # Comets
 #
 # TRANSLATORS: Proper name of comet C/1680 V1
-_("Great Comet of 1680 (C/1680 V1)","comet")
+_("Great Comet of 1680","comet")
 
 #################################################
 #                 EXTRA DATA                    #
@@ -807,41 +825,47 @@ _("Nova", "Nova template")
 # Pulsars from Pulsars plugin
 #
 # TRANSLATORS: Proper name of pulsar PSR J0534+2200 (Source: SIMBAD)
-_("Crab Pulsar")
+_("Crab Pulsar","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J0633+1746 (Source: SIMBAD; https://en.wikipedia.org/wiki/Geminga)
-_("Geminga Pulsar")
+_("Geminga Pulsar","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J0659+1414 (Source: SIMBAD)
-_("Monogem Pulsar")
+_("Monogem Pulsar","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J0834-4511 or PSR J0835-4510 (Source: SIMBAD; https://en.wikipedia.org/wiki/Vela_Pulsar)
-_("Vela Pulsar")
+_("Vela Pulsar","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J1300+1240 (Source: SIMBAD; https://en.wikipedia.org/wiki/PSR_B1257%2B12)
-_("Lich")
+_("Lich","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J1412+7922 (Source: SIMBAD)
-_("Calvera")
+_("Calvera","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J1513-5908 (Source: SIMBAD)
-_("Cir Pulsar")
+_("Cir Pulsar","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J1809-2332 (Source: SIMBAD)
-_("Tasmanian Devil Nebula")
+_("Tasmanian Devil Nebula","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J1915+1606 (Source: SIMBAD; https://en.wikipedia.org/wiki/Hulse–Taylor_binary)
-_("Hulse-Taylor Pulsar")
+_("Hulse-Taylor Pulsar","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J1959+2048 (Source: SIMBAD)
-_("Black Widow")
+_("Black Widow","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J2021+3651 (Source: SIMBAD)
-_("Dragonfly Nebula")
+_("Dragonfly Nebula","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J2225+6535 (Source: SIMBAD)
-_("Guitar Nebula")
+_("Guitar Nebula","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J1921+2153 (Source: SIMBAD; LGM is abbreviation for "little green men"; https://en.wikipedia.org/wiki/PSR_B1919%2B21)
-_("LGM-1")
+_("LGM-1","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J1418-6058 (Source: https://www.nasa.gov/mission_pages/GLAST/news/pulsar_passel.html)
-_("Rabbit")
+_("Rabbit","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J1826-1256 (Source: https://www.nasa.gov/mission_pages/GLAST/news/pulsar_passel.html)
-_("Eel")
+_("Eel","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J1420-6048 (Source: http://www.physics.mcgill.ca/~pulsar/pwncat_notes.html)
-_("Kookaburra")
+_("Kookaburra","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J1747-2958 (Source: http://www.physics.mcgill.ca/~pulsar/pwncat_notes.html)
-_("Mouse")
+_("Mouse","pulsar")
 # TRANSLATORS: Proper name of pulsar PSR J1801-2451 (Source: http://www.physics.mcgill.ca/~pulsar/pwncat_notes.html)
-_("Duck")
+_("Duck","pulsar")
+# TRANSLATORS: Proper name of pulsar PSR J1811-1925 (Source: https://groups.io/g/deepskyhunters/message/327)
+_("Turtle","pulsar")
+# TRANSLATORS: Proper name of pulsar PSR J1826-1334 (Source: https://groups.io/g/deepskyhunters/message/327)
+_("Turkey","pulsar")
+# TRANSLATORS: Proper name of pulsar PSR J1048-5832 (Source: https://groups.io/g/deepskyhunters/message/327)
+_("Puppy","pulsar")
 #
 # Exoplanet systems from Exoplanets plugin
 #
@@ -1085,7 +1109,7 @@ _("Yvaga")
 # TRANSLATORS: https://iau.org/news/pressreleases/detail/iau1912/
 _("Bosona")
 # TRANSLATORS: Proper name of exoplanet HD 206610 b
-# TRANSLATORS: Naron is one of the names given to the Neretva river in Herzegovina (and partly in Croatia) in antiquity orginating with the Celts who called it Nera Etwa which means the Flowing Divinity.
+# TRANSLATORS: Naron is one of the names given to the Neretva river in Herzegovina (and partly in Croatia) in antiquity originating with the Celts who called it Nera Etwa which means the Flowing Divinity.
 # TRANSLATORS: https://iau.org/news/pressreleases/detail/iau1912/
 _("Naron")
 # TRANSLATORS: Proper name of star HD 23079
@@ -1777,7 +1801,7 @@ _("Mönch")
 # TRANSLATORS: https://iau.org/news/pressreleases/detail/iau1912/
 _("Eiger")
 # TRANSLATORS: Proper name of star HD 218566
-# TRANSLATORS: Ebla was one of the earliest kingdoms in Syria, and served as a prominent region in the 2nd and 3rd millenia B.C.
+# TRANSLATORS: Ebla was one of the earliest kingdoms in Syria, and served as a prominent region in the 2nd and 3rd millennia B.C.
 # TRANSLATORS: https://iau.org/news/pressreleases/detail/iau1912/
 _("Ebla")
 # TRANSLATORS: Proper name of exoplanet HD 218566 b

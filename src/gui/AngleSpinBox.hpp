@@ -48,6 +48,7 @@ public:
 		HMSSymbols,		//!< Hours, minutes and seconds, e.g. 12h 4' 6s"
 		DecimalDeg		//!< Decimal degrees, e.g. 180.06888
 	};
+	Q_ENUM(DisplayFormat);
 
 	//! @enum PrefixType
 	//! Determines how positive and negative values are indicated.
@@ -59,13 +60,14 @@ public:
 		Latitude,		//!< positive values have 'N' prefix, negative values have 'S' prefix.
  		Unknown
 	};
-	
+	Q_ENUM(PrefixType);
+
 	AngleSpinBox(QWidget* parent=Q_NULLPTR, DisplayFormat format=DMSSymbols, PrefixType prefix=Normal);
-	~AngleSpinBox() Q_DECL_OVERRIDE;
+	~AngleSpinBox() override;
 
 	// QAbstractSpinBox virtual members
-	virtual void stepBy(int steps) Q_DECL_OVERRIDE;
-	virtual QValidator::State validate(QString& input, int& pos) const Q_DECL_OVERRIDE;
+	void stepBy(int steps) override;
+	QValidator::State validate(QString& input, int& pos) const override;
 
 	//! Get the angle held in the AngleSpinBox
 	//! @return the angle in radians
@@ -115,10 +117,12 @@ public:
 	//! @return the current maximum value
 	//! @param isDegrees true if the maximum value is required in degrees, else max is returned as radians.
 	double getMaximum(const bool isDegrees) const { return maxRad * (isDegrees ? 180.0/M_PI : 1.0); }
+
+	QSize minimumSizeHint() const override;
 	
 public slots:
 	//! Set the value to default 0 angle.
-	virtual void clear() Q_DECL_OVERRIDE;
+	void clear() override;
 	
 	//! Set the value of the spin box in radians.
 	//! @param radians the value to set, in radians.
@@ -135,7 +139,7 @@ signals:
 	void valueChangedRad(double);
 
 protected:
-	virtual StepEnabled stepEnabled() const Q_DECL_OVERRIDE;
+	StepEnabled stepEnabled() const override;
 
 private slots:
 	//! Updates radAngle (internal representation of the angle) and calls formatText

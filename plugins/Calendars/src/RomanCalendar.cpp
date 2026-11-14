@@ -35,7 +35,7 @@ void RomanCalendar::retranslate()
 	monthGen={
 		{ 1, qc_("Ianuarii"   , "Roman month name (genitive)")},
 		{ 2, qc_("Februarii"  , "Roman month name (genitive)")},
-		{ 3, qc_("Martii"     , "Roman month name (genitive)")},
+		{ 3, qc_("Martiae"    , "Roman month name (genitive)")}, // only used with fem.pl. Kalendae, Nonae, Idus
 		{ 4, qc_("Aprilis"    , "Roman month name (genitive)")},
 		{ 5, qc_("Maii"       , "Roman month name (genitive)")},
 		{ 6, qc_("Iunii"      , "Roman month name (genitive)")},
@@ -63,8 +63,8 @@ void RomanCalendar::setJD(double JD)
 QStringList RomanCalendar::getDateStrings() const
 {
 	QStringList events={qc_("Kalendae", "Roman calendar term"),
-			    qc_("Nones",    "Roman calendar term"),
-			    qc_("Ides",     "Roman calendar term")};
+			    qc_("Nonae",    "Roman calendar term"),
+			    qc_("Idus",     "Roman calendar term")};
 	QStringList eventsShort={qc_("Kal.", "Roman calendar term"),
 				 qc_("Non.", "Roman calendar term"),
 				 qc_("Id." , "Roman calendar term")};
@@ -96,20 +96,19 @@ QStringList RomanCalendar::getDateStrings() const
 QString RomanCalendar::getFormattedDateString() const
 {
 	QStringList str=getDateStrings();
-
-	QString day;
-	return QString("%1 %2 %3 %4 %5")
-			.arg(str.at(4))
-			.arg(str.at(3))
-			.arg(str.at(2))
-			.arg(str.at(0))
-			.arg(qc_("A.U.C.", "ab urbe condita"));// year AUC
+	const int year=str.at(0).toInt();
+	return QString("%1 %2 %3 %4 %5").arg(
+			str.at(4),
+			str.at(3),
+			str.at(2),
+			year>0 ? romanNumber(year) : str.at(0),
+			qc_("A.U.C.", "ab urbe condita"));// year AUC
 }
 
 // set date from a vector of calendar date elements sorted from the largest to the smallest.
 // JulianYear-Month[1...12]-event-count-leap
 // Time is not changed!
-void RomanCalendar::setDate(QVector<int> parts)
+void RomanCalendar::setDate(const QVector<int> &parts)
 {
 	this->parts=parts;
 
@@ -146,13 +145,13 @@ int RomanCalendar::julianYearFromAUC(int aucYear)
 		return aucYear + yearRomeFounded;
 }
 
-int RomanCalendar::fixedFromRoman(QVector<int> roman)
+int RomanCalendar::fixedFromRoman(const QVector<int> &roman)
 {
-	const int year=roman.at(0);
-	const int month=roman.at(1);
-	const events event=static_cast<events>(roman.at(2));
-	const int count=roman.at(3);
-	const int leap=roman.at(4);
+	const int year =roman.value(0);
+	const int month=roman.value(1);
+	const events event=static_cast<events>(roman.value(2));
+	const int count=roman.value(3);
+	const int leap =roman.value(4);
 
 	int rd = 0; // Suppress warning
 	switch (event)
@@ -206,12 +205,86 @@ int RomanCalendar::aucYearFromJulian(int julianYear)
 		return julianYear - yearRomeFounded;
 }
 
-// return a Roman number (1...19)
+// return a Roman number (within int range)
 QString RomanCalendar::romanNumber(const int num)
 {
-	QStringList roman={"",   "I",  "II",  "III",  "IV",  "V",  "VI",  "VII",  "VIII",  "IX",
-			   "X", "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX"};
-	if (num>19) return QString::number(num); // "bogus";
-	if (num<1) return QString::number(num);  // "bogus";
-	return roman.at(num);
+	if (num==0)
+		return ("N");
+	QString res;
+	if (num < 0 )
+		res.append("-");
+	int n=abs(num);
+	if ( n>=5000 )
+	{
+		int mils=n/1000;
+		res.append(romanNumber(mils));
+		res.append("&middot;M ");
+		n-=mils*1000;
+	}
+	while ( n>=1000 )
+	{
+		res.append("M");
+		n -= 1000;
+	}
+	if ( n>=900 )
+	{
+		res.append("CM");
+		n -= 900;
+	}
+	if ( n>=500 )
+	{
+		res.append("D");
+		n -= 500;
+	}
+	if ( n>=400 )
+	{
+		res.append("CD");
+		n -= 400;
+	}
+	while ( n>=100 )
+	{
+		res.append("C");
+		n -= 100;
+	}
+	if ( n>=90 )
+	{
+		res.append("XC");
+		n -= 90;
+	}
+	if ( n>=50 )
+	{
+		res.append("L");
+		n -= 50;
+	}
+	if ( n>=40 )
+	{
+		res.append("XL");
+		n -= 40;
+	}
+	while (n >= 10)
+	{
+		res.append("X");
+		n -= 10;
+	}
+	if ( n==9 )
+	{
+		res.append("IX");
+		n -= 9;
+	}
+	if ( n>=5 )
+	{
+		res.append("V");
+		n -= 5;
+	}
+	if ( n==4 )
+	{
+		res.append("IV");
+		n -= 4;
+	}
+	while ( n>0 )
+	{
+		res.append("I");
+		n -= 1;
+	}
+	return res;
 }

@@ -24,19 +24,22 @@
 #include "StelGui.hpp"
 #include "StelCore.hpp"
 #include "StelMainView.hpp"
+#include "StelModuleMgr.hpp"
+#include "StelProgressController.hpp"
 #include <QGraphicsView>
 #include <QDebug>
 #include <QTimeLine>
 #include <QGraphicsSceneMouseEvent>
 #include <QSettings>
 #include <QTextDocument>
+#include <QRegularExpression>
+#include <QGraphicsDropShadowEffect>
 
-InfoPanel::InfoPanel(QGraphicsItem* parent) : QGraphicsTextItem("", parent),
-	infoPixmap(Q_NULLPTR)
+InfoPanel::InfoPanel(QGraphicsItem* parent) : QGraphicsTextItem("", parent)
 {
 	QSettings* conf = StelApp::getInstance().getSettings();
 	Q_ASSERT(conf);
-	QString objectInfo = conf->value("gui/selected_object_info", "all").toString();
+	QString objectInfo = conf->value("gui/selected_object_info", "default").toString();
 	if (objectInfo == "all")
 	{
 		infoTextFilters = StelObject::InfoStringGroup(StelObject::AllInfo);
@@ -51,120 +54,39 @@ InfoPanel::InfoPanel(QGraphicsItem* parent) : QGraphicsTextItem("", parent),
 	}
 	else if (objectInfo == "custom")
 	{
-		infoTextFilters = StelObject::InfoStringGroup(StelObject::None);
-		
-		conf->beginGroup("custom_selected_info");
-		if (conf->value("flag_show_name", false).toBool())
-			infoTextFilters |= StelObject::Name;
-		if (conf->value("flag_show_catalognumber", false).toBool())
-			infoTextFilters |= StelObject::CatalogNumber;
-		if (conf->value("flag_show_magnitude", false).toBool())
-			infoTextFilters |= StelObject::Magnitude;
-		if (conf->value("flag_show_absolutemagnitude", false).toBool())
-			infoTextFilters |= StelObject::AbsoluteMagnitude;
-		if (conf->value("flag_show_radecj2000", false).toBool())
-			infoTextFilters |= StelObject::RaDecJ2000;
-		if (conf->value("flag_show_radecofdate", false).toBool())
-			infoTextFilters |= StelObject::RaDecOfDate;
-		if (conf->value("flag_show_hourangle", false).toBool())
-			infoTextFilters |= StelObject::HourAngle;
-		if (conf->value("flag_show_altaz", false).toBool())
-			infoTextFilters |= StelObject::AltAzi;
-		if (conf->value("flag_show_elongation", false).toBool())
-			infoTextFilters |= StelObject::Elongation;
-		if (conf->value("flag_show_distance", false).toBool())
-			infoTextFilters |= StelObject::Distance;
-		if (conf->value("flag_show_velocity", false).toBool())
-			infoTextFilters |= StelObject::Velocity;
-		if (conf->value("flag_show_propermotion", false).toBool())
-			infoTextFilters |= StelObject::ProperMotion;
-		if (conf->value("flag_show_size", false).toBool())
-			infoTextFilters |= StelObject::Size;
-		if (conf->value("flag_show_extra", false).toBool())
-			infoTextFilters |= StelObject::Extra;
-		if (conf->value("flag_show_type", false).toBool())
-			infoTextFilters |= StelObject::ObjectType;
-		if (conf->value("flag_show_galcoord", false).toBool())
-			infoTextFilters |= StelObject::GalacticCoord;
-		if (conf->value("flag_show_supergalcoord", false).toBool())
-			infoTextFilters |= StelObject::SupergalacticCoord;
-		if (conf->value("flag_show_othercoord", false).toBool())
-			infoTextFilters |= StelObject::OtherCoord;
-		if (conf->value("flag_show_eclcoordofdate", false).toBool())
-			infoTextFilters |= StelObject::EclipticCoordOfDate;
-		if (conf->value("flag_show_eclcoordj2000", false).toBool())
-			infoTextFilters |= StelObject::EclipticCoordJ2000;
-		if (conf->value("flag_show_constellation", false).toBool())
-			infoTextFilters |= StelObject::IAUConstellation;
-		if (conf->value("flag_show_sidereal_time", false).toBool())
-			infoTextFilters |= StelObject::SiderealTime;
-		if (conf->value("flag_show_rts_time", false).toBool())
-			infoTextFilters |= StelObject::RTSTime;
-		conf->endGroup();
+		infoTextFilters = GETSTELMODULE(StelObjectMgr)->getCustomInfoStrings();
 	}
 	else
 	{
-		qWarning() << "config.ini option gui/selected_object_info is invalid, using \"all\"";
-		infoTextFilters = StelObject::InfoStringGroup(StelObject::AllInfo);
+		if (objectInfo != "default")
+			qWarning() << "config.ini option gui/selected_object_info is invalid, using \"default\"";
+		infoTextFilters = StelObject::InfoStringGroup(StelObject::DefaultInfo);
 	}
-	if (qApp->property("text_texture")==true) // CLI option -t given?
-		infoPixmap=new QGraphicsPixmapItem(this);
+
+	QFont font=QGuiApplication::font();
+	font.setPixelSize(StelApp::getInstance().getScreenFontSize());
+	setFont(font);
+	connect(&StelApp::getInstance(), &StelApp::fontChanged, this, &QGraphicsTextItem::setFont);
+	connect(&StelApp::getInstance(), &StelApp::screenFontSizeChanged, this, [this](){
+		QFont font=QGuiApplication::font();
+		font.setPixelSize(StelApp::getInstance().getScreenFontSize());
+		setFont(font);
+	});
+
+	if (conf->value("gui/flag_info_shadow", false).toBool())
+	{
+		// Add a drop shadow for better visibility
+		QGraphicsDropShadowEffect *effect = new QGraphicsDropShadowEffect(this);
+		effect->setBlurRadius(qBound(0, conf->value("gui/info_shadow_radius", 6).toInt(), 64));
+		effect->setColor(QColor(0, 0, 0, qBound(0, conf->value("gui/info_shadow_opacity", 127).toInt(), 255)));
+		effect->setOffset(0,0);
+		setGraphicsEffect(effect);
+	}
+	opacity=qBound(-100, conf->value("gui/info_panel_opacity", 0).toInt(), 100);
 }
 
 InfoPanel::~InfoPanel()
 {
-	if (infoPixmap)
-	{
-		delete infoPixmap;
-		infoPixmap=Q_NULLPTR;
-	}
-}
-
-// A hackish fix for broken OpenGL font situations like RasPi2 VC4 as of 2016-03-26.
-// strList is the text-only representation of InfoPanel.toPlainText(), pre-split into a stringlist.
-// It is assumed: The h2 element (1-2 lines) has been broken into 1-2 lines and a line "ENDHEAD", rest follows line-by-line.
-// The header lines are shown in bold large font, the rest in normal size.
-// There is no bold or other font mark-up, but that should be acceptable.
-QPixmap getInfoPixmap(const QStringList& strList, QFont font, QColor color)
-{
-	// Render the text str into a QPixmap.
-	// search longest string.
-	int maxLenIdx=0; int maxLen=0;
-	for (int i = 0; i < strList.size(); ++i)
-	{
-		if (strList.at(i).length() > maxLen)
-		{
-			maxLen=strList.at(i).length();
-			maxLenIdx=i;
-		}
-	}
-	QFont titleFont(font);
-	titleFont.setBold(true);
-	titleFont.setPixelSize(font.pixelSize()+7);
-
-	QRect strRect = QFontMetrics(titleFont).boundingRect(strList.at(maxLenIdx));
-	int w = strRect.width()+1+static_cast<int>(0.02f*strRect.width());
-	int h = strRect.height()*strList.count()+8;
-
-	QPixmap strPixmap(w, h);
-	strPixmap.fill(Qt::transparent);
-	QPainter painter(&strPixmap);
-	font.setStyleStrategy(QFont::NoAntialias); // else: font problems on RasPi20160326
-	//painter.setRenderHints(QPainter::TextAntialiasing);
-	painter.setPen(color);
-	painter.setFont(titleFont);
-	int txtOffset=0; // to separate heading from rest of text.
-	for (int i = 0; i < strList.size(); ++i)
-	{
-		if (strList.at(i).startsWith( "ENDHEAD"))
-		{
-			painter.setFont(font);
-			txtOffset=8;
-		}
-		else
-			painter.drawText(-strRect.x()+1, -strRect.y()+i*(painter.font().pixelSize()+2)+txtOffset, strList.at(i));
-	}
-	return strPixmap;
 }
 
 void InfoPanel::setTextFromObjects(const QList<StelObjectP>& selected)
@@ -173,69 +95,94 @@ void InfoPanel::setTextFromObjects(const QList<StelObjectP>& selected)
 	{
 		if (!document()->isEmpty())
 			document()->clear();
-		if (qApp->property("text_texture")==true) // CLI option -t given?
-			infoPixmap->setVisible(false);
 	}
 	else
 	{
+		static const QString css(
+			"h2 {"
+			      "color: %1;"
+			      "background-color: rgba(0,0,0,%2%);"
+			    "} "
+			"p {"
+			      "color: %1;"
+			      "background-color: rgba(0,0,0,%2%);"
+			    "} "
+			".info-string {"
+			      "color: %1;"
+			      "background-color: rgba(0,0,0,%2%);"
+			    "} "
+			"table.info-string {"
+			      "margin: 0em 0em 0em -0.125em;"
+			      "border-spacing: 0px;"
+			      "border: 0px;"
+			      "color: %1;"
+			      "background-color: rgba(0,0,0,%2%);"
+			    "} ");
+
 		// just print details of the first item for now
 		// Must set lastRTS for currently selected object here...
 		StelCore *core=StelApp::getInstance().getCore();
-		QString s = selected[0]->getInfoString(core, infoTextFilters);
-		selected[0]->removeExtraInfoStrings(StelObject::AllInfo);
-		QFont font;
-		font.setPixelSize(StelApp::getInstance().getScreenFontSize());
-		setFont(font);
-		setHtml(s);
-		if (qApp->property("text_texture")==true) // CLI option -t given?
+
+		Vec3f color = selected[0]->getInfoColor();
+		QString opacity=QString::number(this->opacity);
+		if (StelApp::getInstance().getFlagOverwriteInfoColor())
 		{
-			// Extract color from HTML.
-			QRegExp colorRegExp("<font color=(#[0-9a-f]{6,6})>");
-			int colorInt=colorRegExp.indexIn(s);
-			QString colorStr;
-
-			if (colorInt>-1)
-				colorStr=colorRegExp.cap(1);
-			else
-				colorStr="#ffffff";
-
-			QColor infoColor(colorStr);
-			// inject a marker word in the infostring to mark end of header.
-			// In case no header exists, put it after the color tag (first closing brace).
-			int endHead=s.indexOf("</h2>")+5;
-			if (endHead==4)
-				endHead=s.indexOf(">")+1;
-			s.insert(endHead, QString("ENDHEAD<br/>"));
-			setHtml(s);
-			infoPixmap->setPixmap(getInfoPixmap(getSelectedText().split("\n"), this->font(), infoColor));
-			// setting visible=false would hide also the child QGraphicsPixmapItem...
-			setHtml("");
-			infoPixmap->setVisible(true);
+			// make info text more readable...
+			color = StelApp::getInstance().getOverwriteInfoColor();
 		}
+		if (core->isBrightDaylight() && !StelApp::getInstance().getVisionModeNight())
+		{
+			// make info text more readable when atmosphere enabled at daylight.
+			color   = StelApp::getInstance().getDaylightInfoColor();
+			opacity = "0";
+		}
+		// A negative opacity forces dark background even for daylight scenes.
+		if (this->opacity<0)
+		{
+			color   = StelApp::getInstance().getOverwriteInfoColor();
+			opacity = QString::number(qAbs(this->opacity));
+		}
+
+		infoHTML = selected[0]->getInfoString(core, infoTextFilters);
+		selected[0]->removeExtraInfoStrings(StelObject::AllInfo);
+
+		document()->setDefaultStyleSheet(css.arg(color.toHtmlColor(), opacity));
+
+		// We need the span to set the background opacity.
+		setHtml(QString("<div class='info-string'><span style='background:rgba(0, 0, 0, %1%);'>").arg(opacity)
+			+ infoHTML
+			+ "</span></div>");
 	}
 }
 
-const QString InfoPanel::getSelectedText(void) const
+QString InfoPanel::getSelectedText() const
 {
 	return toPlainText();
 }
 
+QString InfoPanel::getSelectedHTML() const
+{
+	return infoHTML;
+}
+
 SkyGui::SkyGui(QGraphicsItem * parent)
 	: QGraphicsWidget(parent)
-	, lastButtonbarWidth(0)
-	, btHorizAutoHide(Q_NULLPTR)
-	, btVertAutoHide(Q_NULLPTR)
-	, autoHidebts(Q_NULLPTR)
-	, autoHideHorizontalButtonBar(true)
-	, autoHideVerticalButtonBar(true)
-	, stelGui(Q_NULLPTR)
+	, lastBottomBarWidth(0)
+	, btHorizAutoHide(nullptr)
+	, btVertAutoHide(nullptr)
+	, autoHidebts(nullptr)
+	, autoHideBottomBar(true)
+	, autoHideLeftBar(true)
+	, toolbarAtTop(false)
+	, toolbarAtRight(false)
+	, stelGui(nullptr)
 {
 	setObjectName("StelSkyGui");
 
 	// Construct the Windows buttons bar
-	winBar = new LeftStelBar(this);
+	leftBar = new LeftStelBar(this);
 	// Construct the bottom buttons bar
-	buttonBar = new BottomStelBar(this,
+	bottomBar = new BottomStelBar(this,
 				      QPixmap(":/graphicGui/btbgLeft.png"),
 				      QPixmap(":/graphicGui/btbgRight.png"),
 				      QPixmap(":/graphicGui/btbgMiddle.png"),
@@ -244,19 +191,19 @@ SkyGui::SkyGui(QGraphicsItem * parent)
 
 	// Used to display some progress bar in the lower right corner, e.g. when loading a file
 	progressBarMgr = new StelProgressBarMgr(this);
-	connect(&StelApp::getInstance(), SIGNAL(progressBarAdded(const StelProgressController*)), progressBarMgr, SLOT(addProgressBar(const StelProgressController*)));
-	connect(&StelApp::getInstance(), SIGNAL(progressBarRemoved(const StelProgressController*)), progressBarMgr, SLOT(removeProgressBar(const StelProgressController*)));
+	connect(&StelApp::getInstance(), &StelApp::progressBarAdded,   progressBarMgr, &StelProgressBarMgr::addProgressBar);
+	connect(&StelApp::getInstance(), &StelApp::progressBarRemoved, progressBarMgr, &StelProgressBarMgr::removeProgressBar);
 
 	// The path drawn around the button bars
-	buttonBarPath = new StelBarsPath(this);
+	buttonBarsFrame = new StelBarsFrame(this);
 
 	animLeftBarTimeLine = new QTimeLine(200, this);
-	animLeftBarTimeLine->setCurveShape(QTimeLine::EaseInOutCurve);
-	connect(animLeftBarTimeLine, SIGNAL(valueChanged(qreal)), this, SLOT(updateBarsPos()));
+	animLeftBarTimeLine->setEasingCurve(QEasingCurve(QEasingCurve::InOutSine));
+	connect(animLeftBarTimeLine, &QTimeLine::valueChanged, this, &SkyGui::updateBarsPos);
 
 	animBottomBarTimeLine = new QTimeLine(200, this);
-	animBottomBarTimeLine->setCurveShape(QTimeLine::EaseInOutCurve);
-	connect(animBottomBarTimeLine, SIGNAL(valueChanged(qreal)), this, SLOT(updateBarsPos()));
+	animBottomBarTimeLine->setEasingCurve(QEasingCurve(QEasingCurve::InOutSine));
+	connect(animBottomBarTimeLine, &QTimeLine::valueChanged, this, &SkyGui::updateBarsPos);
 
 	setAcceptHoverEvents(true);
 }
@@ -265,7 +212,7 @@ void SkyGui::init(StelGui* astelGui)
 {
 	stelGui = astelGui;
 
-	// Create the 2 auto hide buttons in the bottom left corner
+	// Create the 2 auto hide buttons placed in the active toolbar corner
 	autoHidebts = new CornerButtons(this);
 	QPixmap pxmapOn = QPixmap(":/graphicGui/miscHorAutoHide-on.png");
 	QPixmap pxmapOff = QPixmap(":/graphicGui/miscHorAutoHide-off.png");
@@ -274,29 +221,53 @@ void SkyGui::init(StelGui* astelGui)
 	pxmapOff = QPixmap(":/graphicGui/miscVertAutoHide-off.png");
 	btVertAutoHide = new StelButton(autoHidebts, pxmapOn, pxmapOff, QPixmap(), "actionAutoHideVerticalButtonBar", true);
 
-	btHorizAutoHide->setPos(1,btVertAutoHide->pixmap().height()-btHorizAutoHide->pixmap().height()+1);
+	btHorizAutoHide->setPos(1,btVertAutoHide->getButtonPixmapHeight()-btHorizAutoHide->getButtonPixmapHeight()+1);
 	btVertAutoHide->setPos(0,0);
 	btVertAutoHide->setZValue(1000);
 
-	infoPanel->setPos(8,8);
+	updateInfoPanelPos();
 
 	// If auto hide is off, show the relevant toolbars
-	if (!autoHideHorizontalButtonBar)
+	if (!autoHideBottomBar)
 	{
 		animBottomBarTimeLine->setDirection(QTimeLine::Forward);
 		animBottomBarTimeLine->start();
 	}
 
-	if (!autoHideVerticalButtonBar)
+	if (!autoHideLeftBar)
 	{
 		animLeftBarTimeLine->setDirection(QTimeLine::Forward);
 		animLeftBarTimeLine->start();
 	}
 
-	buttonBarPath->setZValue(-0.1);
+	buttonBarsFrame->setZValue(-0.1);
 	updateBarsPos();
-	connect(&StelApp::getInstance(), SIGNAL(colorSchemeChanged(const QString&)), this, SLOT(setStelStyle(const QString&)));
-	connect(buttonBar, SIGNAL(sizeChanged()), this, SLOT(updateBarsPos()));
+	connect(&StelApp::getInstance(), &StelApp::colorSchemeChanged, this, &SkyGui::setStelStyle);
+	connect(&StelApp::getInstance(), &StelApp::screenFontSizeChanged, this, &SkyGui::updateInfoPanelPos);
+	connect(bottomBar, &BottomStelBar::sizeChanged, this, &SkyGui::updateBarsPos);
+	// The first draw of path may show overshooting date line if there are too few buttons in the bottom bar.
+	// Correct this by a redraw 1/2s after startup
+	QTimer::singleShot(500, this, [=](){buttonBarsFrame->updatePath(bottomBar, leftBar, toolbarAtTop, toolbarAtRight);});
+}
+
+void SkyGui::updateInfoPanelPos()
+{
+	const auto factor = StelApp::getInstance().screenFontSizeRatio();
+	const qreal margin = 8 * factor;
+	qreal infoX = margin;
+	if (toolbarAtTop && !toolbarAtRight)
+	{
+		const qreal barRight = leftBar->pos().x() + leftBar->boundingRectNoHelpLabel().width();
+		infoX = qMax(margin, barRight + margin);
+	}
+	qreal infoY = margin;
+	if (toolbarAtTop)
+	{
+		const qreal barBottom = bottomBar->pos().y() + bottomBar->boundingRectNoHelpLabel().height();
+		infoY = qMax(margin, barBottom + margin);
+	}
+
+	infoPanel->setPos(infoX, infoY);
 }
 
 void SkyGui::resizeEvent(QGraphicsSceneResizeEvent* event)
@@ -307,33 +278,96 @@ void SkyGui::resizeEvent(QGraphicsSceneResizeEvent* event)
 
 void SkyGui::hoverMoveEvent(QGraphicsSceneHoverEvent* event)
 {
+	const int ww = getSkyGuiWidth();
 	const int hh = getSkyGuiHeight();
 
-	double x = event->pos().x();
-	double y = event->pos().y();
-	double maxX = winBar->boundingRect().width()+2.*buttonBarPath->getRoundSize();
-	double maxY = hh-(winBar->boundingRect().height()+buttonBar->boundingRect().height()+2.*buttonBarPath->getRoundSize());
-	double minX = 0;
+	const double x = event->pos().x();
+	const double y = event->pos().y();
+	const double rs = buttonBarsFrame->getRoundSize();
+	const double leftBarW = leftBar->boundingRect().width();
+	const double leftBarH = leftBar->boundingRect().height();
+	const double bottomBarW = bottomBar->boundingRect().width();
+	const double bottomBarH = bottomBar->boundingRect().height();
 
-	if (x<=maxX && y>=maxY && animLeftBarTimeLine->state()==QTimeLine::NotRunning && winBar->pos().x()<minX)
+	// vertical bar hover trigger
+	bool inLeftBarZone, outOfLeftBarZone;
+	if (toolbarAtRight)
+	{
+		const double edgeX = ww - leftBarW - 2.*rs;
+		if (toolbarAtTop)
+		{
+			inLeftBarZone    = (x >= edgeX) && (y <= leftBarH + bottomBarH + 2.*rs);
+			outOfLeftBarZone = (x < edgeX - 30) || (y > leftBarH + bottomBarH + 2.*rs + 30);
+		}
+		else
+		{
+			inLeftBarZone    = (x >= edgeX) && (y >= hh - leftBarH - bottomBarH - 2.*rs);
+			outOfLeftBarZone = (x < edgeX - 30) || (y < hh - leftBarH - bottomBarH - 2.*rs - 30);
+		}
+	}
+	else
+	{
+		const double edgeX = leftBarW + 2.*rs;
+		if (toolbarAtTop)
+		{
+			inLeftBarZone    = (x <= edgeX) && (y <= leftBarH + bottomBarH + 2.*rs);
+			outOfLeftBarZone = (x > edgeX + 30) || (y > leftBarH + bottomBarH + 2.*rs + 30);
+		}
+		else
+		{
+			inLeftBarZone    = (x <= edgeX) && (y >= hh - leftBarH - bottomBarH - 2.*rs);
+			outOfLeftBarZone = (x > edgeX + 30) || (y < hh - leftBarH - bottomBarH - 2.*rs - 30);
+		}
+	}
+
+	if (inLeftBarZone && animLeftBarTimeLine->state()==QTimeLine::NotRunning && animLeftBarTimeLine->currentValue()<1.)
 	{
 		animLeftBarTimeLine->setDirection(QTimeLine::Forward);
 		animLeftBarTimeLine->start();
 	}
-	if (autoHideVerticalButtonBar && (x>maxX+30 || y<maxY-30) && animLeftBarTimeLine->state()==QTimeLine::NotRunning && winBar->pos().x()>=minX)
+	if (autoHideLeftBar && outOfLeftBarZone && animLeftBarTimeLine->state()==QTimeLine::NotRunning && animLeftBarTimeLine->currentValue()>=0.9999999)
 	{
 		animLeftBarTimeLine->setDirection(QTimeLine::Backward);
 		animLeftBarTimeLine->start();
 	}
 
-	maxX = winBar->boundingRect().width()+buttonBar->boundingRect().width()+2.*buttonBarPath->getRoundSize();
-	maxY = hh-buttonBar->boundingRect().height()+2.*buttonBarPath->getRoundSize();
-	if (x<=maxX && y>=maxY && animBottomBarTimeLine->state()==QTimeLine::NotRunning && animBottomBarTimeLine->currentValue()<1.)
+	// horizontal bar hover trigger
+	bool inBottomBarZone, outOfBottomBarZone;
+	if (toolbarAtRight)
+	{
+		const double edgeX = ww - leftBarW - bottomBarW - 2.*rs;
+		if (toolbarAtTop)
+		{
+			inBottomBarZone    = (x >= edgeX) && (y <= bottomBarH + 2.*rs);
+			outOfBottomBarZone = (x < edgeX - 30) || (y > bottomBarH + 2.*rs + 30);
+		}
+		else
+		{
+			inBottomBarZone    = (x >= edgeX) && (y >= hh - bottomBarH + 2.*rs);
+			outOfBottomBarZone = (x < edgeX - 30) || (y < hh - bottomBarH + 2.*rs - 30);
+		}
+	}
+	else
+	{
+		const double edgeX = leftBarW + bottomBarW + 2.*rs;
+		if (toolbarAtTop)
+		{
+			inBottomBarZone    = (x <= edgeX) && (y <= bottomBarH + 2.*rs);
+			outOfBottomBarZone = (x > edgeX + 30) || (y > bottomBarH + 2.*rs + 30);
+		}
+		else
+		{
+			inBottomBarZone    = (x <= edgeX) && (y >= hh - bottomBarH + 2.*rs);
+			outOfBottomBarZone = (x > edgeX + 30) || (y < hh - bottomBarH + 2.*rs - 30);
+		}
+	}
+
+	if (inBottomBarZone && animBottomBarTimeLine->state()==QTimeLine::NotRunning && animBottomBarTimeLine->currentValue()<1.)
 	{
 		animBottomBarTimeLine->setDirection(QTimeLine::Forward);
 		animBottomBarTimeLine->start();
 	}
-	if (autoHideHorizontalButtonBar && (x>maxX+30 || y<maxY-30) && animBottomBarTimeLine->state()==QTimeLine::NotRunning && animBottomBarTimeLine->currentValue()>=0.9999999)
+	if (autoHideBottomBar && outOfBottomBarZone && animBottomBarTimeLine->state()==QTimeLine::NotRunning && animBottomBarTimeLine->currentValue()>=0.9999999)
 	{
 		animBottomBarTimeLine->setDirection(QTimeLine::Backward);
 		animBottomBarTimeLine->start();
@@ -361,76 +395,161 @@ int SkyGui::getSkyGuiHeight() const
 
 qreal SkyGui::getBottomBarHeight() const
 {
-	return buttonBar->boundingRect().height();
+	return bottomBar->boundingRect().height();
 }
 
 qreal SkyGui::getLeftBarWidth() const
 {
-	return winBar->boundingRect().width();
+	return leftBar->boundingRect().width();
+}
+
+QRectF SkyGui::getBottomBarRect() const
+{
+	return bottomBar->boundingRectNoHelpLabel().translated(bottomBar->pos());
+}
+
+QRectF SkyGui::getLeftBarRect() const
+{
+	return leftBar->boundingRectNoHelpLabel().translated(leftBar->pos());
 }
 
 //! Update the position of the button bars in the main window
 void SkyGui::updateBarsPos()
 {
-	const int ww = getSkyGuiWidth();
-	const int hh = getSkyGuiHeight();
+	// auto-hide buttons are created in init(), so return if called before that
+	if (!autoHidebts) return;
+
+	const int ww = getSkyGuiWidth();  // actually: window width
+	const int hh = getSkyGuiHeight(); // actually: window height
 	bool updatePath = false;
 
-	// Use a position cache to avoid useless redraw triggered by the position set if the bars don't move
-	double rangeX = winBar->boundingRectNoHelpLabel().width()+2.*buttonBarPath->getRoundSize()+1.;
-	const qreal newWinBarX = buttonBarPath->getRoundSize()-(1.-animLeftBarTimeLine->currentValue())*rangeX-0.5;
-	const qreal newWinBarY = hh-winBar->boundingRectNoHelpLabel().height()-buttonBar->boundingRectNoHelpLabel().height()-20;
-	if (winBar->pos().x()!=newWinBarX || winBar->pos().y()!=newWinBarY)
+	// Update the layout of the horizontal bar (text above or below buttons)
+	bottomBar->setBarAtTop(toolbarAtTop);
+	leftBar->setBarAtRight(toolbarAtRight);
+	leftBar->setBarAtTop(toolbarAtTop);
+
+	const qreal leftBarW   = leftBar->boundingRectNoHelpLabel().width();
+	const qreal leftBarH   = leftBar->boundingRectNoHelpLabel().height();
+	const qreal bottomBarH = bottomBar->boundingRectNoHelpLabel().height();
+	const qreal rs         = buttonBarsFrame->getRoundSize();
+
+	// vertical bar position
+	const double rangeX = leftBarW + 2. * rs + 1.;
+	qreal newLeftBarX, newLeftBarY;
+
+	const double hiddenOffsetX = (1. - animLeftBarTimeLine->currentValue()) * rangeX;
+	if (toolbarAtRight)
 	{
-		winBar->setPos(qRound(newWinBarX), qRound(newWinBarY));
+		newLeftBarX = ww - leftBarW - rs + hiddenOffsetX + 0.5;
+	}
+	else
+	{
+		newLeftBarX = rs - hiddenOffsetX - 0.5;
+	}
+
+	if (toolbarAtTop)
+	{
+		newLeftBarY = bottomBarH + 20;
+	}
+	else
+	{
+		newLeftBarY = hh - leftBarH - bottomBarH - 20;
+	}
+
+	if (!qFuzzyCompare(leftBar->pos().x(), newLeftBarX) || !qFuzzyCompare(leftBar->pos().y(), newLeftBarY))
+	{
+		leftBar->setPos(qRound(newLeftBarX), qRound(newLeftBarY));
 		updatePath = true;
 	}
 
-	double rangeY = buttonBar->boundingRectNoHelpLabel().height()+0.5-7.-buttonBarPath->getRoundSize();
-	const qreal newButtonBarX = winBar->boundingRectNoHelpLabel().right()+buttonBarPath->getRoundSize();
-	const qreal newButtonBarY = hh-buttonBar->boundingRectNoHelpLabel().height()-buttonBarPath->getRoundSize()+0.5+(1.-animBottomBarTimeLine->currentValue())*rangeY;
-	if (buttonBar->pos().x()!=newButtonBarX || buttonBar->pos().y()!=newButtonBarY)
+	// horizontal bar position
+	const double rangeY = bottomBar->getButtonsBoundingRect().height() + 1.5 + bottomBar->getGap();
+	qreal newBottomBarX, newBottomBarY;
+
+	const double hiddenOffsetY = (1. - animBottomBarTimeLine->currentValue()) * rangeY;
+	if (toolbarAtRight)
 	{
-		buttonBar->setPos(qRound(newButtonBarX), qRound(newButtonBarY));
+		newBottomBarX = ww - bottomBar->boundingRectNoHelpLabel().width() - leftBarW - rs;
+	}
+	else
+	{
+		newBottomBarX = leftBarW + rs;
+	}
+
+	if (toolbarAtTop)
+	{
+		newBottomBarY = rs - bottomBar->getGap() - 0.5 - hiddenOffsetY;
+	}
+	else
+	{
+		newBottomBarY = hh - bottomBar->boundingRectNoHelpLabel().height() + bottomBar->getGap() - rs + 0.5 + hiddenOffsetY;
+	}
+
+	if (!qFuzzyCompare(bottomBar->pos().x(), newBottomBarX) || !qFuzzyCompare(bottomBar->pos().y(), newBottomBarY))
+	{
+		bottomBar->setPos(qRound(newBottomBarX), qRound(newBottomBarY));
 		updatePath = true;
 	}
 
-	if (lastButtonbarWidth != buttonBar->boundingRectNoHelpLabel().width())
+	if (lastBottomBarWidth != static_cast<int>(bottomBar->boundingRectNoHelpLabel().width()))
 	{
+		lastBottomBarWidth = static_cast<int>(bottomBar->boundingRectNoHelpLabel().width());
 		updatePath = true;
-		lastButtonbarWidth = static_cast<int>(buttonBar->boundingRectNoHelpLabel().width());
 	}
 
 	if (updatePath)
-		buttonBarPath->updatePath(buttonBar, winBar);
+		buttonBarsFrame->updatePath(bottomBar, leftBar, toolbarAtTop, toolbarAtRight);
 
 	const qreal newProgressBarX = ww-progressBarMgr->boundingRect().width()-20;
 	const qreal newProgressBarY = hh-progressBarMgr->boundingRect().height()+7;	
 	progressBarMgr->setPos(newProgressBarX, newProgressBarY);
-	progressBarMgr->setZValue(400);	
+	progressBarMgr->setZValue(400);
+
+	// Update position of the auto-hide buttons.
+	const int vW = btVertAutoHide->getButtonPixmapWidth();
+	const int vH = btVertAutoHide->getButtonPixmapHeight();
+	const int hW = btHorizAutoHide->getButtonPixmapWidth();
+	const int hH = btHorizAutoHide->getButtonPixmapHeight();
+
+	// Mirror the button pixmaps to keep the angled edge facing the correct corner.
+	const QTransform t = QTransform::fromScale(toolbarAtRight ? -1. : 1., toolbarAtTop ? -1. : 1.);
+	btVertAutoHide->setTransform(t);
+	btHorizAutoHide->setTransform(t);
+
+	// Desired content origin in autoHidebts coords (before flip-transform offset is applied).
+	const int vDesX = toolbarAtRight ? (hW - 1) : 0;
+	const int hDesX = toolbarAtRight ? (vW - 2) : 1;
+	const int hDesY = toolbarAtTop ? 0 : (vH - hH + 1);
 
 	// Update position of the auto-hide buttons
-	autoHidebts->setPos(0, hh-autoHidebts->childrenBoundingRect().height()+1);
+	btVertAutoHide->setPos(vDesX + (toolbarAtRight ? vW : 0), toolbarAtTop ? vH : 0);
+	btHorizAutoHide->setPos(hDesX + (toolbarAtRight ? hW : 0), hDesY + (toolbarAtTop ? hH : 0));
+
+	// Position the autoHidebts widget so its content touches the active screen corner.
+	autoHidebts->setPos(toolbarAtRight ? (ww - autoHidebts->childrenBoundingRect().right()) : 0,
+	                    toolbarAtTop ? 0 : (hh - autoHidebts->childrenBoundingRect().bottom() + 1));
+
 	double opacity = qMax(animLeftBarTimeLine->currentValue(), animBottomBarTimeLine->currentValue());
-	autoHidebts->setOpacity(opacity < 0.01 ? 0.01 : opacity);	// Work around a qt bug
+	autoHidebts->setOpacity(qMax(0.01, opacity));	// Work around a qt bug
 
 	// Update the screen as soon as possible.
+	updateInfoPanelPos();
 	StelMainView::getInstance().thereWasAnEvent();
 }
 
 void SkyGui::setStelStyle(const QString& style)
 {
-	Q_UNUSED(style);
-	buttonBarPath->setPen(QColor::fromRgbF(0.7,0.7,0.7,0.5));
-	buttonBarPath->setBrush(QColor::fromRgbF(0.15, 0.16, 0.19, 0.2));
-	buttonBar->setColor(QColor::fromRgbF(0.9, 0.91, 0.95, 0.9));
-	winBar->setColor(QColor::fromRgbF(0.9, 0.91, 0.95, 0.9));
+	Q_UNUSED(style)
+	buttonBarsFrame->setPen(QColor::fromRgbF(0.7,0.7,0.7,0.5));
+	buttonBarsFrame->setBrush(QColor::fromRgbF(0.15, 0.16, 0.19, 0.2));
+	bottomBar->setColor(QColor::fromRgbF(0.9, 0.91, 0.95, 0.9));
+	leftBar->setColor(QColor::fromRgbF(0.9, 0.91, 0.95, 0.9));
 }
 
 // Add a new progress bar in the lower right corner of the screen.
 void SkyGui::addProgressBar(StelProgressController* p)
 {
-	return progressBarMgr->addProgressBar(p);
+	progressBarMgr->addProgressBar(p);
 }
 
 void SkyGui::paint(QPainter*, const QStyleOptionGraphicsItem*, QWidget*)

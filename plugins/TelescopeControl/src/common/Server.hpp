@@ -2,7 +2,7 @@
 The stellarium telescope library helps building
 telescope server programs, that can communicate with stellarium
 by means of the stellarium TCP telescope protocol.
-It also contains smaple server classes (dummy, Meade LX200).
+It also contains sample server classes (dummy, Meade LX200).
 
 Author and Copyright of this file and of the stellarium telescope library:
 Johannes Gajdosik, 2006
@@ -26,7 +26,6 @@ Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
 #define SERVER_HPP
 
 #include <list>
-using namespace std;
 
 class Socket;
 
@@ -46,7 +45,9 @@ class Server
 {
 public:
 	Server(void) {}
-	Server(int port);
+	Server(int port, int slot = 0);
+	//! Telescope slot associated with this server, or zero for a standalone server.
+	int getLogSlot() const { return logSlot; }
 	virtual ~Server(void) {}
 	virtual void step(long long int timeout_micros);
 	
@@ -66,12 +67,13 @@ protected:
 	friend class Listener;
 	
 private:
+	const int logSlot = 0;
 	  // called by Connection:
 	virtual void gotoReceived(unsigned int ra_int, int dec_int) = 0;
 	virtual void syncReceived(unsigned int ra_int, int dec_int) = 0;
 	friend class Connection;
 	
-	class SocketList : public list<Socket*>
+	class SocketList : public std::list<Socket*>
 	{
 		public:
 		~SocketList(void) { clear(); }

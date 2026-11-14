@@ -20,11 +20,9 @@
 #ifndef ONLINEQUERIES_HPP
 #define ONLINEQUERIES_HPP
 
-#include "StelGui.hpp"
 #include "StelModule.hpp"
 #include "HipOnlineQuery.hpp"
 
-#include <QFont>
 #include <QString>
 
 class QPixmap;
@@ -34,6 +32,11 @@ class OnlineQueriesDialog;
 /*! @defgroup onlineQueries Online Queries Plug-in
 @{
 The %Online Queries plugin provides online lookup to retrieve additional data from selected web services.
+
+The results are presented in a QWebEngine view on platforms which support this. Unfortunately on some platforms
+the module seems to be available but fails to initialize properly. A manual entry in the config file can be used
+to actively disable the QWebEngineView based content box and open the URL in the system webbrowser.
+If none is configured, Qt's own error messages will be visible in stderr.
 
 <b>Configuration</b>
 
@@ -54,13 +57,10 @@ class OnlineQueries : public StelModule
 
 public:
 	OnlineQueries();
-	virtual ~OnlineQueries();
+	virtual ~OnlineQueries() ;
 
-	virtual void init();
-	virtual void deinit();
-	virtual void update(double) {;}
-	virtual void draw(StelCore *core){Q_UNUSED(core)}
-	virtual bool configureGui(bool show);
+	void init() override;
+	bool configureGui(bool show) override;
 
 signals:
 	void flagEnabledChanged(bool b);
@@ -77,13 +77,15 @@ public slots:
 	void queryWikipedia();    //!< Connect from a button that triggers information query
 	void queryAAVSO();        //!< Connect from a button that triggers information query
 	void queryGCVS();         //!< Connect from a button that triggers information query
-	void queryAncientSkies(); //!< Connect from a button that triggers information query
+	// The Ancient-Skies.org website did not resurrect as planned in 2022. In 2025, ASE is coming.
+	void queryASE();          //!< Connect from a button that triggers information query
 	void queryCustomSite1();  //!< Connect from a button that triggers information query
 	void queryCustomSite2();  //!< Connect from a button that triggers information query
 	void queryCustomSite3();  //!< Connect from a button that triggers information query
 	QString getCustomUrl1() const { return customUrl1;}
 	QString getCustomUrl2() const { return customUrl2;}
 	QString getCustomUrl3() const { return customUrl3;}
+	bool webEngineDisabled() const { return disableWebView;}
 
 private slots:
 	//! Set up the plugin with default values.  This means clearing out the OnlineQueries section in the
@@ -98,19 +100,23 @@ private slots:
 	void onAavsoHipQueryStatusChanged(); //!< To be connected
 
 private:
-	//! The actual query worker: build name or HIP number from currently selected object, and present result in dialog or external browser
-	void query(QString url, bool useHip, bool useBrowser);
+	//! The actual query worker: build name or HIP number from currently selected object
+	void query(const QString &url, bool useHip);
 	void createToolbarButton() const;
-	void setOutputHtml(QString html); //!< Forward html to GUI dialog
+	void setOutputHtml(const QString &html); //!< Forward html to GUI dialog
+	void setOutputUrl(const QUrl &url);      //!< Forward URL to GUI dialog
+#ifndef NO_GUI
 	OnlineQueriesDialog* dialog;
+#endif
 	QSettings* conf;
-	bool enabled;
+	bool enabled;                     //!< show dialog?
+	bool disableWebView;              //!< Disable the webview on platforms where QtWebView compiles, but fails to work properly. (Seen on Odroid boards.)
 
 	StelButton* toolbarButton;
 
 	// URLs are settable via config.ini.
 	// TODO: Maybe add a config panel for the custom sites?
-	QString ancientSkiesUrl;
+	QString aseUrl;
 	QString aavsoHipUrl;
 	QString aavsoOidUrl;
 	QString gcvsUrl;
@@ -121,9 +127,6 @@ private:
 	bool custom1UseHip; //!< Use HIP number, not common name, in query?
 	bool custom2UseHip; //!< Use HIP number, not common name, in query?
 	bool custom3UseHip; //!< Use HIP number, not common name, in query?
-	bool custom1inBrowser; //!< True if custom1 URL should be opened in a webbrowser, not in our panel
-	bool custom2inBrowser; //!< True if custom2 URL should be opened in a webbrowser, not in our panel
-	bool custom3inBrowser; //!< True if custom3 URL should be opened in a webbrowser, not in our panel
 
 	HipOnlineQuery *hipQuery;              // one is actually enough!
 	HipOnlineReply *hipOnlineReply;        // Common reply object
@@ -140,9 +143,9 @@ class OnlineQueriesPluginInterface : public QObject, public StelPluginInterface
 	Q_PLUGIN_METADATA(IID StelPluginInterface_iid)
 	Q_INTERFACES(StelPluginInterface)
 public:
-	virtual StelModule* getStelModule() const;
-	virtual StelPluginInfo getPluginInfo() const;
-	virtual QObjectList getExtensionList() const { return QObjectList(); }
+	StelModule* getStelModule() const override;
+	StelPluginInfo getPluginInfo() const override;
+	//QObjectList getExtensionList() const override { return QObjectList(); }
 };
 
 #endif /* ONLINEQUERIES_HPP */

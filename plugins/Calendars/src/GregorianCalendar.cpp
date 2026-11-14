@@ -38,7 +38,7 @@ void GregorianCalendar::setJD(double JD)
 
 // set date from a vector of calendar date elements sorted from the largest to the smallest.
 // Year-Month[1...12]-Day[1...31]
-void GregorianCalendar::setDate(QVector<int> parts)
+void GregorianCalendar::setDate(const QVector<int> &parts)
 {
 	//qDebug() << "GregorianCalendar::setDate:" << parts;
 	this->parts=parts;
@@ -70,12 +70,12 @@ QString GregorianCalendar::getFormattedDateString() const
 {
 	QStringList str=getDateStrings();
 	// TODO: Maybe use QDate with user's localisation here? Weekday has to be taken from our results, though.
-	return QString("%1, %2 - %3 (%4) - %5")
-			.arg(str.at(3)) // weekday
-			.arg(str.at(2)) // day
-			.arg(str.at(1)) // month, numerical
-			.arg(monthNames.value(parts.at(1))) // month, name
-			.arg(str.at(0));// year
+	return QString("%1, %2 - %3 (%4) - %5").arg(
+			str.at(3), // weekday
+			str.at(2), // day
+			str.at(1), // month, numerical
+			monthNames.value(parts.at(1)), // month, name
+			str.at(0));// year
 }
 
 // returns true for leap years
@@ -91,11 +91,11 @@ bool GregorianCalendar::isLeap(int year)
  * Functions from CC.UE ch2
  */
 
-int GregorianCalendar::fixedFromGregorian(QVector<int> gregorian)
+int GregorianCalendar::fixedFromGregorian(const QVector<int> &gregorian)
 {
-	const int year=gregorian.at(0);
-	const int month=gregorian.at(1);
-	const int day=gregorian.at(2);
+	const int year =gregorian.value(0);
+	const int month=gregorian.value(1);
+	const int day  =gregorian.value(2);
 
 	int rd=gregorianEpoch-1+365*(year-1)+StelUtils::intFloorDiv((year-1), 4)-StelUtils::intFloorDiv((year-1), 100)
 			+StelUtils::intFloorDiv((year-1), 400)+(367*month-362)/12+day;

@@ -17,21 +17,18 @@
  * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
  */
 
-#include "StelUtils.hpp"
-#include "StelProjector.hpp"
-#include "StelPainter.hpp"
 #include "StelApp.hpp"
 #include "StelCore.hpp"
 #include "StelFileMgr.hpp"
-#include "StelIniParser.hpp"
-#include "StelLocaleMgr.hpp"
 #include "StelModuleMgr.hpp"
 #include "StelGui.hpp"
 #include "StelGuiItems.hpp"
-#include "StelVertexArray.hpp"
 #include "RemoteControl.hpp"
+#ifndef NO_GUI
 #include "RemoteControlDialog.hpp"
+#endif
 #include "RequestHandler.hpp"
+#include "StelTranslator.hpp"
 
 #include "httpserver/httplistener.h"
 #include "httpserver/staticfilecontroller.h"
@@ -58,7 +55,7 @@ StelPluginInfo RemoteControlStelPluginInterface::getPluginInfo() const
 	info.id = "RemoteControl";
 	info.displayedName = N_("Remote Control");
 	info.authors = "Florian Schaukowitsch, Georg Zotti";
-	info.contact = "http://homepage.univie.ac.at/Georg.Zotti";
+	info.contact = "https://homepage.univie.ac.at/Georg.Zotti";
 	info.description = N_("Provides remote control functionality using a webserver interface. See manual for detailed description.");
 	info.acknowledgements += N_("This plugin was created in the 2015 campaign of the ESA Summer of Code in Space programme.");
 	info.version = REMOTECONTROL_PLUGIN_VERSION;
@@ -67,8 +64,8 @@ StelPluginInfo RemoteControlStelPluginInterface::getPluginInfo() const
 }
 
 RemoteControl::RemoteControl()
-	: httpListener(Q_NULLPTR)
-	, requestHandler(Q_NULLPTR)
+	: httpListener(nullptr)
+	, requestHandler(nullptr)
 	, enabled(false)
 	, autoStart(false)
 	, usePassword(false)
@@ -78,12 +75,14 @@ RemoteControl::RemoteControl()
 	, port(8090)
 	, minThreads(1)
 	, maxThreads(30)
-	, toolbarButton(Q_NULLPTR)
+	, toolbarButton(nullptr)
+	, conf(StelApp::getInstance().getSettings())
 {
 	setObjectName("RemoteControl");
 
+#ifndef NO_GUI
 	configDialog = new RemoteControlDialog();
-	conf = StelApp::getInstance().getSettings();
+#endif
 
 	//needed to ensure clean shutdown of server before threading errors can occur
 	connect(&StelApp::getInstance(), &StelApp::aboutToQuit, this, &RemoteControl::stopServer, Qt::DirectConnection);
@@ -91,21 +90,27 @@ RemoteControl::RemoteControl()
 
 RemoteControl::~RemoteControl()
 {
+#ifndef NO_GUI
 	delete configDialog;
+#endif
 	if(httpListener)
 	{
 		//we manually delete the listener here to make sure
 		//all connections are closed before the requesthandler is deleted
 		delete httpListener;
-		httpListener = Q_NULLPTR;
+		httpListener = nullptr;
 	}
 }
 
 bool RemoteControl::configureGui(bool show)
 {
+#ifdef NO_GUI
+	return false;
+#else
 	if (show)
 		configDialog->setVisible(true);
 	return true;
+#endif
 }
 
 //! Determine which "layer" the plugin's drawing will happen on.
@@ -124,7 +129,7 @@ void RemoteControl::init()
 
 	loadSettings();
 
-	qDebug()<<"RemoteControl using QtWebApp version"<<getQtWebAppLibVersion();
+	qInfo()<<"RemoteControl using QtWebApp version"<<getQtWebAppLibVersion();
 
 	StaticFileControllerSettings settings;
 	//retrieve actual webroot through StelFileMgr
@@ -148,31 +153,35 @@ void RemoteControl::init()
 	requestHandler = new RequestHandler(settings, this);
 
 	StelApp& app = StelApp::getInstance();
+	connect(StelApp::getInstance().getCore(), &StelCore::configurationDataSaved, this, &RemoteControl::saveSettings);
 
 	// Create action for enable/disable & hook up signals	
-	addAction("actionShow_Remote_Control", N_("Remote Control"), N_("Remote control"), "enabled", "");
+	addAction("actionShow_Remote_Control",        N_("Remote Control"), N_("Remote control"), "enabled");
 
-	connect(StelApp::getInstance().getCore(), SIGNAL(configurationDataSaved()), this, SLOT(saveSettings()));
+#ifndef NO_GUI
+	addAction("actionShow_Remote_Control_dialog", N_("Remote Control"), N_("Remote control config"), configDialog, "visible");
 
-	// Add a toolbar button. TODO:  decide whether a button is necessary at all. Maye the button should not only enable, but call the GUI dialog directly?
+	// Add a toolbar button. Right-click opens the config.
 	try
 	{
 		StelGui* gui = dynamic_cast<StelGui*>(app.getGui());
-		if (gui!=Q_NULLPTR)
+		if (gui!=nullptr)
 		{
-			toolbarButton = new StelButton(Q_NULLPTR,
+			toolbarButton = new StelButton(nullptr,
 						       QPixmap(":/RemoteControl/resources/bt_remote_on.png"),
 						       QPixmap(":/RemoteControl/resources/bt_remote_off.png"),
 						       QPixmap(":/graphicGui/miscGlow32x32.png"),
-						       "actionShow_Remote_Control");
+						       "actionShow_Remote_Control",
+						       false,
+						       "actionShow_Remote_Control_dialog");
 			gui->getButtonBar()->addButton(toolbarButton, "065-pluginsGroup");
 		}
 	}
 	catch (std::runtime_error& e)
 	{
-		qWarning() << "WARNING: unable to create toolbar button for RemoteControl plugin: " << e.what();
+		qWarning() << "Unable to create toolbar button for RemoteControl plugin: " << e.what();
 	}
-
+#endif
 	if(autoStart)
 		setFlagEnabled(true);
 }
@@ -260,9 +269,31 @@ void RemoteControl::setPort(const int port)
 	}
 }
 
+void RemoteControl::setMaxRequestSize(const int size)
+{
+	if (size != maxRequestSize)
+	{
+		maxRequestSize = size;
+		if (maxRequestSize>maxMultipartSize)
+			setMaxMultipartSize(maxRequestSize);
+		emit maxRequestSizeChanged(size);
+	}
+}
+
+void RemoteControl::setMaxMultipartSize(const int size)
+{
+	if (size != maxMultipartSize)
+	{
+		maxMultipartSize = size;
+		if (maxRequestSize>maxMultipartSize)
+			setMaxRequestSize(maxMultipartSize);
+		emit maxMultipartSizeChanged(size);
+	}
+}
+
 void RemoteControl::startServer()
 {
-	Q_ASSERT(httpListener == Q_NULLPTR);
+	Q_ASSERT(httpListener == nullptr);
 
 	//set request handler password settings
 	requestHandler->setPassword(password);
@@ -273,6 +304,9 @@ void RemoteControl::startServer()
 	settings.port = port;
 	settings.minThreads = minThreads;
 	settings.maxThreads = maxThreads;
+	settings.maxRequestSize = maxRequestSize;
+	settings.maxMultipartSize = maxMultipartSize;
+	settings.readTimeout = 60000;
 	httpListener = new HttpListener(settings,requestHandler);
 }
 
@@ -281,7 +315,7 @@ void RemoteControl::stopServer()
 	if(httpListener)
 	{
 		delete httpListener;
-		httpListener = Q_NULLPTR;
+		httpListener = nullptr;
 	}
 }
 
@@ -307,6 +341,8 @@ void RemoteControl::loadSettings()
 	setPort(conf->value("port", 8090).toInt());
 	minThreads = conf->value("min_threads", 1).toInt();
 	maxThreads = conf->value("max_threads", 30).toInt();
+	maxRequestSize = conf->value("maxRequestSize", 16384).toInt();
+	maxMultipartSize = conf->value("maxMultipartSize", 1048576).toInt();
 	conf->endGroup();
 }
 
@@ -321,5 +357,7 @@ void RemoteControl::saveSettings()
 	conf->setValue("port", port);
 	conf->setValue("min_threads", minThreads);
 	conf->setValue("max_threads", maxThreads);
+	conf->setValue("maxRequestSize", maxRequestSize);
+	conf->setValue("maxMultipartSize", maxMultipartSize);
 	conf->endGroup();
 }

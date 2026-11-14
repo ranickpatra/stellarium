@@ -18,9 +18,13 @@
 # Debian, Ubuntu: apt-get install make texlive-full gs pdftk. 
 # Others: make sure to install the abovementioned packages for your distribution.
 #
-# MAC OS X
-# ==========
-# * TODO: please add instructions here.
+# MACOS
+# =====
+# TeX Live: install it via MacTeX from: https://tug.org/mactex/mactex-download.html.
+#   Double-click on the package to install it, then follow the instructions to install
+#   Ghostscript, Ghostscript-Extras and TeX Live itself. If you only need TeX to build SUG,
+#   GUI Applications are not needed.
+# pdftk: install it via brew: `brew install pdftk-java`.
 
 
 
@@ -97,9 +101,9 @@ else
 endif
 
 # htlatex needs bounding box files.
-PICSpdf=$(wildcard pictures/*.pdf)
-PICSpng=$(wildcard pictures/*.png) $(subst .pdf,.png, ${PICSpdf})
-PICSjpg=$(wildcard pictures/*.jpg)
+PICSpdf=$(wildcard Images/*.pdf)
+PICSpng=$(wildcard Images/*.png) $(subst .pdf,.png, ${PICSpdf})
+PICSjpg=$(wildcard Images/*.jpg)
 PICSbbx=$(subst .png,.xbb, ${PICSpng}) $(subst .jpg,.xbb, ${PICSjpg})
 
 
@@ -166,9 +170,9 @@ html: guide.html
 #Makefile: ;
 # we must call makeindex again just before final run to update page numbers. Not too intuitive, but seems necessary...
 guide.pdf : guide.ind guide.bbl 
-	${PDFLATEX} guide.tex
-	${MAKEINDEX} guide.idx -s StyleInd.ist
-	${PDFLATEX} guide.tex
+	${PDFLATEX} '\PassOptionsToPackage{draft}{graphicx}\input guide.tex'
+	${MAKEINDEX} guide.idx -s indexstyle.ist
+	${PDFLATEX} '\PassOptionsToPackage{draft}{graphicx}\input guide.tex'
 	${PDFLATEX} guide.tex
 	@touch -c guide.ind
 	@touch -c guide.bbl
@@ -181,7 +185,7 @@ guide.dvi : guide.tex
 
 #guide.ind: guide.idx guide.toc
 guide.ind: guide.idx guide.aux
-	${MAKEINDEX} guide.idx -s StyleInd.ist
+	${MAKEINDEX} guide.idx -s indexstyle.ist
 
 guide.bbl: guide.bcf guide.bib
 	${BIBER} guide
@@ -194,7 +198,7 @@ guide.bcf: guide.log
 
 guide.aux: guide.log
 
-guide.log: $(wildcard *.tex) 
+guide.log: $(wildcard *.tex) LegrandOrangeBook.cls
 	${PDFLATEX} guide.tex
 
 SUG SUG.pdf: guide_opt.pdf
@@ -213,7 +217,7 @@ SUG SUG.pdf: guide_opt.pdf
 
 pdf2png: $(subst .pdf,.png, ${PICSpdf})
 
-pictures/%.png : pictures/%.pdf
+Images/%.png : Images/%.pdf
 	convert $< $@
 
 %.xbb: %.png
@@ -272,9 +276,9 @@ guide.mk4:
 	@echo if mode == "draft" then   > $@
 	@echo Make:htlatex()           >> $@
 	@echo else                     >> $@
-	@echo   Make:add("biber", "biber ${input}")                                                        >> $@
+	@echo   Make:add("biber", "biber ${input}")                                                     >> $@
 	@echo   Make:add("texindex", "tex '\def\filename{{guide}{idx}{4dx}{ind}} \input  idxmake.4ht'") >> $@
-	@echo   Make:add("makeindex", "$makeindex ${filename}.idx -s StyleInd.ist")                     >> $@
+	@echo   Make:add("makeindex", "$makeindex ${filename}.idx -s indexstyle.ist")                   >> $@
 	@echo   local filter = require "make4ht-filter"                                                 >> $@
 	@echo   local process = filter{"cleanspan", "fixligatures", "hruletohr", "fix-links"}           >> $@
 	@echo   Make:htlatex()     >> $@
@@ -284,17 +288,17 @@ guide.mk4:
 	@echo   Make:htlatex()     >> $@
 	@echo   Make:htlatex()     >> $@
 	@echo   Make:match("html$",process)                                 >> $@
- 	@echo  Make:match("html$", "tidy -m -xml -utf8 -q -i ${filename}")  >> $@
+	@echo  Make:match("html$", "tidy -m -xml -utf8 -q -i ${filename}")  >> $@
 	@echo end                  >> $@
 
-	
-	
+
+
 # Totally non-tex4ht: Try pandoc? (start to collect arguments here, try "make pandoc")
 # Ubuntu on Windows only has pandoc 1.12. Maybe V2 would be more complete? In any case, tabu or some other package seems to be a problem.
 pandoc:
 		pandoc -f latex -t plain guide.tex
 
-		
+
 # Hint on restoring initial view settings
 # from https://stackoverflow.com/questions/25544002/command-line-tool-to-mark-pdf-to-open-in-single-page-view	
 #guide_pdfmark.ps: Makefile
@@ -332,13 +336,17 @@ else
  ifeq ($(findstring Git, $(SHELL)),Git)
 	@echo INFO: We are in MinGW/git shell, right?
  else
-  ifeq ($(findstring Microsoft, $(shell cat /proc/version)), Microsoft)
+  ifeq ($(findstring Microsoft, $(shell cat /proc/version 2>/dev/null)), Microsoft)
 	@echo INFO: This looks like Ubuntu on Windows
   else
    ifeq ($(findstring CYGWIN, $(shell uname)),CYGWIN)
 	@echo INFO: We are on Cygwin, right?
    else
+    ifeq ($(findstring Darwin, $(shell uname)),Darwin)
+	@echo INFO: We are on macOS \(Darwin\), right?
+    else
 	@echo I assume $(shell uname) is a valid environment. Please enhance this line.
+    endif
    endif
   endif 
  endif 

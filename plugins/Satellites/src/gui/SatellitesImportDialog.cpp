@@ -21,7 +21,7 @@
 #include "ui_satellitesImportDialog.h"
 
 #include "StelApp.hpp"
-#include "StelMainView.hpp" //for the QFileDialog? Why?
+#include "StelGui.hpp"
 #include "StelModuleMgr.hpp" // for the GETSTELMODULE macro :(
 #include "StelTranslator.hpp"
 #include "StelProgressController.hpp"
@@ -35,14 +35,15 @@
 #include <QStandardItemModel>
 #include <QTemporaryFile>
 #include <QDir>
+#include <QStandardPaths>
 
 SatellitesImportDialog::SatellitesImportDialog()
 	: StelDialog("SatellitesImport")
 	, isGettingData(false)
 	, numberDownloadsComplete(0)
-	, downloadMgr(Q_NULLPTR)
-	, progressBar(Q_NULLPTR)
-	, filterProxyModel(Q_NULLPTR)
+	, downloadMgr(nullptr)
+	, progressBar(nullptr)
+	, filterProxyModel(nullptr)
 {
 	ui = new Ui_satellitesImportDialog;
 	newSatellitesModel = new QStandardItemModel(this);
@@ -56,14 +57,14 @@ SatellitesImportDialog::~SatellitesImportDialog()
 	if (progressBar)
 	{
 		StelApp::getInstance().removeProgressBar(progressBar);
-		progressBar = Q_NULLPTR;
+		progressBar = nullptr;
 	}
 	
 	if (newSatellitesModel)
 	{
 		newSatellitesModel->clear();
 		delete newSatellitesModel;
-		newSatellitesModel = Q_NULLPTR;
+		newSatellitesModel = nullptr;
 	}
 }
 
@@ -92,33 +93,24 @@ void SatellitesImportDialog::createDialogContent()
 	if (gui)
 	{
 		enableKineticScrolling(gui->getFlagUseKineticScrolling());
-		connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+		connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &SatellitesImportDialog::enableKineticScrolling);
 	}
 
-	connect(ui->closeStelWindow, SIGNAL(clicked()),
-	        this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)),
-		this, SLOT(handleMovedTo(QPoint)));
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
-	connect(ui->pushButtonGetData, SIGNAL(clicked()),
-	        this, SLOT(getData()));
-	connect(ui->pushButtonAbort, SIGNAL(clicked()),
-	        this, SLOT(abortDownloads()));
-	connect(ui->pushButtonAdd, SIGNAL(clicked()),
-	        this, SLOT(acceptNewSatellites()));
-	connect(ui->pushButtonDiscard, SIGNAL(clicked()),
-	        this, SLOT(discardNewSatellites()));
-	connect(ui->pushButtonMarkAll, SIGNAL(clicked()),
-	        this, SLOT(markAll()));
-	connect(ui->pushButtonMarkNone, SIGNAL(clicked()),
-	        this, SLOT(markNone()));
+	connect(ui->pushButtonGetData,  &QPushButton::clicked, this, &SatellitesImportDialog::getData);
+	connect(ui->pushButtonAbort,    &QPushButton::clicked, this, &SatellitesImportDialog::abortDownloads);
+	connect(ui->pushButtonAdd,      &QPushButton::clicked, this, &SatellitesImportDialog::acceptNewSatellites);
+	connect(ui->pushButtonDiscard,  &QPushButton::clicked, this, &SatellitesImportDialog::discardNewSatellites);
+	connect(ui->pushButtonMarkAll,  &QPushButton::clicked, this, &SatellitesImportDialog::markAll);
+	connect(ui->pushButtonMarkNone, &QPushButton::clicked, this, &SatellitesImportDialog::markNone);
 	
 	filterProxyModel = new QSortFilterProxyModel(this);
 	filterProxyModel->setSourceModel(newSatellitesModel);
 	filterProxyModel->setFilterCaseSensitivity(Qt::CaseInsensitive);
 	ui->listView->setModel(filterProxyModel);
-	connect(ui->lineEditSearch, SIGNAL(textChanged(const QString&)),
-	        filterProxyModel, SLOT(setFilterFixedString(const QString&)));
+	connect(ui->lineEditSearch, &QLineEdit::textChanged, filterProxyModel, &QSortFilterProxyModel::setFilterFixedString);
 	
 	reset();
 }
@@ -132,8 +124,7 @@ void SatellitesImportDialog::getData()
 	if (!downloadMgr)
 	{
 		downloadMgr = StelApp::getInstance().getNetworkAccessManager();
-		connect(downloadMgr, SIGNAL(finished(QNetworkReply*)),
-		        this, SLOT(receiveDownload(QNetworkReply*)));
+		connect(downloadMgr, &QNetworkAccessManager::finished, this, &SatellitesImportDialog::receiveDownload);
 	}
 	Satellites* satMgr = GETSTELMODULE(Satellites);
 	
@@ -149,7 +140,8 @@ void SatellitesImportDialog::getData()
 			progressBar = StelApp::getInstance().addProgressBar();
 		progressBar->setValue(0);
 		progressBar->setRange(0, sourceUrls.size());
-		progressBar->setFormat("TLE download %v/%m");
+		// TRANSLATORS: The full phrase is 'Loading TLE %VALUE%/%MAX%' in progress bar
+		progressBar->setFormat(QString("%1 %v/%m").arg(q_("Loading TLE")));
 		
 		ui->pushButtonGetData->setVisible(false);
 		ui->pushButtonAbort->setVisible(true);
@@ -168,14 +160,14 @@ void SatellitesImportDialog::getData()
 	{
 		QStringList sourceFilePaths;
 		// XXX: we should check that there is at least one home location.
-		QString homeDirPath = QStandardPaths::standardLocations(QStandardPaths::HomeLocation)[0];
+		QString homeDirPath = QStandardPaths::standardLocations(QStandardPaths::HomeLocation).constFirst();
 		sourceFilePaths = QFileDialog::getOpenFileNames(
-				      Q_NULLPTR,
+				      nullptr,
 		                      q_("Select TLE source file(s)..."),
 		                      homeDirPath, "*.*");
 		if (sourceFilePaths.isEmpty())
 			return;
-		for (auto filePath : sourceFilePaths)
+		for (auto &filePath : sourceFilePaths)
 		{
 			QFileInfo fileInfo(filePath);
 			if (fileInfo.exists() && fileInfo.isReadable())
@@ -235,7 +227,7 @@ void SatellitesImportDialog::receiveDownload(QNetworkReply* networkReply)
 		if (progressBar)
 		{
 			StelApp::getInstance().removeProgressBar(progressBar);
-			progressBar = Q_NULLPTR;
+			progressBar = nullptr;
 		}
 		
 		if (sourceFiles.isEmpty())
@@ -325,7 +317,7 @@ void SatellitesImportDialog::reset()
 	if (progressBar)
 	{
 		StelApp::getInstance().removeProgressBar(progressBar);
-		progressBar = Q_NULLPTR;
+		progressBar = nullptr;
 	}
 }
 
@@ -346,7 +338,7 @@ void SatellitesImportDialog::populateList()
 			open = sourceFiles[f]->open(QFile::ReadOnly);
 		if (open)
 		{
-			satMgr->parseTleFile(*sourceFiles[f], newSatellites);
+			satMgr->parseDataFile(*sourceFiles[f], newSatellites);
 			sourceFiles[f]->close();
 		}
 		else

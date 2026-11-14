@@ -21,9 +21,10 @@
 #ifndef STELPROJECTOR_HPP
 #define STELPROJECTOR_HPP
 
-#include "StelProjectorType.hpp"
 #include "VecMath.hpp"
 #include "StelSphereGeometry.hpp"
+
+class QOpenGLShaderProgram;
 
 //! @class StelProjector
 //! Provide the main interface to all operations of projecting coordinates from sky to screen.
@@ -50,8 +51,8 @@ public:
 	class ModelViewTranform
 	{
 	public:
-		ModelViewTranform() {;}
-		virtual ~ModelViewTranform() {;}
+		ModelViewTranform() {}
+		virtual ~ModelViewTranform() {}
 		virtual void forward(Vec3d&) const =0;
 		virtual void backward(Vec3d&) const =0;
 		virtual void forward(Vec3f&) const =0;
@@ -61,24 +62,40 @@ public:
 		virtual ModelViewTranformP clone() const=0;
 
 		virtual Mat4d getApproximateLinearTransfo() const=0;
+
+		virtual QByteArray getForwardTransformShader() const = 0;
+		virtual void setForwardTransformUniforms(QOpenGLShaderProgram& program) const = 0;
+		virtual QByteArray getBackwardTransformShader() const = 0;
+		virtual void setBackwardTransformUniforms(QOpenGLShaderProgram& program) const = 0;
 	};
 
 	class Mat4dTransform: public ModelViewTranform
 	{
 	public:
-        Mat4dTransform(const Mat4d& m);
-        void forward(Vec3d& v) const;
-        void backward(Vec3d& v) const;
-        void forward(Vec3f& v) const;
-        void backward(Vec3f& v) const;
-        void combine(const Mat4d& m);
-        Mat4d getApproximateLinearTransfo() const;
-        ModelViewTranformP clone() const;
+		Mat4dTransform(const Mat4d& altAzToWorld, const Mat4d& vertexToAltAzPos);
+		void forward(Vec3d& v) const override;
+		void backward(Vec3d& v) const override;
+		void forward(Vec3f& v) const override;
+		void backward(Vec3f& v) const override;
+		void combine(const Mat4d& m) override;
+		Mat4d getApproximateLinearTransfo() const override;
+		ModelViewTranformP clone() const override;
+		QByteArray getForwardTransformShader() const override;
+		void setForwardTransformUniforms(QOpenGLShaderProgram& program) const override;
+		QByteArray getBackwardTransformShader() const override;
+		void setBackwardTransformUniforms(QOpenGLShaderProgram& program) const override;
+
+	private:
+		Mat4dTransform(const Mat4dTransform& src) = default;
 
 	private:
 		//! transfo matrix and invert
 		Mat4d transfoMat;
 		Mat4f transfoMatf;
+		//! Transforms a vertex from model space to coordinates where Z is zenith, so zenith angle can easily be computed.
+		Mat4f vertexToAltAzPos;
+		//! Transforms view direction from the projector's frame to coordinates where Z is zenith, so zenith angle can easily be computed.
+		Mat4f worldPosToAltAzPos;
 	};
 
 	//! @enum StelProjectorMaskType
@@ -107,35 +124,35 @@ public:
 			, flipHorz(false)
 			, flipVert(false)
 			, devicePixelsPerPixel(1)
-			, widthStretch(1) {;}
+			, widthStretch(1) {}
 
-		Vector4<int> viewportXywh;       //! posX, posY, width, height
-		float fov;                       //! FOV in degrees
-		bool gravityLabels;              //! the flag to use gravity labels or not
-		float defaultAngleForGravityText;//! a rotation angle to apply to gravity text (only if gravityLabels is set to false)
-		StelProjectorMaskType maskType;  //! The current projector mask
-		double zNear, zFar;              //! Near and far clipping planes
-		Vector2<qreal> viewportCenter;   //! Viewport center in screen pixel
-		Vector2<qreal> viewportCenterOffset;//! Viewport center's offset in fractions of screen width/height. Usable e.g. in cylindrical projection to move horizon down.
-						 //! Currently only Y shift is fully implemented, X shift likely not too meaningful.
-		qreal viewportFovDiameter;       //! diameter of the FOV disk in pixel
-		bool flipHorz, flipVert;         //! Whether to flip in horizontal or vertical directions
-		qreal devicePixelsPerPixel;      //! The number of device pixel per "Device Independent Pixels" (value is usually 1, but 2 for mac retina screens)
-		qreal widthStretch;              //! A factor to adapt to special installation setups, e.g. multi-projector with edge blending. Allow to stretch/squeeze projected content. Larger than 1 means the image is stretched wider.
+		Vec4i viewportXywh;              //!< posX, posY, width, height
+		float fov;                       //!< FOV in degrees
+		bool gravityLabels;              //!< the flag to use gravity labels or not
+		float defaultAngleForGravityText;//!< a rotation angle to apply to gravity text (only if gravityLabels is set to false)
+		StelProjectorMaskType maskType;  //!< The current projector mask
+		double zNear, zFar;              //!< Near and far clipping planes
+		Vector2<qreal> viewportCenter;   //!< Viewport center in screen pixel
+		Vector2<qreal> viewportCenterOffset;//!< Viewport center's offset in fractions of screen width/height. Usable e.g. in cylindrical projection to move horizon down.
+						 //!< Currently only Y shift is fully implemented, X shift likely not too meaningful.
+		qreal viewportFovDiameter;       //!< diameter of the FOV disk in pixel
+		bool flipHorz, flipVert;         //!< Whether to flip in horizontal or vertical directions
+		qreal devicePixelsPerPixel;      //!< The number of device pixel per "Device Independent Pixels" (value is usually 1, but 2 for mac retina screens)
+		qreal widthStretch;              //!< A factor to adapt to special installation setups, e.g. multi-projector with edge blending. Allow to stretch/squeeze projected content. Larger than 1 means the image is stretched wider.
 	};
 
 	//! Destructor
 	virtual ~StelProjector() {}
 
 	///////////////////////////////////////////////////////////////////////////
-	// Methods which must be reimplemented by all instance of StelProjector
+	// Methods which must be reimplemented by all subclasses of StelProjector
 	//! Get a human-readable name for this projection type
 	virtual QString getNameI18() const = 0;
 	//! Get a human-readable short description for this projection type
 	virtual QString getDescriptionI18() const {return "No description";}
 	//! Get a HTML version of the short description for this projection type
 	QString getHtmlSummary() const;
-	//! Get the maximum FOV apperture in degree
+	//! Get the maximum FOV aperture in degree
 	virtual float getMaxFov() const = 0;
 	//! Apply the transformation in the forward direction in place.
 	//! After transformation v[2] will always contain the length of the original v: sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2])
@@ -147,7 +164,15 @@ public:
 	//! Apply the transformation in the backward projection in place.
 	virtual bool backward(Vec3d& v) const = 0;
 	//! Return the small zoom increment to use at the given FOV for nice movements
-	virtual float deltaZoom(float fov) const = 0;
+	virtual float deltaZoom(float fov) const {return fov;}
+	//! Returns GLSL code that can be used in a shader to implement forward transformation
+	virtual QByteArray getForwardTransformShader() const = 0;
+	//! Sets the necessary uniforms so that the shader returned by getForwardTransformShader can work
+	virtual void setForwardTransformUniforms(QOpenGLShaderProgram& program) const;
+	//! Returns GLSL code that can be used in a shader to implement backward transformation
+	virtual QByteArray getBackwardTransformShader() const = 0;
+	//! Sets the necessary uniforms so that the shader returned by getBackwardTransformShader can work
+	virtual void setBackwardTransformUniforms(QOpenGLShaderProgram& program) const;
 
 	//! Determine whether a great circle connection p1 and p2 intersects with a projection discontinuity.
 	//! For many projections without discontinuity, this should return always false, but for other like
@@ -156,12 +181,12 @@ public:
 	bool intersectViewportDiscontinuity(const SphericalCap& cap) const;
 
 	//! Convert a Field Of View radius value in radians in ViewScalingFactor (used internally)
-	virtual float fovToViewScalingFactor(float fov) const = 0;
+	virtual float fovToViewScalingFactor(float fov) const {return fov;}
 	//! Convert a ViewScalingFactor value (used internally) in Field Of View radius in radians
-	virtual float viewScalingFactorToFov(float vsf) const = 0;
+	virtual float viewScalingFactorToFov(float vsf) const { return vsf;}
 
 	//! Get the current state of the flag which decides whether to
-	//! arrage labels so that they are aligned with the bottom of a 2d
+	//! arrange labels so that they are aligned with the bottom of a 2d
 	//! screen, or a 3d dome.
 	bool getFlagGravityLabels() const;
 
@@ -197,6 +222,10 @@ public:
 	//! Get size of a radian in pixels at the center of the viewport disk
 	float getPixelPerRadAtCenter() const;
 
+	//! Get the scale factor for objects drawn on screen. This takes into account
+	//! font size and the OS-given high-DPI scaling setting (see #getDevicePixelsPerPixel).
+	float getScreenScale() const;
+
 	//! Get the current FOV diameter in degrees
 	float getFov() const;
 
@@ -228,6 +257,12 @@ public:
 	//! @param win the projected vector in the viewport 2D frame.
 	//! @return true if the projected coordinate is valid.
 	bool project(const Vec3f& v, Vec3f& win) const;
+
+	//! Project the vector v from the current frame into the viewport.
+	//! @param v the vector in the current frame.
+	//! @param win the projected vector in the viewport 2D frame.
+	//! @return true if the projected coordinate is valid.
+	bool project(const Vec3d& v, Vec3f& win) const;
 
 	virtual void project(int n, const Vec3d* in, Vec3f* out);
 
@@ -270,6 +305,12 @@ public:
 	//! @return true if at least one of the projected vector is within the viewport.
 	bool projectLineCheck(const Vec3d& v1, Vec3d& win1, const Vec3d& v2, Vec3d& win2) const;
 
+	QByteArray getProjectShader() const;
+	void setProjectUniforms(QOpenGLShaderProgram& program) const;
+
+	QByteArray getUnProjectShader() const;
+	void setUnProjectUniforms(QOpenGLShaderProgram& program) const;
+
 	//! Get the current model view matrix.
 	ModelViewTranformP getModelViewTransform() const;
 
@@ -285,6 +326,14 @@ public:
 	//! Get the current type of the mask if any.
 	StelProjectorMaskType getMaskType(void) const;
 
+	//! Check whether the projection represented by \p other is the same as this.
+	//!
+	//! This check is intended to tell whether the shaders returned by #getProjectShader and #getUnProjectShader are
+	//! the same for this and \p other.
+	//! The parameters compared include projection type and whether refraction is on. Numerical
+	//  parameters of the transform like rotation angles, stretch factors etc. (that are passed as uniforms) are ignored.
+	bool isSameProjection(const StelProjector& other) const;
+
 protected:
 	//! Private constructor. Only StelCore can create instances of StelProjector.
 	StelProjector(ModelViewTranformP amodelViewTransform)
@@ -299,22 +348,32 @@ protected:
 		  gravityLabels(true),
 		  defaultAngleForGravityText(0.f),
 		  devicePixelsPerPixel(1.),
-		  widthStretch(1.0) {;}
+		  widthStretch(1.0) {}
 
 	//! Return whether the projection presents discontinuities. Used for optimization.
-	virtual bool hasDiscontinuity() const =0;
+	virtual bool hasDiscontinuity() const {return false;}
 	//! Determine whether a great circle connection p1 and p2 intersects with a projection discontinuity.
 	//! For many projections without discontinuity, this should return always false, but for other like
 	//! cylindrical projection it will return true if the line cuts the wrap-around line (i.e. at lon=180 if the observer look at lon=0).
-	virtual bool intersectViewportDiscontinuityInternal(const Vec3d& p1, const Vec3d& p2) const = 0;
+	virtual bool intersectViewportDiscontinuityInternal(const Vec3d& p1, const Vec3d& p2) const
+	{
+		Q_UNUSED(p1)
+		Q_UNUSED(p2)
+		return false;
+	}
 
 	//! Determine whether a cap intersects with a projection discontinuity.
-	virtual bool intersectViewportDiscontinuityInternal(const Vec3d& capN, double capD) const = 0;
+	virtual bool intersectViewportDiscontinuityInternal(const Vec3d& capN, double capD) const
+	{
+		Q_UNUSED(capN)
+		Q_UNUSED(capD)
+		return false;
+	}
 
 	//! Initialize the bounding cap.
 	virtual void computeBoundingCap();
 
-	ModelViewTranformP modelViewTransform;	// Operator to apply (if not Q_NULLPTR) before the modelview projection step
+	ModelViewTranformP modelViewTransform;	// Operator to apply (if not nullptr) before the modelview projection step
 
 	float flipHorz,flipVert;            // Whether to flip in horizontal or vertical directions. Values only -1 (flip) or +1 (no flip).
 	float pixelPerRad;                  // pixel per rad at the center of the viewport disk

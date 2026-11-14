@@ -2,7 +2,7 @@
 The stellarium telescope library helps building
 telescope server programs, that can communicate with stellarium
 by means of the stellarium TCP telescope protocol.
-It also contains smaple server classes (dummy, Meade LX200).
+It also contains sample server classes (dummy, Meade LX200).
 
 Author and Copyright of this file and of the stellarium telescope library:
 Johannes Gajdosik, 2006, modified for NexStar telescopes by Michael Heinz.
@@ -25,17 +25,12 @@ Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
 #include "NexStarConnection.hpp"
 #include "NexStarCommand.hpp"
 #include "TelescopeClientDirectNexStar.hpp"
-#include "common/LogFile.hpp"
-#include "StelUtils.hpp"
+#include "common/TelescopeLogging.hpp"
 
 #include <iostream>
-using namespace std;
 
-NexStarConnection::NexStarConnection(Server &server, const char *serial_device) : SerialPort(server, serial_device)
-{
-}
-
-void NexStarConnection::resetCommunication(void)
+template <class Transport>
+void NexStarConnectionImpl<Transport>::resetCommunication(void)
 {
 	while (!command_list.empty())
 	{
@@ -43,58 +38,76 @@ void NexStarConnection::resetCommunication(void)
 		command_list.pop_front();
 	}
 	
-	read_buff_end = read_buff;
-	write_buff_end = write_buff;
-#ifdef DEBUG4
-	*log_file << Now() << "NexStarConnection::resetCommunication" << StelUtils::getEndLineChar();
-#endif
+	this->read_buff_end = this->read_buff;
+	this->write_buff_end = this->write_buff;
+	qCDebug(Telescopes) << this->getLogPrefix() << "NexStarConnection::resetCommunication";
 }
 
-void NexStarConnection::sendGoto(unsigned int ra_int, int dec_int)
+template <class Transport>
+void NexStarConnectionImpl<Transport>::sendGoto(unsigned int ra_int, int dec_int)
 {
-	sendCommand(new NexStarCommandGotoPosition(server, ra_int, dec_int));
+	sendCommand(new NexStarCommandGotoPosition(this->server, ra_int, dec_int));
 }
 
-void NexStarConnection::sendSync(unsigned int ra_int, int dec_int)
+template <class Transport>
+void NexStarConnectionImpl<Transport>::sendSync(unsigned int ra_int, int dec_int)
 {
-	sendCommand(new NexStarCommandSync(server, ra_int, dec_int));
+	sendCommand(new NexStarCommandSync(this->server, ra_int, dec_int));
 }
 
-void NexStarConnection::dataReceived(const char *&p,const char *read_buff_end)
+template <class Transport>
+void NexStarConnectionImpl<Transport>::sendAbort()
 {
-	if (isClosed())
+	qCDebug(Telescopes) << this->getLogPrefix() << "NexStarConnection::sendAbort()";
+	// Remove queued commands (pointers, so delete their objects!)
+	while (!command_list.empty())
 	{
-		*log_file << Now() << "NexStarConnection::dataReceived: strange: fd is closed" << StelUtils::getEndLineChar();
+		delete command_list.front();
+		command_list.pop_front();
+	}
+
+	sendCommand(new NexStarCommandAbort(this->server));
+}
+
+template <class Transport>
+void NexStarConnectionImpl<Transport>::dataReceived(const char *&p,const char *read_buff_end)
+{
+	if (this->isClosed())
+	{
+		qCWarning(Telescopes) << this->getLogPrefix()
+		                      << "NexStarConnection::dataReceived: strange: fd is closed";
 	}
 	else if (command_list.empty())
 	{
-		#ifdef DEBUG4
-		*log_file << Now() << "NexStarConnection::dataReceived: "
-				      "error: command_list is empty" << StelUtils::getEndLineChar();
-		#endif
+		qCWarning(Telescopes) << this->getLogPrefix()
+		                      << "NexStarConnection::dataReceived: error: command_list is empty";
 		resetCommunication();
-		static_cast<TelescopeClientDirectNexStar*>(&server)->communicationResetReceived();
+		static_cast<TelescopeClientDirectNexStar*>(&this->server)->communicationResetReceived();
 	}
 	else if (command_list.front()->needsNoAnswer())
 	{
-		*log_file << Now() << "NexStarConnection::dataReceived: "
-		                      "strange: command(" << *command_list.front()
-				   << ") needs no answer" << StelUtils::getEndLineChar();
+		qCWarning(Telescopes).nospace() << this->getLogPrefix()
+		                                << "NexStarConnection::dataReceived: "
+		                                   "strange: command("
+		                                << *command_list.front() << ") needs no answer";
 	}
 	else
 	{
 		while(true)
 		{
 			const int rc=command_list.front()->readAnswerFromBuffer(p, read_buff_end);
-			//*log_file << Now() << "NexStarConnection::dataReceived: "
-			//                   << *command_list.front() << "->readAnswerFromBuffer returned "
-			//                   << rc << StelUtils::getEndLineChar();
+			/*
+			qCDebug(Telescopes).nospace() << this->getLogPrefix() << "NexStarConnection::dataReceived: "
+			                              << *command_list.front() << "->readAnswerFromBuffer returned "
+			                              << rc;
+			*/
 			if (rc <= 0)
 			{
 				if (rc < 0)
 				{
 					resetCommunication();
-					static_cast<TelescopeClientDirectNexStar*>(&server)->communicationResetReceived();
+					static_cast<TelescopeClientDirectNexStar*>(&this->server)
+						->communicationResetReceived();
 				}
 				break;
 			}
@@ -103,29 +116,37 @@ void NexStarConnection::dataReceived(const char *&p,const char *read_buff_end)
 			if (command_list.empty())
 				break;
 			if (!command_list.front()->writeCommandToBuffer(
-			                                   write_buff_end,
-			                                   write_buff+sizeof(write_buff)))
+			                                   this->write_buff_end,
+			                                   this->write_buff+sizeof(this->write_buff)))
 				break;
 		}
 	}
 }
 
-void NexStarConnection::sendCommand(NexStarCommand *command)
+template <class Transport>
+void NexStarConnectionImpl<Transport>::sendCommand(NexStarCommand *command)
 {
 	if (command)
 	{
-		#ifdef DEBUG4
-		*log_file << Now() << "NexStarConnection::sendCommand(" << *command
-			  << ")" << StelUtils::getEndLineChar();
-		#endif
+		qCDebug(Telescopes).nospace() << this->getLogPrefix() << "NexStarConnection::sendCommand("
+		                              << *command << ")";
+		/*
+		// Uncomment with the end diagnostic below: processing may delete command.
+		QString commandDescription;
+		QDebug(&commandDescription).nospace() << *command;
+		*/
 		command_list.push_back(command);
 		while (!command_list.front()->hasBeenWrittenToBuffer())
 		{
-			if (command_list.front()->writeCommandToBuffer(write_buff_end, write_buff+sizeof(write_buff)))
+			if (command_list.front()->writeCommandToBuffer(this->write_buff_end,
+			                                             this->write_buff+sizeof(this->write_buff)))
 			{
-				//*log_file << Now() << "NexStarConnection::sendCommand: "
-				//                   << (*command_list.front())
-				//                   << "::writeCommandToBuffer ok" << StelUtils::getEndLineChar();
+				/*
+				qCDebug(Telescopes).nospace() << this->getLogPrefix()
+				                              << "NexStarConnection::sendCommand: "
+				                              << *command_list.front()
+				                              << "::writeCommandToBuffer ok";
+				*/
 				if (command_list.front()->needsNoAnswer())
 				{
 					delete command_list.front();
@@ -140,14 +161,22 @@ void NexStarConnection::sendCommand(NexStarCommand *command)
 			}
 			else
 			{
-				//*log_file << Now() << "NexStarConnection::sendCommand: "
-				//                   << (*command_list.front())
-				//                   << "::writeCommandToBuffer failed" << StelUtils::getEndLineChar();
+				/*
+				qCDebug(Telescopes).nospace() << this->getLogPrefix()
+				                              << "NexStarConnection::sendCommand: "
+				                              << *command_list.front()
+				                              << "::writeCommandToBuffer failed";
+				*/
 				break;
 			}
 		}
-		//*log_file << Now() << "NexStarConnection::sendCommand(" << *command << ") end"
-		//                   << StelUtils::getEndLineChar();
+		/*
+		qCDebug(Telescopes).nospace().noquote() << this->getLogPrefix() << "NexStarConnection::sendCommand("
+		                                        << commandDescription << ") end";
+		*/
 	}
 }
 
+// Explicitly instantiate the serial and TCP/IP transports.
+template class NexStarConnectionImpl<SerialPort>;
+template class NexStarConnectionImpl<TcpConnection>;

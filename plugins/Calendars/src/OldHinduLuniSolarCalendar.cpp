@@ -35,18 +35,18 @@ void OldHinduLuniSolarCalendar::retranslate()
 {
 	// fill the name lists with translated month names.
 	monthNames={
-		{  1, qc_("Caitra"     , "old Hindu month name")},
-		{  2, qc_("Vaiśākha"   , "old Hindu month name")},
-		{  3, qc_("Jyeṣṭha"    , "old Hindu month name")},
-		{  4, qc_("Āṣāḑha"     , "old Hindu month name")},
-		{  5, qc_("Śrāvaṇa"    , "old Hindu month name")},
-		{  6, qc_("Bhādrapada" , "old Hindu month name")},
-		{  7, qc_("Āśvina"     , "old Hindu month name")},
-		{  8, qc_("Kārtika"    , "old Hindu month name")},
-		{  9, qc_("Mārgaśīrṣa" , "old Hindu month name")},
-		{ 10, qc_("Pauṣa"      , "old Hindu month name")},
-		{ 11, qc_("Māgha"      , "old Hindu month name")},
-		{ 12, qc_("Phālguna"   , "old Hindu month name")}};
+		{  1, qc_("Caitra"     , "Hindu Lunar month name")},
+		{  2, qc_("Vaiśākha"   , "Hindu Lunar month name")},
+		{  3, qc_("Jyeṣṭha"    , "Hindu Lunar month name")},
+		{  4, qc_("Āṣāḍha"     , "Hindu Lunar month name")},
+		{  5, qc_("Śrāvaṇa"    , "Hindu Lunar month name")},
+		{  6, qc_("Bhādrapada" , "Hindu Lunar month name")},
+		{  7, qc_("Āśvina"     , "Hindu Lunar month name")},
+		{  8, qc_("Kārtika"    , "Hindu Lunar month name")},
+		{  9, qc_("Mārgaśīrṣa" , "Hindu Lunar month name")},
+		{ 10, qc_("Pauṣa"      , "Hindu Lunar month name")},
+		{ 11, qc_("Māgha"      , "Hindu Lunar month name")},
+		{ 12, qc_("Phālguna"   , "Hindu Lunar month name")}};
 }
 
 // Set a calendar date from the Julian day number
@@ -81,18 +81,28 @@ QStringList OldHinduLuniSolarCalendar::getDateStrings() const
 // get a formatted complete string for a date
 QString OldHinduLuniSolarCalendar::getFormattedDateString() const
 {
+	const int rd=fixedFromOldHinduLunar(parts);
 	QStringList str=getDateStrings();
 	// TRANSLATORS: K.Y. stands for Kali Yuga
 	QString epoch = qc_("K.Y.", "epoch");
 	QString leap = (str.at(3)=="1" ? qc_("[leap]", "short indicator for leap month") : "");
 	// Format: [weekday], [day] - [month, numeral] ([month, name]) [leap] - [year] [epoch]
-	return QString("%1, %2 - %3 (%4) %5 - %6 %7").arg(str.at(5), str.at(4), str.at(1), str.at(2), leap, str.at(0), epoch);
+	return QString("%1, %2 - %3 (%4)<sub>%5</sub> - %6 %7 (%8: %9)").arg(
+				str.at(5),
+				str.at(4),
+				str.at(1),
+				str.at(2),
+				leap,
+				str.at(0),
+				epoch,
+				q_("Day"),
+				QString::number(hinduDayCount(rd)));
 }
 
 // set date from a vector of calendar date elements sorted from the largest to the smallest.
 // Year-Month[1...12]-Day[1...31]
 // Time is not changed!
-void OldHinduLuniSolarCalendar::setDate(QVector<int> parts)
+void OldHinduLuniSolarCalendar::setDate(const QVector<int> &parts)
 {
 	this->parts=parts;
 	double rd=fixedFromOldHinduSolar(parts);
@@ -105,12 +115,12 @@ void OldHinduLuniSolarCalendar::setDate(QVector<int> parts)
 
 
 // parts={ year, month, leap, day}
-int OldHinduLuniSolarCalendar::fixedFromOldHinduLunar(QVector<int> parts)
+int OldHinduLuniSolarCalendar::fixedFromOldHinduLunar(const QVector<int> &parts)
 {
-	const int year=parts.at(0);
-	const int month=parts.at(1);
-	const bool leap=parts.at(2);
-	const int day=parts.at(3);
+	const int year =parts.value(0);
+	const int month=parts.value(1);
+	const bool leap=parts.value(2);
+	const int day  =parts.value(3);
 
 	const double mina = (12*year-1)*aryaSolarMonth;
 	const double lunarNewYear=aryaLunarMonth*(std::floor(mina/aryaLunarMonth)+1.);

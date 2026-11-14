@@ -31,9 +31,9 @@
 
 #include <QString>
 #include <QStringList>
-#include <QFont>
 
 class StelTranslator;
+class StelSkyCulture;
 class StelToneReproducer;
 class QSettings;
 class StelPainter;
@@ -42,8 +42,20 @@ typedef QSharedPointer<Nebula> NebulaP;
 
 //! @class NebulaMgr
 //! Manage a collection of nebulae. This class is used
-//! to display the NGC catalog with information, and textures for some of them.
-// GZ: This doc seems outdated/misleading - photo textures are not mamaged here but in StelSkyImageTile
+//! to display the M, NGC, IC, Barnard, and many other catalogs with information, and textures for some of them.
+// GZ: This doc seems widely outdated/misleading - photo textures are not managed here but in StelSkyImageTile
+
+//! Stellarium is prepared to manage more than one set of nebulae (Deep-Sky Objects).
+//! Currently all data are loaded from directory nebulae/default/.
+//! The actual textures are managed in a StelSphericalIndex.
+//! The file names.dat is an annotated list of object nicknames, providing names and references.
+//! Some names are a bit too fancyful for some users, so references can be excluded from loading
+//! by setting an entry in config.ini:
+//! [astro]
+//! nebula_exclude_references=default:ADI,DSC-HT;custom:foo,bar
+//! This would exclude references ADI and DSC-HT from nebulae/default/names.dat
+//! and references foo and bar from a (future) nebulae/custom/names.dat nebula set.
+//! If the value string does not contain a colon, it is assumed we mean default.
 
 class NebulaMgr : public StelObjectModule
 {
@@ -58,12 +70,14 @@ class NebulaMgr : public StelObjectModule
 		   WRITE setFlagUseTypeFilters
 		   NOTIFY flagUseTypeFiltersChanged)
 	//StelProperties
-	Q_PROPERTY(Nebula::TypeGroup typeFilters
+	// This used to be of type Nebula::TypeGroup, however on Qt6 this does not work and was changed to int.
+	Q_PROPERTY(int typeFilters
 		   READ getTypeFilters
 		   WRITE setTypeFilters
 		   NOTIFY typeFiltersChanged
 		   )
-	Q_PROPERTY(Nebula::CatalogGroup catalogFilters
+	// This used to be of type Nebula::CatalogGroup, however on Qt6 this does not work and was changed to int.
+	Q_PROPERTY(int catalogFilters
 		   READ getCatalogFilters
 		   WRITE setCatalogFilters
 		   NOTIFY catalogFiltersChanged
@@ -113,6 +127,11 @@ class NebulaMgr : public StelObjectModule
 		   WRITE setDesignationUsage
 		   NOTIFY designationUsageChanged
 		   )
+	Q_PROPERTY(bool flagShowOnlyNamedDSO
+		   READ getFlagShowOnlyNamedDSO
+		   WRITE setFlagShowOnlyNamedDSO
+		   NOTIFY flagShowOnlyNamedDSOChanged
+		   )
 	Q_PROPERTY(bool flagUseSizeLimits
 		   READ getFlagSizeLimitsUsage
 		   WRITE setFlagSizeLimitsUsage
@@ -129,6 +148,16 @@ class NebulaMgr : public StelObjectModule
 		   NOTIFY maxSizeLimitChanged
 		   )
 	// Colors
+	Q_PROPERTY(double hintsBrightness
+		   READ getHintsBrightness
+		   WRITE setHintsBrightness
+		   NOTIFY hintsBrightnessChanged
+		   )
+	Q_PROPERTY(double labelsBrightness
+		   READ getLabelsBrightness
+		   WRITE setLabelsBrightness
+		   NOTIFY labelsBrightnessChanged
+		   )
 	Q_PROPERTY(Vec3f labelsColor
 		   READ getLabelsColor
 		   WRITE setLabelsColor
@@ -254,11 +283,6 @@ class NebulaMgr : public StelObjectModule
 		   WRITE setProtoplanetaryNebulaColor
 		   NOTIFY protoplanetaryNebulaeColorChanged
 		   )
-	Q_PROPERTY(Vec3f clusterWithNebulosityColor
-		   READ getClusterWithNebulosityColor
-		   WRITE setClusterWithNebulosityColor
-		   NOTIFY clusterWithNebulosityColorChanged
-		   )
 	Q_PROPERTY(Vec3f hydrogenRegionsColor
 		   READ getHydrogenRegionColor
 		   WRITE setHydrogenRegionColor
@@ -317,7 +341,7 @@ class NebulaMgr : public StelObjectModule
 
 public:
 	NebulaMgr();
-	virtual ~NebulaMgr();
+	~NebulaMgr() override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in the StelModule class
@@ -328,16 +352,16 @@ public:
 	//!  - Load the pointer texture.
 	//!  - Set flags values from ini parser which relate to nebula display.
 	//!  - call updateI18n() to translate names.
-	virtual void init();
+	void init() override;
 
-	//! Draws all nebula objects.
-	virtual void draw(StelCore* core);
+	//! Draws all nebula objects and the pointer.
+	void draw(StelCore* core) override;
 
 	//! Update state which is time dependent.
-	virtual void update(double deltaTime) {hintsFader.update(static_cast<int>(deltaTime*1000)); flagShow.update(static_cast<int>(deltaTime*1000));}
+	void update(double deltaTime) override {hintsFader.update(static_cast<int>(deltaTime*1000)); flagShow.update(static_cast<int>(deltaTime*1000));}
 
 	//! Determines the order in which the various modules are drawn.
-	virtual double getCallOrder(StelModuleActionName actionName) const;
+	double getCallOrder(StelModuleActionName actionName) const override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in StelObjectModule class
@@ -346,30 +370,30 @@ public:
 	//! @param limitFov the field of view around the position v in which to search for nebulae.
 	//! @param core the StelCore to use for computations.
 	//! @return a list containing the nebulae located inside the limitFov circle around position v.
-	virtual QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const;
+	QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const override;
 
 	//! Return the matching nebula object's pointer if exists or an "empty" StelObjectP.
 	//! @param nameI18n The case in-sensitive nebula name or NGC M catalog name : format can
 	//! be M31, M 31, NGC31, NGC 31
-	virtual StelObjectP searchByNameI18n(const QString& nameI18n) const;
+	StelObjectP searchByNameI18n(const QString& nameI18n) const override;
 
 	//! Return the matching nebula if exists or Q_NULLPTR.
 	//! @param name The case in-sensitive standard program name
-	virtual StelObjectP searchByName(const QString& name) const;
+	StelObjectP searchByName(const QString& name) const override;
 
-	virtual StelObjectP searchByID(const QString &id) const { return searchByName(id); }
+	StelObjectP searchByID(const QString &id) const override { return searchByName(id); }
 
 	//! Find and return the list of at most maxNbItem objects auto-completing the passed object English name.
 	//! @param objPrefix the case insensitive first letters of the searched object
 	//! @param maxNbItem the maximum number of returned object names
 	//! @param useStartOfWords the autofill mode for returned objects names
 	//! @return a list of matching object name by order of relevance, or an empty list if nothing match
-	virtual QStringList listMatchingObjects(const QString& objPrefix, int maxNbItem=5, bool useStartOfWords=false) const;
+	QVector<QPair<QString,StelObjectP>> listMatchingObjects(const QString& objPrefix, int maxNbItem=5, bool useStartOfWords=false) const override;
 	//! @note Loading deep-sky objects with the proper names only.
-	virtual QStringList listAllObjects(bool inEnglish) const;
-	virtual QStringList listAllObjectsByType(const QString& objType, bool inEnglish) const;
-	virtual QString getName() const { return "Deep-sky objects"; }
-	virtual QString getStelObjectType() const { return Nebula::NEBULA_TYPE; }
+	QVector<QPair<QString,StelObjectP>> listAllObjects(bool inEnglish) const override;
+	QVector<QPair<QString,StelObjectP>> listAllObjectsByType(const QString& objType, bool inEnglish) const override;
+	QString getName() const override { return "Deep-sky objects"; }
+	QString getStelObjectType() const override { return Nebula::NEBULA_TYPE; }
 
 	//! Compute the maximum magntiude for which hints will be displayed.
 	float computeMaxMagHint(const class StelSkyDrawer* skyDrawer) const;
@@ -387,22 +411,33 @@ public:
 	const QVector<NebulaP>& getAllDeepSkyObjects() const { return dsoArray; }
 
 	//! Get the list of deep-sky objects by type.
-	QList<NebulaP> getDeepSkyObjectsByType(const QString& objType) const;
+	const QList<NebulaP> getDeepSkyObjectsByType(const QString& objType) const;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Properties setters and getters
 public slots:
-	void setCatalogFilters(Nebula::CatalogGroup cflags);
-	Nebula::CatalogGroup getCatalogFilters() const { return Nebula::catalogFilters; }
+	void setCatalogFilters(int cflags);
+	int getCatalogFilters() const { return int(Nebula::catalogFilters); }
+	//! Activate all catalogs
+	void selectAllCatalogs();
+	//! Activate a useful selection of catalogs: M, NGC, IC
+	void selectStandardCatalogs();
+	//! Disable all catalogs
+	void selectNoneCatalogs();
+	//! retrieve configured catalogs from config.ini.
+	void loadCatalogFilters();
+	//! store configured catalogs into config.ini.
+	void storeCatalogFilters();
 
-	void setTypeFilters(Nebula::TypeGroup tflags);
-	Nebula::TypeGroup getTypeFilters() const { return Nebula::typeFilters; }
+	void setTypeFilters(int tflags);
+	int getTypeFilters() const { return int(Nebula::typeFilters); }
 
 	//! Set the default color used to draw the nebula symbols (default circles, etc).
 	//! @param c The color of the nebula symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setCirclesColor(Vec3f(0.6,0.8,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(0.6, 0.8, 0.0);
+	//! NebulaMgr.setCirclesColor(c.toVec3f());
 	//! @endcode
 	void setCirclesColor(const Vec3f& c);
 	//! Get current value of the nebula circle color.
@@ -411,8 +446,9 @@ public slots:
 	//! Set the default color used to draw the region symbols (default dashed shape).
 	//! @param c The color of the region symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setRegionsColor(Vec3f(0.6,0.8,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(0.6, 0.8, 0.0);
+	//! NebulaMgr.setRegionsColor(c.toVec3f());
 	//! @endcode
 	void setRegionsColor(const Vec3f& c);
 	//! Get current value of the region color.
@@ -421,8 +457,9 @@ public slots:
 	//! Set the color used to draw the galaxy symbols (ellipses).
 	//! @param c The color of the galaxy symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setGalaxyColor(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! NebulaMgr.setGalaxyColor(c.toVec3f());
 	//! @endcode
 	void setGalaxyColor(const Vec3f& c);
 	//! Get current value of the galaxy symbol color.
@@ -431,8 +468,9 @@ public slots:
 	//! Set the color used to draw the active galaxy symbols (ellipses).
 	//! @param c The color of the active galaxy symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setActiveGalaxyColor(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! NebulaMgr.setActiveGalaxyColor(c.toVec3f());
 	//! @endcode
 	void setActiveGalaxyColor(const Vec3f& c);
 	//! Get current value of the active galaxy symbol color.
@@ -441,8 +479,9 @@ public slots:
 	//! Set the color used to draw the interacting galaxy symbols (ellipses).
 	//! @param c The color of the interacting galaxy symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setInteractingGalaxyColor(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! NebulaMgr.setInteractingGalaxyColor(c.toVec3f());
 	//! @endcode
 	void setInteractingGalaxyColor(const Vec3f& c);
 	//! Get current value of the interacting galaxy symbol color.
@@ -451,8 +490,9 @@ public slots:
 	//! Set the color used to draw the radio galaxy symbols (ellipses).
 	//! @param c The color of the radio galaxy symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setRadioGalaxyColor(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! NebulaMgr.setRadioGalaxyColor(c.toVec3f());
 	//! @endcode
 	void setRadioGalaxyColor(const Vec3f& c);
 	//! Get current value of the radio galaxy symbol color.
@@ -461,8 +501,9 @@ public slots:
 	//! Set the color used to draw the quasars symbols (ellipses).
 	//! @param c The color of the quasars symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setQuasarColor(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! NebulaMgr.setQuasarColor(c.toVec3f());
 	//! @endcode
 	void setQuasarColor(const Vec3f& c);
 	//! Get current value of the quasar symbol color.
@@ -471,8 +512,9 @@ public slots:
 	//! Set the color used to draw the bright nebula symbols (emission nebula boxes, planetary nebulae circles).
 	//! @param c The color of the nebula symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setNebulaColor(Vec3f(0.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(0.0, 1.0, 0.0);
+	//! NebulaMgr.setNebulaColor(c.toVec3f());
 	//! @endcode
 	void setNebulaColor(const Vec3f& c);
 	//! Get current value of the nebula circle color.
@@ -481,8 +523,9 @@ public slots:
 	//! Set the color used to draw the planetary nebulae symbols.
 	//! @param c The color of the planetary nebulae symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setPlanetaryNebulaColor(Vec3f(0.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(0.0, 1.0, 0.0);
+	//! NebulaMgr.setPlanetaryNebulaColor(c.toVec3f());
 	//! @endcode
 	void setPlanetaryNebulaColor(const Vec3f& c);
 	//! Get current value of the planetary nebula circle color.
@@ -491,8 +534,9 @@ public slots:
 	//! Set the color used to draw the reflection nebulae symbols.
 	//! @param c The color of the reflection nebulae symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setReflectionNebulaColor(Vec3f(0.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(0.0, 1.0, 0.0);
+	//! NebulaMgr.setReflectionNebulaColor(c.toVec3f());
 	//! @endcode
 	void setReflectionNebulaColor(const Vec3f& c);
 	//! Get current value of the reflection nebula circle color.
@@ -501,8 +545,9 @@ public slots:
 	//! Set the color used to draw the bipolar nebulae symbols.
 	//! @param c The color of the bipolar nebulae symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setBipolarNebulaColor(Vec3f(0.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(0.0, 1.0, 0.0);
+	//! NebulaMgr.setBipolarNebulaColor(c.toVec3f());
 	//! @endcode
 	void setBipolarNebulaColor(const Vec3f& c);
 	//! Get current value of the bipolar nebula circle color.
@@ -511,8 +556,9 @@ public slots:
 	//! Set the color used to draw the emission nebulae symbols.
 	//! @param c The color of the emission nebulae symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setEmissionNebulaColor(Vec3f(0.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(0.0, 1.0, 0.0);
+	//! NebulaMgr.setEmissionNebulaColor(c.toVec3f());
 	//! @endcode
 	void setEmissionNebulaColor(const Vec3f& c);
 	//! Get current value of the emission nebula circle color.
@@ -521,8 +567,9 @@ public slots:
 	//! Set the color used to draw the ionized hydrogen region symbols.
 	//! @param c The color of the ionized hydrogen region symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setHydrogenRegionColor(Vec3f(0.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(0.0, 1.0, 0.0);
+	//! NebulaMgr.setHydrogenRegionColor(c.toVec3f());
 	//! @endcode
 	void setHydrogenRegionColor(const Vec3f& c);
 	//! Get current value of the hydrogen region symbol color.
@@ -531,8 +578,9 @@ public slots:
 	//! Set the color used to draw the supernova remnant symbols.
 	//! @param c The color of the supernova remnant symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setSupernovaRemnantColor(Vec3f(0.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(0.0, 1.0, 0.0);
+	//! NebulaMgr.setSupernovaRemnantColor(c.toVec3f());
 	//! @endcode
 	void setSupernovaRemnantColor(const Vec3f& c);
 	//! Get current value of the supernova remnant symbol color.
@@ -541,8 +589,9 @@ public slots:
 	//! Set the color used to draw the supernova candidate symbols.
 	//! @param c The color of the supernova candidate symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setSupernovaCandidateColor(Vec3f(0.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(0.0, 1.0, 0.0);
+	//! NebulaMgr.setSupernovaCandidateColor(c.toVec3f());
 	//! @endcode
 	void setSupernovaCandidateColor(const Vec3f& c);
 	//! Get current value of the supernova candidate symbol color.
@@ -552,8 +601,9 @@ public slots:
 	//! Set the color used to draw the supernova remnant candidate symbols.
 	//! @param c The color of the supernova remnant candidate symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setSupernovaRemnantCandidateColor(Vec3f(0.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(0.0, 1.0, 0.0);
+	//! NebulaMgr.setSupernovaRemnantCandidateColor(c.toVec3f());
 	//! @endcode
 	void setSupernovaRemnantCandidateColor(const Vec3f& c);
 	//! Get current value of the supernova remnant candidate symbol color.
@@ -562,8 +612,9 @@ public slots:
 	//! Set the color used to draw the interstellar matter symbols.
 	//! @param c The color of the interstellar matter symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setInterstellarMatterColor(Vec3f(0.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(0.0, 1.0, 0.0);
+	//! NebulaMgr.setInterstellarMatterColor(c.toVec3f());
 	//! @endcode
 	void setInterstellarMatterColor(const Vec3f& c);
 	//! Get current value of the interstellar matter symbol color.
@@ -572,28 +623,20 @@ public slots:
 	//! Set the color used to draw the dark nebula symbols (gray boxes).
 	//! @param c The color of the dark nebula symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setDarkNebulaColor(Vec3f(0.2,0.2,0.2));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(0.2, 0.2, 0.2);
+	//! NebulaMgr.setDarkNebulaColor(c.toVec3f());
 	//! @endcode
 	void setDarkNebulaColor(const Vec3f& c);
 	//! Get current value of the dark nebula color.
 	const Vec3f getDarkNebulaColor(void) const;
 
-	//! Set the color used to draw the cluster associated with nebulosity symbols.
-	//! @param c The color of the cluster associated with nebulosity symbols
-	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setClusterWithNebulosityColor(Vec3f(0.2,0.2,0.2));
-	//! @endcode
-	void setClusterWithNebulosityColor(const Vec3f& c);
-	//! Get current value of the cluster associated with nebulosity color.
-	const Vec3f getClusterWithNebulosityColor(void) const;
-
 	//! Set the color used to draw the star cluster symbols (Open/Globular).
 	//! @param c The color of the cluster symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setClusterColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setClusterColor(c.toVec3f());
 	//! @endcode
 	void setClusterColor(const Vec3f& c);
 	//! Get current value of the star cluster symbol color.
@@ -602,8 +645,9 @@ public slots:
 	//! Set the color used to draw the open star cluster symbols.
 	//! @param c The color of the open star cluster symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setOpenClusterColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setOpenClusterColor(c.toVec3f());
 	//! @endcode
 	void setOpenClusterColor(const Vec3f& c);
 	//! Get current value of the open star cluster symbol color.
@@ -612,8 +656,9 @@ public slots:
 	//! Set the color used to draw the globular star cluster symbols.
 	//! @param c The color of the globular star cluster symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setGlobularClusterColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setGlobularClusterColor(c.toVec3f());
 	//! @endcode
 	void setGlobularClusterColor(const Vec3f& c);
 	//! Get current value of the globular star cluster symbol color.
@@ -622,8 +667,9 @@ public slots:
 	//! Set the color used to draw the stellar associations symbols.
 	//! @param c The color of the stellar associations symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setStellarAssociationColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setStellarAssociationColor(c.toVec3f());
 	//! @endcode
 	void setStellarAssociationColor(const Vec3f& c);
 	//! Get current value of the stellar association symbol color.
@@ -632,8 +678,9 @@ public slots:
 	//! Set the color used to draw the star clouds symbols.
 	//! @param c The color of the star clouds symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setStarCloudColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setStarCloudColor(c.toVec3f());
 	//! @endcode
 	void setStarCloudColor(const Vec3f& c);
 	//! Get current value of the star cloud symbol color.
@@ -642,8 +689,9 @@ public slots:
 	//! Set the color used to draw the emission objects symbols.
 	//! @param c The color of the emission objects symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setEmissionObjectColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! NebulaMgr.setEmissionObjectColor(c.toVec3f());
 	//! @endcode
 	void setEmissionObjectColor(const Vec3f& c);
 	//! Get current value of the emission object symbol color.
@@ -652,8 +700,9 @@ public slots:
 	//! Set the color used to draw the BL Lac objects symbols.
 	//! @param c The color of the BL Lac objects symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setBlLacObjectColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setBlLacObjectColor(c.toVec3f());
 	//! @endcode
 	void setBlLacObjectColor(const Vec3f& c);
 	//! Get current value of the BL Lac object symbol color.
@@ -662,8 +711,9 @@ public slots:
 	//! Set the color used to draw the blazars symbols.
 	//! @param c The color of the blazars symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setBlazarColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setBlazarColor(c.toVec3f());
 	//! @endcode
 	void setBlazarColor(const Vec3f& c);
 	//! Get current value of the blazar symbol color.
@@ -672,8 +722,9 @@ public slots:
 	//! Set the color used to draw the molecular clouds symbols.
 	//! @param c The color of the molecular clouds symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setMolecularCloudColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setMolecularCloudColor(c.toVec3f());
 	//! @endcode
 	void setMolecularCloudColor(const Vec3f& c);
 	//! Get current value of the molecular cloud symbol color.
@@ -682,8 +733,9 @@ public slots:
 	//! Set the color used to draw the young stellar objects symbols.
 	//! @param c The color of the young stellar objects symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setYoungStellarObjectColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setYoungStellarObjectColor(c.toVec3f());
 	//! @endcode
 	void setYoungStellarObjectColor(const Vec3f& c);
 	//! Get current value of the young stellar object symbol color.
@@ -692,8 +744,9 @@ public slots:
 	//! Set the color used to draw the possible quasars symbols.
 	//! @param c The color of the possible quasars symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setPossibleQuasarColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setPossibleQuasarColor(c.toVec3f());
 	//! @endcode
 	void setPossibleQuasarColor(const Vec3f& c);
 	//! Get current value of the possible quasar symbol color.
@@ -702,8 +755,9 @@ public slots:
 	//! Set the color used to draw the possible planetary nebulae symbols.
 	//! @param c The color of the possible planetary nebulae symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setPossiblePlanetaryNebulaColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setPossiblePlanetaryNebulaColor(c.toVec3f());
 	//! @endcode
 	void setPossiblePlanetaryNebulaColor(const Vec3f& c);
 	//! Get current value of the possible planetary nebula symbol color.
@@ -712,8 +766,9 @@ public slots:
 	//! Set the color used to draw the protoplanetary nebulae symbols.
 	//! @param c The color of the protoplanetary nebulae symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setProtoplanetaryNebulaColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setProtoplanetaryNebulaColor(c.toVec3f());
 	//! @endcode
 	void setProtoplanetaryNebulaColor(const Vec3f& c);
 	//! Get current value of the protoplanetary nebula symbol color.
@@ -722,8 +777,9 @@ public slots:
 	//! Set the color used to draw the stars symbols.
 	//! @param c The color of the stars symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setStarColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setStarColor(c.toVec3f());
 	//! @endcode
 	void setStarColor(const Vec3f& c);
 	//! Get current value of the star symbol color.
@@ -732,8 +788,9 @@ public slots:
 	//! Set the color used to draw the symbiotic stars symbols.
 	//! @param c The color of the symbiotic stars symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setSymbioticStarColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setSymbioticStarColor(c.toVec3f());
 	//! @endcode
 	void setSymbioticStarColor(const Vec3f& c);
 	//! Get current value of the symbiotic star symbol color.
@@ -742,8 +799,9 @@ public slots:
 	//! Set the color used to draw the emission-line stars symbols.
 	//! @param c The color of the emission-line stars symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setEmissionLineStarColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setEmissionLineStarColor(c.toVec3f());
 	//! @endcode
 	void setEmissionLineStarColor(const Vec3f& c);
 	//! Get current value of the emission-line star symbol color.
@@ -752,8 +810,9 @@ public slots:
 	//! Set the color used to draw the cluster of galaxies symbols.
 	//! @param c The color of the cluster of galaxies symbols
 	//! @code
-	//! // example of usage in scripts
-	//! NebulaMgr.setGalaxyClusterColor(Vec3f(1.0,1.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 1.0, 0.0);
+	//! NebulaMgr.setGalaxyClusterColor(c.toVec3f());
 	//! @endcode
 	void setGalaxyClusterColor(const Vec3f& c);
 	//! Get current value of the cluster of galaxies symbol color.
@@ -818,6 +877,11 @@ public slots:
 	//! Get value of flag used to turn on and off DSO type filtering.
 	bool getFlagUseTypeFilters(void) const;
 
+	//! Set flag used to turn on and off Named DSO Only.
+	void setFlagShowOnlyNamedDSO(const bool b);
+	//! Get value of flag used to turn on and off Named DSO Only.
+	bool getFlagShowOnlyNamedDSO(void) const;
+
 	//! Set the limit for min. angular size of displayed DSO.
 	//! @param s the angular size between 1 and 600 arcminutes
 	void setMinSizeLimit(double s);
@@ -858,19 +922,35 @@ public slots:
 	//! @return the amount between 0 and 10. 0 is no hints, 10 is maximum of hints
 	double getHintsAmount(void) const;
 
+	//! Set the brightness used to paint nebulae labels.
+	//! @param a the amount between 0 and 1. 0 is black, 1 is maximum brightness
+	void setLabelsBrightness(double b);
+	//! Get the brightness used to paint nebulae labels.
+	//! @return the amount between 0 and 1. 0 is dark (no labels), 1 is maximum brightness of labels
+	double getLabelsBrightness(void) const;
+
+	//! Set the brightness of nebulae hints.
+	//! @param f the amount between 0 and 10. 0 is no hints, 10 is maximum of hints
+	void setHintsBrightness(double b);
+	//! Get the brightness of nebulae labels.
+	//! @return the amount between 0 and 1. 0 is dark (no hints), 1 is maximum brightness of hints
+	double getHintsBrightness(void) const;
+
+
 signals:
 	//! Emitted when hints are toggled.
 	void flagHintsDisplayedChanged(bool b);
 	//! Emitted when filter types are changed.
 	void flagUseTypeFiltersChanged(bool b);
 	//! Emitted when the catalog filter is changed
-	void catalogFiltersChanged(Nebula::CatalogGroup flags);
+	void catalogFiltersChanged(int flags); // emits an int cast of Nebula::CatalogGroup
 	//! Emitted when the type filter is changed
-	void typeFiltersChanged(Nebula::TypeGroup flags);
+	void typeFiltersChanged(int flags); // emits an int cast of Nebula::TypeGroup
 	void hintsProportionalChanged(bool b);
 	void flagOutlinesDisplayedChanged(bool b);
 	void flagAdditionalNamesDisplayedChanged(bool b);
 	void designationUsageChanged(bool b);
+	void flagShowOnlyNamedDSOChanged(bool b);
 	void flagSurfaceBrightnessUsageChanged(bool b);
 	void flagSurfaceBrightnessArcsecUsageChanged(bool b);
 	void flagSurfaceBrightnessShortNotationUsageChanged(bool b);
@@ -879,6 +959,8 @@ signals:
 	void maxSizeLimitChanged(double s);
 	void labelsAmountChanged(double a);
 	void hintsAmountChanged(double f);
+	void labelsBrightnessChanged(double b);
+	void hintsBrightnessChanged(double b);
 
 	void labelsColorChanged(const Vec3f & color) const;
 	void circlesColorChanged(const Vec3f & color) const;
@@ -905,7 +987,6 @@ signals:
 	void emissionNebulaeColorChanged(const Vec3f & color) const;
 	void possiblePlanetaryNebulaeColorChanged(const Vec3f & color) const;
 	void protoplanetaryNebulaeColorChanged(const Vec3f & color) const;
-	void clusterWithNebulosityColorChanged(const Vec3f & color) const;
 	void hydrogenRegionsColorChanged(const Vec3f & color) const;
 	void interstellarMatterColorChanged(const Vec3f & color) const;
 	void emissionObjectsColorChanged(const Vec3f & color) const;
@@ -926,15 +1007,17 @@ private slots:
 	
 	//! Called when the sky culture is updated.
 	//! Loads native names of deep-sky objects for a given sky culture.
-	//! @param skyCultureDir the name of the directory containing the sky culture to use.
-	void updateSkyCulture(const QString& skyCultureDir);
+	void updateSkyCulture(const StelSkyCulture& skyCulture);
+
+	int loadCultureSpecificNames(const QJsonObject& data);
+	void loadCultureSpecificNameForNamedObject(const QJsonArray& data, const QString& commonName);
 
 	//! Connect from StelApp to reflect font size change.
-	void setFontSizeFromApp(int size){nebulaFont.setPixelSize(size);}
+	void setFontSizeFromApp(int size){fontSize = size;}
 
 private:
 	//! Search for a nebula object by name, e.g. M83, NGC 1123, IC 1234.
-	NebulaP search(const QString& name);
+	NebulaP searchForCommonName(const QString& name);
 
 	//! Search the Nebulae by position
 	NebulaP search(const Vec3d& pos);
@@ -991,9 +1074,32 @@ private:
 	bool loadDSONames(const QString& filename);
 	// Load outlines for DSO
 	bool loadDSOOutlines(const QString& filename);
+	// Load discovery data for DSO
+	// TODO: Move these data into main DSO catalog to fast reading (v4)
+	bool loadDSODiscoveryData(const QString& filename);
+
+	//! User-chosen suppressed references.
+	//! The collection of DSO names in default/names.dat does not suit all.
+	//! We allow to block loading references.
+	//! The unwanted references go to config.ini: astro/nebula_exclude_references = default:unref1,unref2,...;mySet:unref7,unref9,...
+	//! In order to load new versions of the ever-growing list of names (with growing list of references),
+	//! we store which entries should be blocked.
+	//! These names only block the global list, not skyculture-added names.
+	QStringList unwantedReferences;
 
 	QVector<NebulaP> dsoArray;		// The DSO list
 	QHash<unsigned int, NebulaP> dsoIndex;
+	// A struct that holds a NebulaP and user-accepted references from the loaded nebulaSet (usually nebulae/default/names.dat)
+	struct NebulaWithReferences {
+		NebulaP nebula;
+		QStringList references;
+	};
+	//! A Hash that holds a QStringList of all "accepted" names from nebulae/default/names.dat
+	//! @note "accepted" means that users can exclude DSO listed only in selected (unwanted) references.
+	QHash<NebulaP,QStringList> commonNameMap;
+	//! A Hash that holds NebulaP for each "accepted" uppercased name from nebulae/default/names.dat
+	//! @note "accepted" means that users can exclude DSO listed only in selected (unwanted) references.
+	QHash<QString/*name*/,NebulaWithReferences> commonNameIndex;
 
 	LinearFader hintsFader;
 	LinearFader flagShow;
@@ -1006,14 +1112,21 @@ private:
 	//! The amount of labels (between 0 and 10)
 	double labelsAmount;
 
+	//! The max brightness setting of hints (between 0 and 1)
+	double hintsBrightness;
+	//! The max brightness setting of labels (between 0 and 1)
+	double labelsBrightness;
+
 	//! The selection pointer texture
 	StelTextureSP texPointer;
 	
-	QFont nebulaFont;      // Font used for names printing
+	int fontSize;
 
-	// For DSO convertor
+	// For DSO converter
 	bool flagConverter;
 	bool flagDecimalCoordinates;
+
+	static const QString StellariumDSOCatalogVersion;
 };
 
 #endif // NEBULAMGR_HPP

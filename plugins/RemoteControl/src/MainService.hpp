@@ -49,7 +49,6 @@ class MainService : public AbstractAPIService
 {
 	Q_OBJECT
 
-	Q_ENUMS(SelectionMode)
 public:
 	enum SelectionMode
 	{
@@ -57,18 +56,19 @@ public:
 		Zoom,
 		Mark
 	};
+	Q_ENUM(SelectionMode)
 
-	MainService(QObject* parent = Q_NULLPTR);
+	MainService(QObject* parent = nullptr);
 
 	//! Used to implement move functionality
-	virtual void update(double deltaTime) Q_DECL_OVERRIDE;
-	virtual QLatin1String getPath() const Q_DECL_OVERRIDE { return QLatin1String("main"); }
+	void update(double deltaTime) override;
+	QLatin1String getPath() const override { return QLatin1String("main"); }
 	//! @brief Implements the GET operations
 	//! @see @ref rcMainServiceGET
-	virtual void get(const QByteArray& operation,const APIParameters &parameters, APIServiceResponse& response) Q_DECL_OVERRIDE;
+	void get(const QByteArray& operation,const APIParameters &parameters, APIServiceResponse& response) override;
 	//! @brief Implements the HTTP POST operations
 	//! @see @ref rcMainServicePOST
-	virtual void post(const QByteArray &operation, const APIParameters &parameters, const QByteArray &data, APIServiceResponse &response) Q_DECL_OVERRIDE;
+	void post(const QByteArray &operation, const APIParameters &parameters, const QByteArray &data, APIServiceResponse &response) override;
 
 private slots:
 	StelObjectP getSelectedObject();
@@ -77,13 +77,14 @@ private slots:
 	QString getInfoString();
 
 	//! Like StelDialog::gotoObject
-	bool focusObject(const QString& name, SelectionMode mode);
+	bool focusObject(const QString& name, MainService::SelectionMode mode);
 	void focusPosition(const Vec3d& pos);
 
 	void updateMovement(double x, double y, bool xUpdated, bool yUpdated);
 	// Allow azimut/altitude changes. Values must be in Radians.
 	void updateView(double az, double alt, bool azUpdated, bool altUpdated);
 	void setFov(double fov);
+	void setWindowSize(const int width, const int height);
 
 	void actionToggled(const QString& id, bool val);
 	void propertyChanged(StelProperty* prop, const QVariant &val);

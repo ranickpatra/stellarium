@@ -32,7 +32,7 @@ class QTimer;
 class StelProgressController;
 class QProgressBar;
 
-// Progess bars in the lower right corner
+// Progress bars in the lower right corner
 class StelProgressBarMgr : public QGraphicsWidget
 {
 	Q_OBJECT
@@ -47,15 +47,15 @@ private:
 	QMap<const StelProgressController*, QProgressBar*> allBars;
 };
 
-// Buttons in the bottom left corner
+// Auto-hide buttons placed in the active toolbar corner
 class CornerButtons : public QObject, public QGraphicsItem
 {
 	Q_OBJECT
 	Q_INTERFACES(QGraphicsItem)
 public:
-	CornerButtons(QGraphicsItem* parent=Q_NULLPTR);
-	virtual void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget = Q_NULLPTR) Q_DECL_OVERRIDE;
-	virtual QRectF boundingRect() const Q_DECL_OVERRIDE;
+	CornerButtons(QGraphicsItem* parent=nullptr);
+	void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget = nullptr) override;
+	QRectF boundingRect() const override;
 	void setOpacity(double opacity);
 private:
 	mutable double lastOpacity;
@@ -77,7 +77,9 @@ public:
 	//! @param noBackground define whether the button background image have to be used
 	StelButton(QGraphicsItem* parent, const QPixmap& pixOn, const QPixmap& pixOff,
 		   const QPixmap& pixHover=QPixmap(),
-		   class StelAction* action=Q_NULLPTR, bool noBackground=false);
+		   class StelAction* action=nullptr,
+		   bool noBackground=false,
+		   StelAction *otherAction=nullptr);
 	
 	//! Constructor
 	//! @param parent the parent item
@@ -88,7 +90,9 @@ public:
 	//! @param noBackground define whether the button background image have to be used
 	StelButton(QGraphicsItem* parent, const QPixmap& pixOn, const QPixmap& pixOff,
 		   const QPixmap& pixHover,
-		   const QString& actionId, bool noBackground=false);
+		   const QString& actionId,
+		   bool noBackground=false,
+		   const QString& otherActionId="");
 	//! Constructor
 	//! @param parent the parent item
 	//! @param pixOn the pixmap to display when the button is toggled
@@ -100,7 +104,9 @@ public:
 	//! @param isTristate define whether the button is a tristate or an on/off button
 	StelButton(QGraphicsItem* parent, const QPixmap& pixOn, const QPixmap& pixOff, const QPixmap& pixNoChange,
 		   const QPixmap& pixHover,
-		   const QString& actionId=QString(), bool noBackground=false, bool isTristate=true);
+		   const QString& actionId=QString(),
+		   bool noBackground=false,
+		   bool isTristate=true);
 	
 	//! Button states
 	enum {ButtonStateOff = 0, ButtonStateOn = 1, ButtonStateNoChange = 2};
@@ -110,7 +116,8 @@ public:
 
 	//! Get the width of the button image.
 	//! The width is based on pixOn.
-	int getButtonPixmapWidth() const {return pixOn.width();}
+	int getButtonPixmapWidth() const;
+	int getButtonPixmapHeight() const;
 
 	//! Set the button opacity
 	void setOpacity(double v) {opacity=v; updateIcon();}
@@ -127,11 +134,21 @@ public:
 	//! is released (by default buttons trigger on press event).
 	void setTriggerOnRelease(bool b) { triggerOnRelease = b;}
 
+	QRectF boundingRect() const override;
+
+	static double getInputPixmapsDevicePixelRatio() { return GUI_INPUT_PIXMAPS_SCALE; }
+
+	//! brighten image @param img by @param factor (Useful: [0.0...1.8])
+	//! The image is processed in HSV color space, V is modified.
+	static void brightenImage(QImage &img, float factor);
+
+
 signals:
 	//! Triggered when the button state changes
 	void toggled(bool);
 	//! Triggered when the button state changes
 	void triggered();
+	void triggeredRight();
 	//! Emitted when the hover state change
 	//! @param b true if the mouse entered the button
 	void hoverChanged(bool b);
@@ -140,41 +157,51 @@ public slots:
 	//! set whether the button is checked
 	void setChecked(int b);
 	void setChecked(bool b) { setChecked(static_cast<int>(b)); }
+	void updateIcon();
 
 protected:
-	virtual void mousePressEvent(QGraphicsSceneMouseEvent* event);
-	virtual void hoverEnterEvent(QGraphicsSceneHoverEvent* event);
-	virtual void hoverLeaveEvent(QGraphicsSceneHoverEvent* event);
-	virtual void mouseReleaseEvent(QGraphicsSceneMouseEvent *event);
+	void hoverEnterEvent(QGraphicsSceneHoverEvent* event) override;
+	void hoverLeaveEvent(QGraphicsSceneHoverEvent* event) override;
+	void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
+	void mouseReleaseEvent(QGraphicsSceneMouseEvent* event) override;
+	void paint(QPainter*, const QStyleOptionGraphicsItem*, QWidget*) override;
 private slots:
 	void animValueChanged(qreal value);
-	void updateIcon();
 private:
 	void initCtor(const QPixmap& apixOn,
                   const QPixmap& apixOff,
                   const QPixmap& apixNoChange,
                   const QPixmap& apixHover,
-                  StelAction* aaction,
+		  StelAction* anAction,
+		  StelAction* otherAction,
 		  bool noBackground,
 		  bool isTristate);
 	int toggleChecked(int);
+	static double buttonSizeRatio();
 
 	QPixmap pixOn;
 	QPixmap pixOff;
 	QPixmap pixNoChange;
 	QPixmap pixHover;
 	QPixmap pixBackground;
+	QPixmap scaledCurrentPixmap;
 
 	int checked;
 	bool flagChangeFocus;
 
 	QTimeLine* timeLine;
-	class StelAction* action;
+	class StelAction* action;          // linked action for button press
+	class StelAction* secondAction;    // linked action for rightclick (or Ctrl-Click?)
 	bool noBckground;
 	bool isTristate_;
 	double opacity;
 	double hoverOpacity;
 	bool triggerOnRelease = false;
+	// All input pixmaps are supposed to be 500% scaled compared to their
+	// appearance on the screen when high-DPI scale factor is 100%
+	static constexpr double GUI_INPUT_PIXMAPS_SCALE = 5;
+	// This is the actual scale to which the input pixmaps will be resized after loading
+	inline static double pixmapsScale = 0;
 };
 
 // The button bar on the left containing windows toggle buttons
@@ -184,20 +211,33 @@ class LeftStelBar : public QObject, public QGraphicsItem
 	Q_INTERFACES(QGraphicsItem)
 public:
 	LeftStelBar(QGraphicsItem* parent);
-	~LeftStelBar() Q_DECL_OVERRIDE;
-	virtual void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget = Q_NULLPTR) Q_DECL_OVERRIDE;
-	virtual QRectF boundingRect() const Q_DECL_OVERRIDE;
+	~LeftStelBar() override;
+	void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget = nullptr) override;
+	QRectF boundingRect() const override;
 	void addButton(StelButton* button);
 	QRectF boundingRectNoHelpLabel() const;
 	//! Set the color for all the sub elements
 	void setColor(const QColor& c);
+	//! Set whether the bar is at the right edge of the screen.
+	//! This is used to decide whether the help label is displayed to the left or right of the buttons.
+	void setBarAtRight(bool b) { barAtRight = b; }
+	//! Set whether the bar is docked at the top edge of the screen.
+	//! This is used to compute the gap to the outer horizontal edge of the bar.
+	void setBarAtTop(bool b);
 private slots:
 	//! Update the help label when a button is hovered
 	void buttonHoverChanged(bool b);
+
+	//! connect from StelApp to resize fonts on the fly.
+	void setFontSizeFromApp(int size);
+	//! connect from StelApp to set font on the fly.
+	void setFont(const QFont &cfont);
+	void updateButtonPositions();
 private:
 	QTimeLine* hideTimeLine;
 	QGraphicsSimpleTextItem* helpLabel;
-	QGraphicsPixmapItem* helpLabelPixmap; // bad-graphics replacement.
+	bool barAtRight = false;
+	bool barAtTop = false;
 };
 
 // The button bar on the bottom containing actions toggle buttons
@@ -207,9 +247,9 @@ class BottomStelBar : public QObject, public QGraphicsItem
 	Q_INTERFACES(QGraphicsItem)
 public:
 	BottomStelBar(QGraphicsItem* parent, const QPixmap& pixLeft=QPixmap(), const QPixmap& pixRight=QPixmap(), const QPixmap& pixMiddle=QPixmap(), const QPixmap& pixSingle=QPixmap());
-	virtual ~BottomStelBar() Q_DECL_OVERRIDE;
-	virtual void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget = Q_NULLPTR) Q_DECL_OVERRIDE;
-	virtual QRectF boundingRect() const Q_DECL_OVERRIDE;
+	~BottomStelBar() override;
+	void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget = nullptr) override;
+	QRectF boundingRect() const override;
 	QRectF boundingRectNoHelpLabel() const;
 
 	//! Add a button in a group in the button bar. Group are displayed in alphabetic order.
@@ -228,7 +268,7 @@ public:
 							const QPixmap& pixRight=QPixmap(), const QPixmap& pixMiddle=QPixmap(),
 							const QPixmap& pixSingle=QPixmap());
 
-	//! Set the color for all the sub elements
+	//! Set the brush color for all the sub elements (Seems not to do anything, in fact!)
 	void setColor(const QColor& c);
 
 	//! Set whether time must be displayed in the bottom bar
@@ -253,6 +293,21 @@ public:
 	void setFlagShowTz(bool b) { flagShowTZ=b; }
 	bool getFlagShowTz() const { return flagShowTZ; }
 
+	//! @return boundingRect of the buttons only
+	QRectF getButtonsBoundingRect() const;
+	//! @return height of vertical gap (pixels)
+	int getGap() const {return gap;}
+
+	//! Set whether the toolbar is at the top or the bottom of the screen.
+	//! This is used to decide whether the buttons are above or below the text row.
+	void setBarAtTop(bool b);
+	//! Get whether the toolbar is at the top or the bottom of the screen.
+	//! This is used to decide whether the buttons are above or below the text row.
+	bool getBarAtTop() const { return barAtTop; }
+
+	//! enable connection to StelCore::flagUseTopocentricCoordinatesChanged()
+	//! Recommended in operations that temporarily switch off and back on.
+	void enableTopoCentricUpdate(bool enable);
 signals:
 	void sizeChanged();
 
@@ -263,31 +318,26 @@ private slots:
 	//! connect from StelApp to resize fonts on the fly.
 	void setFontSizeFromApp(int size);
 	//! connect from StelApp to set font on the fly.
-	void setFont(QFont font);
+	void setFont(const QFont &cfont);
 
 private:
-	void updateText(bool forceUpdatePos=false);
+	// updateTopocentric: regardless of topocentric setting, reformat the string if true
+	void updateText(bool forceUpdatePos=false, bool updateTopocentric=false);
 	void updateButtonsGroups();
-	QRectF getButtonsBoundingRect() const;
 	// Elements which get displayed above the buttons:
 	QGraphicsSimpleTextItem* location;
 	QGraphicsSimpleTextItem* datetime;
 	QGraphicsSimpleTextItem* fov;
 	QGraphicsSimpleTextItem* fps;
-	// For bad graphics, show these instead. We can use location etc for font info.
-	// We use ad-hoc pixmaps instead if command-line arg. -t (--text-fix) is given.
-	QGraphicsPixmapItem* locationPixmap;
-	QGraphicsPixmapItem* datetimePixmap;
-	QGraphicsPixmapItem* fovPixmap;
-	QGraphicsPixmapItem* fpsPixmap;
+	int gap; // a pixel distance between status line and buttons. May have fixed size or could depend on status element font size QFontMetrics::descent()
 
 
 
 	struct ButtonGroup
 	{
 		ButtonGroup() : leftMargin(0), rightMargin(0),
-						pixBackgroundLeft(Q_NULLPTR), pixBackgroundRight(Q_NULLPTR),
-						pixBackgroundMiddle(Q_NULLPTR), pixBackgroundSingle(Q_NULLPTR) {;}
+						pixBackgroundLeft(nullptr), pixBackgroundRight(nullptr),
+						pixBackgroundMiddle(nullptr), pixBackgroundSingle(nullptr) {}
 		//! Elements of the group
 		QList<StelButton*> elems;
 		//! Left margin size in pixel
@@ -314,17 +364,22 @@ private:
 	bool flagFovDms;
 	bool flagTimeJd;
 	bool flagShowTZ;
+	bool barAtTop;
+	// Store these names. They can potentially be changed each frame, but lookup from SolarSystem is very costly.
+	QString planetNameEnglish;
+	QString planetNameI18n;
 
 	QGraphicsSimpleTextItem* helpLabel;
-	QGraphicsPixmapItem* helpLabelPixmap; // bad-graphics replacement.
 };
 
-// The path around the bottom left button bars
-class StelBarsPath : public QGraphicsPathItem
+//! @class StelBarsFrame
+//! @brief The path around the bottom and left button bars
+class StelBarsFrame : public QGraphicsPathItem
 {
 	public:
-		StelBarsPath(QGraphicsItem* parent);
-		void updatePath(BottomStelBar* bot, LeftStelBar* lef);
+		StelBarsFrame(QGraphicsItem* parent);
+		//! defines a line around the two button bars
+		void updatePath(BottomStelBar* bottom, LeftStelBar* left, bool barOnTop, bool barOnRight);
 		//! return radius of corner arc
 		double getRoundSize() const {return roundSize;}
 		void setBackgroundOpacity(double opacity);

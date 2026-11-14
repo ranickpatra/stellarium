@@ -3,7 +3,7 @@
 #
 # A tool for build an AppImage package of Stellarium
 #
-# Copyright (c) 2020 Alexander Wolf
+# Copyright (c) 2020-2023 Alexander Wolf
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -27,11 +27,6 @@
 dir=$(pwd)
 result="${dir%"${dir##*[!/]}"}"
 result="${result##*/}"
-arch=$(uname -m)
-
-if [ $arch = "armv7l" ]; then
-    arch="armhf"
-fi
 
 if [ "$result" = 'appimage' ]
 then
@@ -39,7 +34,7 @@ then
     ait=$(whereis appimagetool | sed 's/appimagetool://i')
     if [ -z $ait ]
     then
-        baseURL="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${arch}.AppImage"
+        baseURL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
         AppImage_Tool="/usr/local/bin/appimagetool"
         # Install appimagetool AppImage
         sudo wget ${baseURL} -O ${AppImage_Tool}
@@ -74,13 +69,13 @@ then
     # probably git fetched source code without history and tags
     if [ -z $version ]
     then
-        version="edge"
+        version="next"
     fi
     export APP_VERSION=${version}
 
     printf "\nLet's try build an AppImage for version \"%s\"\n" "$version"
 
-    appimage-builder --recipe ${ROOT}/util/appimage/stellarium-appimage-${arch}.yml --skip-test
+    appimage-builder --recipe ${ROOT}/util/appimage/stellarium-appimage-qt5.yml --skip-test
 
     chmod +x ./Stellarium*.AppImage
 else

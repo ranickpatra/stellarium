@@ -23,7 +23,7 @@
 #include "StelFader.hpp"
 #include "StelModule.hpp"
 #include "StelObject.hpp" // For StelObjectP
-#include "StelTexture.hpp"
+#include "StelTextureTypes.hpp"
 
 #include <QSettings>
 
@@ -38,8 +38,8 @@ class NavStarsWindow;
 @{
 The Navigational Stars plugin marks the 58 navigational stars of The
 Nautical Almanac and the 2102-D Rude Star Finder on the sky. Alternatively,
-the French, German, and Russian selection of navigational stars are also
-available.
+the French, German, and Russian selection of navigational stars or alignment
+stars for various telescopes are also available.
 
 The NavStars class is the main class of the plug-in. It manages the list of
 navigational stars and manipulate show/hide markers of them. Markers
@@ -63,7 +63,6 @@ file (section [NavigationalStars]).
 class NavStars : public StelModule
 {
 	Q_OBJECT
-	Q_ENUMS(NavigationalStarsSet)
 	Q_PROPERTY(bool navStarsVisible		READ getNavStarsMarks		WRITE setNavStarsMarks		NOTIFY navStarsMarksChanged)
 	Q_PROPERTY(bool displayAtStartup	READ getEnableAtStartup		WRITE setEnableAtStartup	NOTIFY enableAtStartupChanged)
 	Q_PROPERTY(bool highlightWhenVisible	READ getHighlightWhenVisible	WRITE setHighlightWhenVisible   NOTIFY highlightWhenVisibleChanged)
@@ -77,23 +76,40 @@ public:
 	//! Available sets of navigational stars
 	enum NavigationalStarsSet
 	{
-		AngloAmerican,	//!< Anglo-American set (The Nautical Almanac)
-		French,		//!< French set (Ephémérides Nautiques)
-		Russian,		//!< Russian set (Морской астрономический ежегодник)
-		German		//!< German set (Nautisches Jahrbuch)
+		AngloAmerican,   //!< Anglo-American set (The Nautical Almanac)
+		French,          //!< French set (Ephémérides Nautiques)
+		British,         //!< British set from XVIII century (Maskelyne's "British Mariner's Guide", 1764)
+		Wrinkles,        //!< British set from XIX century (Lecky's "Wrinkles" in practical navigation", 1884)
+		Russian,         //!< Russian set (Морской астрономический ежегодник)
+		USSRAvia,        //!< The set of navigational stars which was used for Soviet aviation
+		USSRSpace,       //!< The set of navigational stars for Soviet and Russian manned space programs Voskhod and Soyuz
+		German,          //!< German set (Nautisches Jahrbuch)
+		GeminiAPS,       //!< Gemini APS Alignment Star List
+		MeadeLX200,      //!< Meade LX200 Alignment Star Library
+		MeadeETX,        //!< Meade ETX Alignment Star Library
+		MeadeAS494,      //!< Meade Autostar #494 Alignment Stars
+		MeadeAS497,      //!< Meade Autostar #497 Alignment Stars
+		CelestronNS,     //!< Celestron NexStar Alignment Star List
+		Apollo,          //!< Apollo Alignment Star List
+		SkywatcherSS,    //!< Skywatcher SynScan Hand Controller and SynScan Pro App
+		VixenSB,         //!< Vixen Starbook Alignment Stars
+		ArgoNavis,       //!< Alignment stars for Argo Navis digital setting circles
+		OrionIS,         //!< Alignment stars for Orion Intelliscope mounts
+		SkyCommander     //!< Alignment stars for Sky Commander DSCs
 	};
+	Q_ENUM(NavigationalStarsSet)
 
 	NavStars();
-	virtual ~NavStars();
+	~NavStars() override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in the StelModule class
-	virtual void init();
-	virtual void deinit();
-	virtual void update(double deltaTime);
-	virtual void draw(StelCore* core);
-	virtual double getCallOrder(StelModuleActionName actionName) const;
-	virtual bool configureGui(bool show);
+	void init() override;
+	void deinit() override;
+	void update(double deltaTime) override;
+	void draw(StelCore* core) override;
+	double getCallOrder(StelModuleActionName actionName) const override;
+	bool configureGui(bool show) override;
 
 	//! Set up the plugin with default values.  This means clearing out the NavigationalStars section in the
 	//! main config.ini (if one already exists), and populating it with default values.
@@ -144,7 +160,7 @@ public slots:
 		currentNSSet = nsset;
 	}
 	//! Get the set of navigational stars
-	NavigationalStarsSet getCurrentNavigationalStarsSet() const
+	NavStars::NavigationalStarsSet getCurrentNavigationalStarsSet() const
 	{
 		return currentNSSet;
 	}
@@ -152,11 +168,7 @@ public slots:
 	QString getCurrentNavigationalStarsSetKey(void) const;
 	QString getCurrentNavigationalStarsSetDescription(void) const;
 	//! Set the set of navigational stars from its key
-	void setCurrentNavigationalStarsSetKey(QString key);
-
-	//! For the currently select object add the extraString info
-	//! in a format that matches the Nautical Almanac.
-	//REMOVE!void extraInfoStrings(const QMap<QString, double>& data, QMap<QString, QString>& strings, QString extraText = "");
+	void setCurrentNavigationalStarsSetKey(const QString &key);
 
 	//! Adds StelObject::ExtraInfo for selected object.
 	void addExtraInfo(StelCore* core);
@@ -166,20 +178,22 @@ public slots:
 	void extraInfo(StelCore* core, const StelObjectP& selectedObject);
 
 	//! Used to display the extraInfoStrings in standard "paired" lines (for example gha/dev)
-	void displayStandardInfo(const StelObjectP& selectedObject, NavStarsCalculator& calc, const QString& extraText);
+	static void displayStandardInfo(const StelObjectP& selectedObject, NavStarsCalculator& calc, const QString& extraText);
 
 	//! Used to display the extraInfoStrings in tabulated form more suited to students of CN
 	//! as found when using Nautical Almanacs.
-	void displayTabulatedInfo(const StelObjectP& selectedObject, NavStarsCalculator& calc, const QString& extraText);
+	static void displayTabulatedInfo(const StelObjectP& selectedObject, NavStarsCalculator& calc, const QString& extraText);
 
 	//! Given two QStrings return in a format consistent with the
 	//! property setting of "withTables".
 	//! @param QString a The cell left value
 	//! @param QString b The cell right value
 	//! @return QString The representation of the extraString info.
-	QString oneRowTwoCells(const QString& a, const QString& b, const QString& extra, bool tabulatedView);
+	static QString oneRowTwoCells(const QString& a, const QString& b, const QString& extra, bool tabulatedView);
 
-	bool isPermittedObject(const QString& s);
+	//! If information output is limited to the currently active navigational stars (getLimitInfoToNavStars()),
+	//! check a dedicated list of exceptions (Sun, Moon, planets apart from Mercury) to also add information.
+	static bool isPermittedObject(const QString& s);
 
 private slots:
 	//! Call when button "Save settings" in main GUI are pressed
@@ -198,7 +212,9 @@ signals:
 	void flagUseUTCTimeChanged(bool b);
 
 private:
+#ifndef NO_GUI
 	NavStarsWindow* mainWindow;
+#endif
 	StelPropertyMgr* propMgr;
 	QSettings* conf;	
 
@@ -206,15 +222,14 @@ private:
 	NavigationalStarsSet currentNSSet;
 
 	bool enableAtStartup;
-	bool starLabelsState;
-	bool upperLimb;
-	bool highlightWhenVisible;
-	bool limitInfoToNavStars;
-	bool tabulatedDisplay;
-	bool useUTCTime;
+	bool starLabelsState;      // Keep track of setting in the main program
+	bool upperLimb;            // Computation for Sun/Moon on upper or lower limb
+	bool highlightWhenVisible; // Show only when sky is dark enough
+	bool limitInfoToNavStars;  // Don't show nav data for non-nav stars
+	bool tabulatedDisplay;     // Use tabular layout for nav strings in InfoText
+	bool useUTCTime;           // Use UTC timezone while active
 
 	QString timeZone;
-	QVector<QString> permittedObjects;
 
 	//! List of the navigational stars' HIP numbers.
 	QList<int> starNumbers;
@@ -241,9 +256,9 @@ class NavStarsStelPluginInterface : public QObject, public StelPluginInterface
 	Q_PLUGIN_METADATA(IID StelPluginInterface_iid)
 	Q_INTERFACES(StelPluginInterface)
 public:
-	virtual StelModule* getStelModule() const;
-	virtual StelPluginInfo getPluginInfo() const;
-	virtual QObjectList getExtensionList() const { return QObjectList(); }
+	StelModule* getStelModule() const override;
+	StelPluginInfo getPluginInfo() const override;
+	//QObjectList getExtensionList() const override { return QObjectList(); }
 };
 
 #endif // NAVSTARS_HPP

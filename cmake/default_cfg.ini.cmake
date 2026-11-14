@@ -1,5 +1,5 @@
 [main]
-version                             = @PACKAGE_VERSION@
+version                             = @STELLARIUM_PUBLIC_VERSION@
 invert_screenshots_colors           = false
 
 [plugins_load_at_startup]
@@ -10,6 +10,7 @@ Exoplanets                          = true
 MeteorShowers                       = true
 Novae                               = true
 FOV                                 = true
+Planes                              = false
 
 [video]
 fullscreen                          = true
@@ -51,7 +52,7 @@ texture_triangle_base_length        = 8
 flag_use_ext_framebuffer_object     = false
 
 [localization]
-sky_culture                         = western
+sky_culture                         = modern
 sky_locale                          = system
 app_locale                          = system
 time_display_format                 = system_default
@@ -59,7 +60,7 @@ date_display_format                 = yyyymmdd
 
 [search]
 flag_search_online                  = true
-simbad_server_url                   = http://simbad.u-strasbg.fr/
+simbad_server_url                   = https://simbad.cds.unistra.fr/
 
 [stars]
 relative_scale                      = 1.0
@@ -108,9 +109,7 @@ screen_font_size                    = 13
 gui_font_size                       = 13
 #Name of custom font file for some languages, like Thai.
 #This file should be stored into data/ folder.
-#base_font_file                      = DejaVuSans.ttf
-#base_font_name                      = DejaVu Sans
-flag_font_selection                 = false
+flag_font_selection                 = true
 mouse_cursor_timeout                = 10
 flag_mouse_cursor_timeout           = false
 selected_object_info                = all

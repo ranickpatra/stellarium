@@ -20,14 +20,6 @@
 #include "TuiNodeDouble.hpp"
 #include <QKeyEvent>
 
-TuiNodeDouble::TuiNodeDouble(const QString& text, QObject* receiver, const char* method, double defValue,
-                             double min, double max, double inc, TuiNode* parent, TuiNode* prev)
-	: TuiNodeEditable(text, parent, prev), value(defValue), minimum(min), maximum(max), increment(inc), typing(false), typedDecimal(false)
-{
-	this->connect(this, SIGNAL(setValue(double)), receiver, method);
-	stringValue.setNum(value,'g',-1);
-}
-
 TuiNodeResponse TuiNodeDouble::handleEditingKey(int key)
 {
 	TuiNodeResponse response;
@@ -40,7 +32,7 @@ TuiNodeResponse TuiNodeDouble::handleEditingKey(int key)
 		editing = false;
 		response.accepted = true;
 		stringValue.setNum(value,'g',-1);
-		emit(setValue(value));
+		emit setValue(value);
 		return response;
 	}
 	else if (key==Qt::Key_Up)
@@ -52,7 +44,7 @@ TuiNodeResponse TuiNodeDouble::handleEditingKey(int key)
 			value = maximum;
 		response.accepted = true;
 		stringValue.setNum(value,'g',-1);
-		emit(setValue(value));
+		emit setValue(value);
 		return response;
 	}
 	else if (key==Qt::Key_Down)
@@ -64,7 +56,7 @@ TuiNodeResponse TuiNodeDouble::handleEditingKey(int key)
 			value = minimum;
 		response.accepted = true;
 		stringValue.setNum(value,'g',-1);
-		emit(setValue(value));
+		emit setValue(value);
 		return response;
 	}
 	else if (key==Qt::Key_Period)
@@ -102,7 +94,7 @@ TuiNodeResponse TuiNodeDouble::handleEditingKey(int key)
 		}
 		response.accepted = true;
 		response.newNode = this;
-		emit(setValue(value));
+		emit setValue(value);
 		return response;
 	}
 	else if (key==Qt::Key_Backspace)
@@ -125,7 +117,7 @@ TuiNodeResponse TuiNodeDouble::handleEditingKey(int key)
 			}
 		}
 		response.accepted = true;
-		emit(setValue(value));
+		emit setValue(value);
 		return response;
 	}
 	else if (key==Qt::Key_Minus)
@@ -136,7 +128,7 @@ TuiNodeResponse TuiNodeDouble::handleEditingKey(int key)
 			value = i;
 		stringValue.setNum(value,'g',-1);
 		response.accepted = true;
-		emit(setValue(value));
+		emit setValue(value);
 		return response;
 	}
 	return response;

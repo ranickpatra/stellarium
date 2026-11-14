@@ -28,9 +28,57 @@
 #include <QGuiApplication>
 #include <QStandardPaths>
 #include <QDir>
+#include <QRegularExpression>
 
 #include <cstdio>
 #include <iostream>
+
+void CLIProcessor::parseCLIArgsPreQApp(const QStringList argList)
+{
+#ifdef Q_OS_WIN
+    #if QT_VERSION < QT_VERSION_CHECK(6,0,0)
+	if (argsGetOption(argList, "-a", "--angle-mode"))
+		qputenv("QT_OPENGL", "angle");
+
+	if (argsGetOption(argList, "-9", "--angle-d3d9"))
+	{
+		qputenv("QT_OPENGL", "angle");
+		qputenv("QT_ANGLE_PLATFORM", "d3d9");
+	}
+	if (argsGetOption(argList, "", "--angle-d3d11"))
+	{
+		qputenv("QT_OPENGL", "angle");
+		qputenv("QT_ANGLE_PLATFORM", "d3d11");
+	}
+	if (argsGetOption(argList, "", "--angle-warp"))
+	{
+		qputenv("QT_OPENGL", "angle");
+		qputenv("QT_ANGLE_PLATFORM", "warp");
+	}
+    #endif
+	if (argsGetOption(argList, "-m", "--mesa-mode"))
+	{
+		qputenv("QT_OPENGL", "software");
+                qputenv("MESA_GL_VERSION_OVERRIDE", "3.3"); // The Mesa 20.1.8 library reports providing 3.1 only. This does the trick for us.
+		// These prepare using current Mesa3D libraries, should the user install them. Else the vars are harmless.
+		qputenv("QT_OPENGL_DLL", "opengl32sw.dll");
+		qputenv("GALLIUM_DRIVER", "llvmpipe");
+	}
+#endif
+	// Override user dir. This must be made via environment variable, else an empty user dir is created before resetting (GH:#3079)
+	try
+	{
+		QString newUserDir;
+		newUserDir = argsGetOptionWithArg(argList, "-u", "--user-dir", "").toString();
+		if (newUserDir!="" && !newUserDir.isEmpty())
+			qputenv("STEL_USERDIR", newUserDir.toLocal8Bit());
+	}
+	catch (std::runtime_error& e)
+	{
+		qCritical() << "ERROR: while processing --user-dir option: " << e.what();
+		exit(1);
+	}
+}
 
 void CLIProcessor::parseCLIArgsPreConfig(const QStringList& argList)
 {
@@ -42,9 +90,10 @@ void CLIProcessor::parseCLIArgsPreConfig(const QStringList& argList)
 
 	if (argsGetOption(argList, "-h", "--help"))
 	{
+		static const QRegularExpression beginRe("^.*[/\\\\]");
 		// Get the basename of binary
 		QString binName = argList.at(0);
-		binName.remove(QRegExp("^.*[/\\\\]"));
+		binName.remove(beginRe);
 
 		std::cout << "Usage:\n"
 		          << "  "
@@ -53,18 +102,23 @@ void CLIProcessor::parseCLIArgsPreConfig(const QStringList& argList)
 			  << "--version (or -v)       : Print program name and version and exit.\n"
 			  << "--help (or -h)          : This cruft.\n"
 			  << "--config-file (or -c)   : Use an alternative name for the config file\n"
+			  << "--log-file (or -l)      : Use an alternative name for the log file\n"
 			  << "--user-dir (or -u)      : Use an alternative user data directory\n"
-			  << "--verbose               : Even more diagnostic output in logfile \n"
-			  << "                          (esp. multimedia handling)\n"
-			  << "--compat33 (or -C)      : Request OpenGL 3.3 Compatibility Profile\n"
-			  << "                          May help for certain driver configurations. Mac?\n"
-			  << "--fix-text (or -t)      : May fix text rendering problems\n"
+			  << "--opengl-compat (or -C) : Request OpenGL Compatibility profile\n"
+			  << "                          May help for certain driver configurations.\n"
+			  << "--low-graphics (or -L)  : Force low-graphics mode\n"
+			  << "--single-buffer         : Use single buffer swap (avoid screen blanking on Intel UHD)\n"
 			  << "--scale-gui  <scale factor>  : Scaling the GUI according to scale factor\n"
+			  << "--gui-css (or -G) <styleName> : Use customized <styleName>.css file for GUI colors\n"
+			  << "--dump-fontinfo         : Output lots of data from the QFontInfo database (debugging aid)\n"
 			  << "--dump-opengl-details (or -d) : dump information about OpenGL support to logfile.\n"
 			  << "                          Use this is you have graphics problems\n"
 			  << "                          and want to send a bug report\n"
 			  << "--full-screen (or -f)   : With argument \"yes\" or \"no\" over-rides\n"
 			  << "                          the full screen setting in the config file\n"
+	     #ifdef Q_OS_WIN
+			  << "--no-screensaver (or -F): Inhibits screen saver when in fullscreen mode\n"
+	     #endif
 			  << "--screenshot-dir        : Specify directory to save screenshots\n"
 			  << "--startup-script        : Specify name of startup script\n"
 			  << "--home-planet           : Specify observer planet (English name)\n"
@@ -82,12 +136,13 @@ void CLIProcessor::parseCLIArgsPreConfig(const QStringList& argList)
 		          << "--multires-image        : With filename / URL argument, specify a\n"
 			  << "                          multi-resolution image to load\n"
 #ifdef Q_OS_WIN
+			  #if QT_VERSION < QT_VERSION_CHECK(6,0,0)
 			  << "--angle-mode (or -a)    : Use ANGLE as OpenGL ES2 rendering engine (autodetect driver)\n"
 			  << "--angle-d3d9 (or -9)    : Force use Direct3D 9 for ANGLE OpenGL ES2 rendering engine\n"
 			  << "--angle-d3d11           : Force use Direct3D 11 for ANGLE OpenGL ES2 rendering engine\n"
 			  << "--angle-warp            : Force use the Direct3D 11 software rasterizer for ANGLE OpenGL ES2 rendering engine\n"
-			  << "--mesa-mode (or -m)     : Use MESA as software OpenGL rendering engine\n"
-			  << "--safe-mode (or -s)     : Synonymous to --mesa-mode \n"
+			  #endif
+                          << "--mesa-mode (or -m)     : Use Mesa as software OpenGL rendering engine\n"
 			  #ifdef ENABLE_SPOUT
 			  << "--spout (or -S) <sky|all> : Act as SPOUT sender (Sky only/including GUI)\n"
 			  << "--spout-name <name>     : Set particular name for SPOUT sender.\n"
@@ -97,41 +152,22 @@ void CLIProcessor::parseCLIArgsPreConfig(const QStringList& argList)
 		exit(0);
 	}
 
-	if (argsGetOption(argList, "", "--verbose"))
-		qApp->setProperty("verbose", true);
+#ifdef Q_OS_WIN
+	if (argsGetOption(argList, "-F", "--no-screensaver"))
+		qApp->setProperty("onetime_inhibit_screensaver", true);
+#endif
+	if (argsGetOption(argList, "-C", "--opengl-compat"))
+		qApp->setProperty("onetime_opengl_compat", true);
 
-	if (argsGetOption(argList, "-C", "--compat33"))
-		qApp->setProperty("onetime_compat33", true);
+	if (argsGetOption(argList, "-L", "--low-graphics"))
+		qApp->setProperty("onetime_force_low_graphics", true);
 
-	if (argsGetOption(argList, "-t", "--fix-text"))
-		qApp->setProperty("text_texture", true); // Will be observed in StelPainter::drawText()
+	if (argsGetOption(argList, "", "--single-buffer"))
+		qApp->setProperty("onetime_single_buffer", true);
 
-	#ifdef Q_OS_WIN
-	if (argsGetOption(argList, "-s", "--safe-mode"))
-		qApp->setProperty("onetime_mesa_mode", true);
+	if (argsGetOption(argList, "", "--dump-fontinfo"))
+		qApp->setProperty("onetime_fontinfo", true);
 
-	if (argsGetOption(argList, "-a", "--angle-mode"))
-		qApp->setProperty("onetime_angle_mode", true);
-
-	if (argsGetOption(argList, "-9", "--angle-d3d9"))
-	{
-		qputenv("QT_ANGLE_PLATFORM", "d3d9");
-		qApp->setProperty("onetime_angle_mode", true);
-	}
-	if (argsGetOption(argList, "", "--angle-d3d11"))
-	{
-		qputenv("QT_ANGLE_PLATFORM", "d3d11");
-		qApp->setProperty("onetime_angle_mode", true);
-	}
-	if (argsGetOption(argList, "", "--angle-warp"))
-	{
-		qputenv("QT_ANGLE_PLATFORM", "warp");
-		qApp->setProperty("onetime_angle_mode", true);
-	}
-	if (argsGetOption(argList, "-m", "--mesa-mode"))
-		qApp->setProperty("onetime_mesa_mode", true);
-
-	#endif
 	if (argsGetOption(argList, "", "--list-landscapes"))
 	{
 		const QSet<QString>& landscapeIds = StelFileMgr::listContents("landscapes", StelFileMgr::Directory);
@@ -144,19 +180,6 @@ void CLIProcessor::parseCLIArgsPreConfig(const QStringList& argList)
 		}
 		exit(0);
 	}
-
-	try
-	{
-		QString newUserDir;
-		newUserDir = argsGetOptionWithArg(argList, "-u", "--user-dir", "").toString();
-		if (newUserDir!="" && !newUserDir.isEmpty())
-			StelFileMgr::setUserDir(newUserDir);
-	}
-	catch (std::runtime_error& e)
-	{
-		qCritical() << "ERROR: while processing --user-dir option: " << e.what();
-		exit(1);
-	}
 }
 
 void CLIProcessor::parseCLIArgsPostConfig(const QStringList& argList, QSettings* confSettings)
@@ -166,7 +189,7 @@ void CLIProcessor::parseCLIArgsPostConfig(const QStringList& argList, QSettings*
 	int fullScreen, altitude;
 	float fov;
 	QString landscapeId, homePlanet, longitude, latitude, skyDate, skyTime;
-	QString projectionType, screenshotDir, multiresImage, startupScript;
+	QString projectionType, screenshotDir, multiresImage, startupScript, customCSS;
 #ifdef ENABLE_SPOUT
 	QString spoutStr, spoutName;
 #endif
@@ -174,6 +197,8 @@ void CLIProcessor::parseCLIArgsPostConfig(const QStringList& argList, QSettings*
 	{
 		bool dumpOpenGLDetails = argsGetOption(argList, "-d", "--dump-opengl-details");
 		qApp->setProperty("dump_OpenGL_details", dumpOpenGLDetails);
+		bool no_audio = argsGetOption(argList, "", "--no-audio");
+		qApp->setProperty("onetime_no-audio", no_audio);
 		fullScreen = argsGetYesNoOption(argList, "-f", "--full-screen", -1);
 		landscapeId = argsGetOptionWithArg(argList, "", "--landscape", "").toString();
 		homePlanet = argsGetOptionWithArg(argList, "", "--home-planet", "").toString();
@@ -187,6 +212,7 @@ void CLIProcessor::parseCLIArgsPostConfig(const QStringList& argList, QSettings*
 		screenshotDir = argsGetOptionWithArg(argList, "", "--screenshot-dir", "").toString();
 		multiresImage = argsGetOptionWithArg(argList, "", "--multires-image", "").toString();
 		startupScript = argsGetOptionWithArg(argList, "", "--startup-script", "").toString();
+		customCSS = argsGetOptionWithArg(argList, "-G", "--gui-css", "").toString();
 #ifdef ENABLE_SPOUT
 		// For now, we default to spout=sky when no extra option is given. Later, we should also accept "all".
 		// Unfortunately, this still throws an exception when no optarg string is given.
@@ -227,21 +253,23 @@ void CLIProcessor::parseCLIArgsPostConfig(const QStringList& argList, QSettings*
 		// Over-ride the skyDatePart if the user specified the date using --sky-date
 		if (!skyDate.isEmpty())
 		{
-			// validate the argument format, we will tolerate yyyy-mm-dd by removing all -'s
-			QRegExp dateRx("\\d{8}");
-			if (dateRx.exactMatch(skyDate.remove("-")))
-				skyDatePart = QDate::fromString(skyDate, "yyyyMMdd").toJulianDay();
+			// validate the argument format, we will tolerate yyyy-mm-dd.
+			static const QRegularExpression dateRx("(-?\\d{4})-?(\\d{2})-?(\\d{2})");
+			static const QRegularExpression boundaryRx("\\b-");
+			QRegularExpressionMatch dateMatch=dateRx.match(skyDate);
+			if (dateMatch.hasMatch())
+			    StelUtils::getJDFromDate(&skyDatePart, dateMatch.captured(1).toInt(), dateMatch.captured(2).toInt(), dateMatch.captured(3).toInt(), 12, 0, 0);
 			else
-				qWarning() << "WARNING: --sky-date argument has unrecognised format  (I want yyyymmdd)";
+			    qWarning() << "--sky-date argument has unrecognised format  (I want [-]yyyymmdd)" << skyDate.remove(boundaryRx);
 		}
 
 		if (!skyTime.isEmpty())
 		{
-			QRegExp timeRx("\\d{1,2}:\\d{2}:\\d{2}");
-			if (timeRx.exactMatch(skyTime))
+			static const QRegularExpression timeRx("\\d{1,2}:\\d{2}:\\d{2}");
+			if (timeRx.match(skyTime).hasMatch())
 				skyTimePart = StelUtils::qTimeToJDFraction(QTime::fromString(skyTime, "hh:mm:ss"));
 			else
-				qWarning() << "WARNING: --sky-time argument has unrecognised format (I want hh:mm:ss)";
+				qWarning() << "--sky-time argument has unrecognised format (I want hh:mm:ss)";
 		}
 
 		confSettings->setValue("navigation/startup_time_mode", "preset");
@@ -260,6 +288,11 @@ void CLIProcessor::parseCLIArgsPostConfig(const QStringList& argList, QSettings*
 		qApp->setProperty("onetime_startup_script", startupScript);
 	}
 
+	if (!customCSS.isEmpty())
+	{
+		qApp->setProperty("onetime_custom_css", customCSS);
+	}
+
 	if (fov>0.0f) confSettings->setValue("navigation/init_fov", fov);
 	if (!projectionType.isEmpty()) confSettings->setValue("projection/type", projectionType);
 	if (!screenshotDir.isEmpty())
@@ -272,7 +305,7 @@ void CLIProcessor::parseCLIArgsPostConfig(const QStringList& argList, QSettings*
 		}
 		catch (std::runtime_error& e)
 		{
-			qWarning() << "WARNING: problem while setting screenshot directory for --screenshot-dir option: " << e.what();
+			qWarning() << "Problem while setting screenshot directory for --screenshot-dir option: " << e.what();
 		}
 	}
 	else
@@ -286,7 +319,7 @@ void CLIProcessor::parseCLIArgsPostConfig(const QStringList& argList, QSettings*
 			}
 			catch (std::runtime_error& e)
 			{
-				qWarning() << "WARNING: problem while setting screenshot from config file setting: " << e.what();
+				qWarning() << "Problem while setting screenshot from config file setting: " << e.what();
 			}
 		}		
 	}

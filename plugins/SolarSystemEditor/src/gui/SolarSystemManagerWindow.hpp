@@ -41,13 +41,13 @@ class SolarSystemManagerWindow : public StelDialog
 	Q_OBJECT
 public:
 	SolarSystemManagerWindow();
-	virtual ~SolarSystemManagerWindow();
+	~SolarSystemManagerWindow() override;
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 
 protected:
-	virtual void createDialogContent();
+	void createDialogContent() override;
 	Ui_solarSystemManagerWindow * ui;
 
 private slots:

@@ -17,41 +17,51 @@
  */
 
 #include "ASCOMDevice.hpp"
-#include <atlcomcli.h>
+#include "TelescopeControl.hpp"
 #include <comdef.h>
 
-ASCOMDevice::ASCOMDevice(QObject* parent, QString ascomDeviceId) : QObject(parent)
-{
-	mAscomDeviceId = ascomDeviceId;
-}
+ASCOMDevice::ASCOMDevice(QObject* parent, QString ascomDeviceId) : QObject(parent),
+	mAscomDeviceId(ascomDeviceId)
+{}
 
 bool ASCOMDevice::connect()
 {
 	if (mConnected) return true;
 
-	HRESULT hResult;
-	VARIANT v1;
-	BOOL initResult;
+	BOOL initResult = OleInit(COINIT_APARTMENTTHREADED);
+	HRESULT hResult = OleCreateInstance(reinterpret_cast<const wchar_t*>(mAscomDeviceId.toStdWString().c_str()), &pTelescopeDispatch);
 
-	initResult = OleInit(COINIT_APARTMENTTHREADED);
-	hResult = OleCreateInstance(reinterpret_cast<const wchar_t*>(mAscomDeviceId.toStdWString().c_str()), &pTelescopeDispatch);
-
-	if (FAILED(hResult))
+	if (!initResult || FAILED(hResult))
 	{
-		qDebug() << "Initialization failed for device: " << mAscomDeviceId;
+		qCWarning(Telescopes) << "Initialization failed for device: " << mAscomDeviceId;
 		return false;
 	}
 
-	v1 = OleBoolToVariant(TRUE);
+	VARIANT v1 = OleBoolToVariant(TRUE);
 
-	hResult = OlePropertyPut(pTelescopeDispatch, Q_NULLPTR, const_cast<wchar_t*>(LConnected), 1, v1);
+	hResult = OlePropertyPut(pTelescopeDispatch, nullptr, const_cast<wchar_t*>(LConnected), 1, v1);
 
 	if (FAILED(hResult))
 	{
-		qDebug() << "Could not connect to device: " << mAscomDeviceId;
+		qCWarning(Telescopes) << "Could not connect to device: " << mAscomDeviceId;
 		return false;
 	}
-	
+
+	// With ASCOM 7.1 there is a problem reaching the Properties panel of the simulators.
+	// Before sending a slew, telescopes must be set to tracking.
+	qCDebug(Telescopes) << "This device is tracking:" << isTracking();
+	if (!isTracking())
+	{
+		VARIANT vT = OleBoolToVariant(TRUE);
+
+		hResult = OlePropertyPut(pTelescopeDispatch, nullptr, const_cast<wchar_t*>(LTracking), 1, vT);
+
+		if (FAILED(hResult))
+		{
+			qCWarning(Telescopes) << "Could not enable Tracking on device: " << mAscomDeviceId;
+			return false;
+		}
+	}
 	mConnected = true;
 	return true;
 }
@@ -60,16 +70,12 @@ bool ASCOMDevice::disconnect()
 {
 	if (!mConnected) return true;
 
-	VARIANT v1;
-	HRESULT hResult;
-
-	v1 = OleBoolToVariant(FALSE);
-
-	hResult = OlePropertyPut(pTelescopeDispatch, Q_NULLPTR, const_cast<wchar_t*>(LConnected), 1, v1);
+	VARIANT v1 = OleBoolToVariant(FALSE);
+	HRESULT hResult = OlePropertyPut(pTelescopeDispatch, nullptr, const_cast<wchar_t*>(LConnected), 1, v1);
 
 	if (FAILED(hResult))
 	{
-		qDebug() << "Could not disconnect device: " << mAscomDeviceId;
+		qCWarning(Telescopes) << "Could not disconnect device: " << mAscomDeviceId;
 		return false;
 	}
 	
@@ -89,29 +95,31 @@ void ASCOMDevice::slewToCoordinates(ASCOMDevice::ASCOMCoordinates coords)
 {
 	if (!mConnected) return;
 
-	VARIANT v1, v2;
-	HRESULT hResult;
+	VARIANT v1 = OleDoubleToVariant(coords.RA);
+	VARIANT v2 = OleDoubleToVariant(coords.DEC);
 
-	v1 = OleDoubleToVariant(coords.RA);
-	v2 = OleDoubleToVariant(coords.DEC);
+	qCDebug(Telescopes) << "Slewing to coordinates" << variantToQstring(v1) << " dec " << variantToQstring(v2);
+	qCDebug(Telescopes) << "Slewing to coordinates" << QString::number(variantToDouble(v1)) << " dec " << QString::number(variantToDouble(v2));
 
-	hResult = OleMethodCall(pTelescopeDispatch, Q_NULLPTR, const_cast<wchar_t*>(LSlewToCoordinatesAsync), 2, v1, v2);
+	HRESULT hResult = OleMethodCall(pTelescopeDispatch, nullptr, const_cast<wchar_t*>(LSlewToCoordinatesAsync), 2, v1, v2);
+	if (FAILED(hResult))
+	{
+		qCWarning(Telescopes) << "Slew failed for device: " << mAscomDeviceId;
+	}
 }
 
 void ASCOMDevice::syncToCoordinates(ASCOMCoordinates coords)
 {
 	if (!mConnected) return;
 
-	VARIANT v1, v2;
-	HRESULT hResult;
+	VARIANT v1 = OleDoubleToVariant(coords.RA);
+	VARIANT v2 = OleDoubleToVariant(coords.DEC);
 
-	v1 = OleDoubleToVariant(coords.RA);
-	v2 = OleDoubleToVariant(coords.DEC);
-
-	hResult = OleMethodCall(pTelescopeDispatch, Q_NULLPTR, const_cast<wchar_t*>(LSyncToCoordinates), 2, v1, v2);
+	qCDebug(Telescopes) << "Syncing to coordinates" << variantToQstring(v1) << " dec " << variantToQstring(v2);
+	HRESULT hResult = OleMethodCall(pTelescopeDispatch, nullptr, const_cast<wchar_t*>(LSyncToCoordinates), 2, v1, v2);
 	if (FAILED(hResult))
 	{
-		qDebug() << "Could not sync to coordinates for device: " << mAscomDeviceId;
+		qCWarning(Telescopes) << "Could not sync to coordinates for device: " << mAscomDeviceId;
 	}
 }
 
@@ -119,11 +127,10 @@ void ASCOMDevice::abortSlew()
 {
 	if (!mConnected) return;
 
-	HRESULT hResult;
-	hResult = OleMethodCall(pTelescopeDispatch, Q_NULLPTR, const_cast<wchar_t*>(LAbortSlew));
+	HRESULT hResult = OleMethodCall(pTelescopeDispatch, nullptr, const_cast<wchar_t*>(LAbortSlew));
 	if (FAILED(hResult))
 	{
-		qDebug() << "Could not abort slew for device: " << mAscomDeviceId;
+		qCCritical(Telescopes) << "Could not abort slew for device: " << mAscomDeviceId;
 	}
 }
 
@@ -132,13 +139,13 @@ bool ASCOMDevice::isDeviceConnected() const
 	if (!mConnected) return false;
 
 	VARIANT v1;
-	HRESULT hResult;
-
-	hResult = OlePropertyGet(pTelescopeDispatch, &v1, const_cast<wchar_t*>(LConnected));
+	HRESULT hResult = OlePropertyGet(pTelescopeDispatch, &v1, const_cast<wchar_t*>(LConnected));
+	// TODO: if possible, change this. It fires once per frame in draw()!
+	//qCDebug(Telescopes) << "ASCOMDevice::isDeviceConnected reports" << variantToQstring(v1);
 
 	if (FAILED(hResult))
 	{
-		qDebug() << "Could not get connected state for device: " << mAscomDeviceId;
+		qCWarning(Telescopes) << "Could not get connected state for device: " << mAscomDeviceId;
 		return false;
 	}
 
@@ -150,32 +157,46 @@ bool ASCOMDevice::isParked() const
 	if (!mConnected) return true;
 
 	VARIANT v1;
-	HRESULT hResult;
-
-	hResult = OlePropertyGet(pTelescopeDispatch, &v1, const_cast<wchar_t*>(LAtPark));
+	HRESULT hResult = OlePropertyGet(pTelescopeDispatch, &v1, const_cast<wchar_t*>(LAtPark));
+	qCDebug(Telescopes) << "ASCOMDevice::isParked reports" << variantToQstring(v1);
 
 	if (FAILED(hResult))
 	{
-		qDebug() << "Could not get AtPark state for device: " << mAscomDeviceId;
+		qCWarning(Telescopes) << "Could not get AtPark state for device: " << mAscomDeviceId;
 		return false;
 	}
 
 	return v1.boolVal == -1;
 }
 
+bool ASCOMDevice::isTracking() const
+{
+	if (!mConnected) return true;
+
+	VARIANT v1;
+	HRESULT hResult = OlePropertyGet(pTelescopeDispatch, &v1, const_cast<wchar_t*>(LTracking));
+	qCDebug(Telescopes) << "ASCOMDevice::isTracking reports" << variantToQstring(v1);
+
+	if (FAILED(hResult))
+	{
+		qCWarning(Telescopes) << "Could not get Tracking state for device: " << mAscomDeviceId;
+		return false;
+	}
+
+	return v1.boolVal == -1;
+}
 
 ASCOMDevice::ASCOMEquatorialCoordinateType ASCOMDevice::getEquatorialCoordinateType()
 {
 	if (!mConnected) return ASCOMDevice::ASCOMEquatorialCoordinateType::Other;
 
 	VARIANT v1;
-	HRESULT hResult;
-
-	hResult = OlePropertyGet(pTelescopeDispatch, &v1, const_cast<wchar_t*>(LEquatorialSystem));
+	HRESULT hResult = OlePropertyGet(pTelescopeDispatch, &v1, const_cast<wchar_t*>(LEquatorialSystem));
+	qCDebug(Telescopes) << "ASCOMDevice::getEquatorialCoordinateType reports" << variantToQstring(v1);
 
 	if (FAILED(hResult))
 	{
-		qDebug() << "Could not get EquatorialCoordinateType for device: " << mAscomDeviceId;
+		qCWarning(Telescopes) << "Could not get EquatorialCoordinateType for device: " << mAscomDeviceId;
 		return ASCOMDevice::ASCOMEquatorialCoordinateType::Other;
 	}
 
@@ -187,13 +208,12 @@ bool ASCOMDevice::doesRefraction()
 	if (!mConnected) return false;
 
 	VARIANT v1;
-	HRESULT hResult;
-
-	hResult = OlePropertyGet(pTelescopeDispatch, &v1, const_cast<wchar_t*>(LDoesRefraction));
+	HRESULT hResult = OlePropertyGet(pTelescopeDispatch, &v1, const_cast<wchar_t*>(LDoesRefraction));
+	qCDebug(Telescopes) << "ASCOMDevice::doesRefraction reports" << variantToQstring(v1);
 
 	if (FAILED(hResult))
 	{
-		qDebug() << "Could not get DoesRefraction for device: " << mAscomDeviceId;
+		qCWarning(Telescopes) << "Could not get DoesRefraction for device: " << mAscomDeviceId;
 		return false;
 	}
 
@@ -211,13 +231,14 @@ ASCOMDevice::ASCOMCoordinates ASCOMDevice::getCoordinates()
 	HRESULT hResult;
 
 	hResult = OlePropertyGet(pTelescopeDispatch, &v1, const_cast<wchar_t*>(LRightAscension));
-	if (FAILED(hResult)) qDebug() << "Could not get RightAscension for device: " << mAscomDeviceId;
+	if (FAILED(hResult)) qCWarning(Telescopes) << "Could not get RightAscension for device: " << mAscomDeviceId;
 
 	hResult = OlePropertyGet(pTelescopeDispatch, &v2, const_cast<wchar_t*>(LDeclination));
-	if (FAILED(hResult)) qDebug() << "Could not get Declination for device: " << mAscomDeviceId;
+	if (FAILED(hResult)) qCWarning(Telescopes) << "Could not get Declination for device: " << mAscomDeviceId;
 
 	coords.RA = v1.dblVal;
 	coords.DEC = v2.dblVal;
+	qCDebug(Telescopes) << "ASCOMDevice::getCoordinates(): RA/Dec:" << QString::number(coords.RA) << "/" << QString::number(coords.DEC);
 
 	return coords;
 }
@@ -227,9 +248,7 @@ QString ASCOMDevice::showDeviceChooser(QString previousDeviceId)
 	VARIANT v1, v2;
 	HRESULT hResult;
 	IDispatch* chooserDispatch;
-	BOOL initResult;
-
-	initResult = OleInit(COINIT_APARTMENTTHREADED);
+	BOOL initResult = OleInit(COINIT_APARTMENTTHREADED);
 
 	if (!initResult) return previousDeviceId;
 	hResult = OleCreateInstance(L"ASCOM.Utilities.Chooser", &chooserDispatch);
@@ -259,3 +278,4 @@ const wchar_t* ASCOMDevice::LDoesRefraction = L"DoesRefraction";
 const wchar_t* ASCOMDevice::LRightAscension = L"RightAscension";
 const wchar_t* ASCOMDevice::LDeclination = L"Declination";
 const wchar_t* ASCOMDevice::LChoose = L"Choose";
+const wchar_t* ASCOMDevice::LTracking = L"Tracking";

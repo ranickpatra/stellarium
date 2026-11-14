@@ -26,7 +26,9 @@
 #include "StelTexture.hpp"
 #include "StelTextureMgr.hpp"
 #include "StelToast.hpp"
+#include "StelToneReproducer.hpp"
 #include "LandscapeMgr.hpp"
+#include "Planet.hpp"
 
 #include <QTimeLine>
 
@@ -58,7 +60,7 @@ ToastTile::ToastTile(ToastSurvey* survey, int level, int x, int y)
 ToastTile::~ToastTile()
 {
 	//delete all currently owned tiles
-	for (auto* child : subTiles)
+	for (auto* child : std::as_const(subTiles))
 	{
 		delete child;
 	}
@@ -109,6 +111,7 @@ void ToastTile::prepareDraw(Vec3f color)
 {
 	Q_ASSERT(!empty);
 
+	StelCore *core=StelApp::getInstance().getCore();
 	StelSkyDrawer *drawer=StelApp::getInstance().getCore()->getSkyDrawer();
 	const bool withExtinction=(drawer->getFlagHasAtmosphere() && drawer->getExtinction().getExtinctionCoefficient()>=0.01f);
 
@@ -116,7 +119,7 @@ void ToastTile::prepareDraw(Vec3f color)
 	{
 		//qDebug() << "load texture" << imagePath;
 		StelTextureMgr& texMgr=StelApp::getInstance().getTextureManager();
-		texture = texMgr.createTextureThread(imagePath, StelTexture::StelTextureParams(true));
+		texture = texMgr.createTextureThread(imagePath, StelTexture::Params().enableMipmapGen());
 	}
 	if (texture.isNull() || (!texture->isLoading() && !texture->canBind() && !texture->getErrorMessage().isEmpty()))
 	{
@@ -128,20 +131,39 @@ void ToastTile::prepareDraw(Vec3f color)
 	if (!texture->canBind())
 		return;
 	// Get the opengl arrays
-	if (vertexArray.empty())
+	if (originalVertexArray.empty())
 	{
 		int ml = qMin(qMax(3, level+1), getGrid()->getMaxLevel());
-		vertexArray = getGrid()->getVertexArray(level, x, y, ml);
+		originalVertexArray = getGrid()->getVertexArray(level, x, y, ml);
 		textureArray = getGrid()->getTextureArray(level, x, y, ml);
 		indexArray = getGrid()->getTrianglesIndex(level, x, y, ml);
 		colorArray.clear();
-		for (int i=0; i<vertexArray.size(); ++i)
+		for (int i=0; i<originalVertexArray.size(); ++i)
 			colorArray.append(color);
 	}
+
+	if (core->getUseAberration())
+	{
+		const Vec3d vel = core->getAberrationVec(core->getJDE());
+		vertexArray=QVector<Vec3d>(originalVertexArray);
+		for (int i=0; i<originalVertexArray.size(); i++)
+		{
+			Vec3d vert=originalVertexArray.at(i);
+			Q_ASSERT_X(fabs(vert.normSquared()-1.0)<0.0001, "StelToast aberration", "vertex length not unity");
+			vert+=vel;
+			vert.normalize();
+
+			vertexArray[i]=vert;
+		}
+	}
+	else
+	{
+		vertexArray=originalVertexArray;
+	}
+
 	// Recreate the color array in any case. Assume we must compute extinction on every frame.
 	if (withExtinction)
 	{
-		StelCore *core=StelApp::getInstance().getCore();
 		// We must process the vertices to find geometric altitudes in order to compute vertex colors.
 		const Extinction& extinction=drawer->getExtinction();
 		colorArray.clear();
@@ -149,7 +171,7 @@ void ToastTile::prepareDraw(Vec3f color)
 		for (int i=0; i<vertexArray.size(); ++i)
 		{
 			Vec3d vertAltAz=core->j2000ToAltAz(vertexArray.at(i), StelCore::RefractionOn);
-			Q_ASSERT(fabs(vertAltAz.lengthSquared()-1.0) < 0.001);
+			Q_ASSERT(fabs(vertAltAz.normSquared()-1.0) < 0.001);
 
 			float oneMag=0.0f;
 			extinction.forward(vertAltAz, &oneMag);
@@ -164,7 +186,6 @@ void ToastTile::prepareDraw(Vec3f color)
 	{
 		colorArray.fill(Vec3f(1.0f));
 	}
-
 
 	if (subTiles.isEmpty() && level < getSurvey()->getMaxLevel())
 	{
@@ -229,7 +250,7 @@ void ToastTile::draw(StelPainter* sPainter, const SphericalCap& viewportShape, i
 	if (!isVisible(viewportShape, maxVisibleLevel))
 	{
 		// Clean up to save memory.
-		for (auto* child : subTiles)
+		for (auto* child : std::as_const(subTiles))
 		{
 			//put into cache instead of delete
 			//the subtiles of the child remain owned by it
@@ -245,7 +266,7 @@ void ToastTile::draw(StelPainter* sPainter, const SphericalCap& viewportShape, i
 		drawTile(sPainter, color);
 
 	// Draw all the children
-	for (auto* child : subTiles)
+	for (auto* child : std::as_const(subTiles))
 	{
 		child->draw(sPainter, viewportShape, maxVisibleLevel, color);
 	}
@@ -302,6 +323,7 @@ void ToastSurvey::draw(StelPainter* sPainter)
 		// Get the luminance scaled between 0 and 1
 		StelToneReproducer* eye = core->getToneReproducer();
 		float aLum =eye->adaptLuminanceScaled(lum);
+		Q_ASSERT(aLum>0.f);
 
 		// Bound a maximum luminance. GZ: Is there any reference/reason, or just trial and error?
 		aLum = qMin(1.0f, aLum*2.f); // Was 0.38 for MilkyWay. TOAST is allowed to look a bit artificial though...
@@ -314,9 +336,12 @@ void ToastSurvey::draw(StelPainter* sPainter)
 		float atmFactor=qMax(0.35f, 50.0f*(0.02f-atmLum)); // keep visible in twilight, but this is enough for some effect with the moon.
 		color*=atmFactor*atmFactor;
 
-		if (color[0]<0) color[0]=0;
-		if (color[1]<0) color[1]=0;
-		if (color[2]<0) color[2]=0;
+		Q_ASSERT_X(color[0]>=0.f, "StelToast::draw()", "color R has unexpected value");
+		Q_ASSERT_X(color[1]>=0.f, "StelToast::draw()", "color G has unexpected value");
+		Q_ASSERT_X(color[2]>=0.f, "StelToast::draw()", "color B has unexpected value");
+		//if (color[0]<0) color[0]=0;
+		//if (color[1]<0) color[1]=0;
+		//if (color[2]<0) color[2]=0;
 	}
 
 	// We also get the viewport shape to discard invisible tiles.

@@ -20,24 +20,22 @@
 #define SIMPLEDRAWLINE_HPP
 
 #include "StelModule.hpp"
-#include <QFont>
 
 //! This is an example of a plug-in which can be dynamically loaded into stellarium
 class SimpleDrawLine : public StelModule
 {
 public:
 	SimpleDrawLine();
-	virtual ~SimpleDrawLine();
+	~SimpleDrawLine() override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in the StelModule class
-	virtual void init();
-	virtual void update(double) {;}
-	virtual void draw(StelCore* core);
-	virtual double getCallOrder(StelModuleActionName actionName) const;
+	void init() override;
+	void draw(StelCore* core) override;
+	double getCallOrder(StelModuleActionName actionName) const override;
 private:
-	// Font used for displaying our text
-	QFont font;
+	// Font size used for displaying our text
+	int fontSize;
 };
 
 
@@ -51,9 +49,9 @@ class SimpleDrawLineStelPluginInterface : public QObject, public StelPluginInter
 	Q_PLUGIN_METADATA(IID StelPluginInterface_iid)
 	Q_INTERFACES(StelPluginInterface)
 public:
-	virtual StelModule* getStelModule() const;
-	virtual StelPluginInfo getPluginInfo() const;
-	virtual QObjectList getExtensionList() const { return QObjectList(); }
+	StelModule* getStelModule() const override;
+	StelPluginInfo getPluginInfo() const override;
+	//QObjectList getExtensionList() const override { return QObjectList(); }
 };
 
 #endif /* SIMPLEDRAWLINE_HPP */

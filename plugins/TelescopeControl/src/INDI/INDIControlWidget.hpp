@@ -29,26 +29,16 @@ class INDIControlWidget;
 
 class INDIControlWidget : public QWidget
 {
-    Q_OBJECT
+	Q_OBJECT
 
 public:
-	explicit INDIControlWidget(QSharedPointer<TelescopeClient> telescope, QWidget *parent = 0);
-    ~INDIControlWidget();
-
-private slots:
-	void onNorthButtonPressed();
-	void onNorthButtonReleased();
-	void onEastButtonPressed();
-	void onEastButtonReleased();
-	void onSouthButtonPressed();
-	void onSouthButtonReleased();
-	void onWestButtonPressed();
-	void onWestButtonReleased();
+	explicit INDIControlWidget(QSharedPointer<TelescopeClient> telescope, QWidget *parent = nullptr);
+	~INDIControlWidget() override;
 
 private:
 	double speed() const;
 
-    Ui::INDIControlWidget *ui;
+	Ui::INDIControlWidget *ui;
 	QSharedPointer<TelescopeClient> mTelescope;
 };
 

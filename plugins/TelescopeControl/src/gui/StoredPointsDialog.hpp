@@ -24,16 +24,8 @@
 #include <QDialog>
 #include <QStandardItemModel>
 
-#include "StelApp.hpp"
-#include "StelStyle.hpp"
-#include "StelTranslator.hpp"
-#include "StelDialog.hpp"
-#include "StelCore.hpp"
-#include "StelObjectMgr.hpp"
-#include "StelModuleMgr.hpp"
-#include "StelUtils.hpp"
 
-#include "AngleSpinBox.hpp"
+#include "StelDialog.hpp"
 
 class Ui_StoredPoints;
 
@@ -51,13 +43,13 @@ class StoredPointsDialog : public StelDialog
 	Q_OBJECT
 
 public:
-	StoredPointsDialog();
-	~StoredPointsDialog();
+	StoredPointsDialog(const QString &dialogName=QString("TelescopeControlStoredPoints"), QObject* parent=nullptr);
+	~StoredPointsDialog() override;
 
 	void populatePointsList(QVariantList list);
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 
 private slots:
 	void buttonAddPressed();
@@ -74,7 +66,7 @@ signals:
 
 protected:
 	//! Initialize the dialog widgets and connect the signals/slots
-	virtual void createDialogContent();
+	void createDialogContent() override;
 	Ui_StoredPoints *ui;
 private:
 	//! @enum ModelColumns This enum defines the number and the order of the columns in the table that lists points

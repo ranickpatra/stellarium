@@ -31,41 +31,41 @@ class CopticCalendar : public JulianCalendar
 public:
 	CopticCalendar(double jd);
 
-	virtual ~CopticCalendar() Q_DECL_OVERRIDE {}
+	~CopticCalendar() override {}
 
 public slots:
-	virtual void retranslate() Q_DECL_OVERRIDE;
+	void retranslate() override;
 
 	//! Set a calendar date from the Julian day number
-	virtual void setJD(double JD) Q_DECL_OVERRIDE;
+	void setJD(double JD) override;
 
 	//! set date from a vector of calendar date elements sorted from the largest to the smallest.
 	//! Year-Month[1...13]-Day[1...30]
-	virtual void setDate(QVector<int> parts) Q_DECL_OVERRIDE;
+	void setDate(const QVector<int> &parts) override;
 
 	//! get a stringlist of calendar date elements sorted from the largest to the smallest.
 	//! Year, Month, MonthName, Day, DayName
-	virtual QStringList getDateStrings() const Q_DECL_OVERRIDE;
+	QStringList getDateStrings() const override;
 
 	//! get a formatted complete string for a date
-	virtual QString getFormattedDateString() const Q_DECL_OVERRIDE;
+	QString getFormattedDateString() const override;
 
-public:
 	//! find RD number for date in the Coptic calendar (may be used in other calendars!)
-	static int fixedFromCoptic(QVector<int> coptic);
+	static int fixedFromCoptic(const QVector<int> &coptic);
 	//! find date in the Coptic calendar from RD number (may be used in other calendars!)
 	static QVector<int> copticFromFixed(int rd);
 
 	//! returns true for leap years
 	static bool isLeap(int year);
 
+	//! returns name of weekday for a JD
+	static QString weekday(double jd);
+public:
 	static const int copticEpoch; //! RD of 284-aug-29 (Jul).
 
 protected:
 	static QMap<int, QString> monthNames;
 	static QMap<int, QString> dayNames;
-
-	static QString weekday(double jd);
 };
 
 #endif

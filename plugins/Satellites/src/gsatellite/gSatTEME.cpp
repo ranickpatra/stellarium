@@ -11,7 +11,7 @@
  *              Kelso, "Revisiting Spacetrack Report #3,"
  *              presented at the AIAA/AAS Astrodynamics Specialist
  *              Conference, Keystone, CO, 2006 August 21-24.
- *              http://celestrak.com/publications/AIAA/2006-6753/
+ *              https://celestrak.org/publications/AIAA/2006-6753/
  ***************************************************************************/
 
 /***************************************************************************
@@ -36,13 +36,14 @@
 
 // GKepFile
 #include "gSatTEME.hpp"
-#include <iostream>
-#include <iomanip>
+//#include <iostream>
+//#include <iomanip>
+#include <math.h>
 
 #include "mathUtils.hpp"
 #include "sgp4io.h"
 
-#define CONSTANTS_SET wgs72
+#define CONSTANTS_SET wgs84
 #define TYPERUN_SET   'c'
 #define OPSMODE_SET   'i'
 #define TYPEINPUT_SET 'm'
@@ -54,9 +55,7 @@
 // Constructors
 gSatTEME::gSatTEME(const char *pstrName, char *pstrTleLine1, char *pstrTleLine2)
 {
-	double startmfe, stopmfe, deltamin;
-	double ro[3] = {};
-	double vo[3] = {};
+	double startmfe, stopmfe, deltamin; // dummies
 
 	m_SatName = pstrName;
 
@@ -68,14 +67,7 @@ gSatTEME::gSatTEME(const char *pstrName, char *pstrTleLine1, char *pstrTleLine2)
 	           startmfe, stopmfe, deltamin, satrec);
 
 	// call the propagator to get the initial state vector value
-	sgp4(CONSTANTS_SET, satrec,  0.0, ro,  vo);
-
-	m_Position[ 0]= ro[ 0];
-	m_Position[ 1]= ro[ 1];
-	m_Position[ 2]= ro[ 2];
-	m_Vel[ 0]     = vo[ 0];
-	m_Vel[ 1]     = vo[ 1];
-	m_Vel[ 2]     = vo[ 2];
+	sgp4(CONSTANTS_SET, satrec,  0.0, m_Position.v,  m_Vel.v);
 }
 
 void gSatTEME::setEpoch(gTime ai_time)
@@ -83,68 +75,52 @@ void gSatTEME::setEpoch(gTime ai_time)
 	gTime     kepEpoch(satrec.jdsatepoch);
 	gTimeSpan tSince = ai_time - kepEpoch;
 
-	double ro[3] = {};
-	double vo[3] = {};
 	double dtsince = tSince.getDblSeconds()/KSEC_PER_MIN;
 	// call the propagator to get the initial state vector value
-	sgp4(CONSTANTS_SET, satrec,  dtsince, ro,  vo);
+	sgp4(CONSTANTS_SET, satrec,  dtsince, m_Position.v,  m_Vel.v);
 
-	m_Position[ 0]= ro[ 0];
-	m_Position[ 1]= ro[ 1];
-	m_Position[ 2]= ro[ 2];
-	m_Vel[ 0]     = vo[ 0];
-	m_Vel[ 1]     = vo[ 1];
-	m_Vel[ 2]     = vo[ 2];
 	m_SubPoint    = computeSubPoint( ai_time);
 }
 
 void gSatTEME::setMinSinceKepEpoch(double ai_minSinceKepEpoch)
 {
-	double ro[3];
-	double vo[3];
 	gTimeSpan tSince( ai_minSinceKepEpoch/KMIN_PER_DAY);
 	gTime     Epoch(satrec.jdsatepoch);
 	Epoch += tSince;
 	// call the propagator to get the initial state vector value
-	sgp4(CONSTANTS_SET, satrec,  ai_minSinceKepEpoch, ro,  vo);
+	sgp4(CONSTANTS_SET, satrec,  ai_minSinceKepEpoch, m_Position.v,  m_Vel.v);
 
-	m_Position[ 0]= ro[ 0];
-	m_Position[ 1]= ro[ 1];
-	m_Position[ 2]= ro[ 2];
-	m_Vel[ 0]     = vo[ 0];
-	m_Vel[ 1]     = vo[ 1];
-	m_Vel[ 2]     = vo[ 2];
 	m_SubPoint    = computeSubPoint( Epoch);
 }
 
 Vec3d gSatTEME::computeSubPoint(gTime ai_Time)
 {
 	Vec3d resultVector; // (0) Latitude, (1) Longitude, (2) altitude
-	double theta, r, e2, phi, c;
 
-	theta = AcTan(m_Position[1], m_Position[0]); // radians
-	resultVector[ LONGITUDE] = fmod((theta - ai_Time.toThetaGMST()), K2PI);  //radians
+	const double theta = atan2(m_Position[1], m_Position[0]); // radians
+	resultVector[ LONGITUDE] = fmod((theta - ai_Time.toThetaGMST()), 2.*M_PI);  //radians
 
 
-	r = std::sqrt(Sqr(m_Position[0]) + Sqr(m_Position[1]));
-	e2 = __f*(2 - __f);
-	resultVector[ LATITUDE] = AcTan(m_Position[2],r); /*radians*/
+	const double r = std::sqrt(Sqr(m_Position[0]) + Sqr(m_Position[1]));
+	const double e2 = __f*(2. - __f);
+	resultVector[ LATITUDE] = atan2(m_Position[2],r); /*radians*/
 
+	double phi, c;
 	do
 	{
 		phi = resultVector[ LATITUDE];
-		c = 1/std::sqrt(1 - e2*Sqr(sin(phi)));
-		resultVector[ LATITUDE] = AcTan(m_Position[2] + KEARTHRADIUS*c*e2*sin(phi),r);
+		c = 1./std::sqrt(1. - e2*Sqr(sin(phi)));
+		resultVector[ LATITUDE] = atan2(m_Position[2] + EARTH_RADIUS*c*e2*sin(phi),r);
 	}
 	while(fabs(resultVector[ LATITUDE] - phi) >= 1E-10);
 
-	resultVector[ ALTITUDE] = r/cos(resultVector[ LATITUDE]) - KEARTHRADIUS*c;/*kilometers*/
+	resultVector[ ALTITUDE] = r/cos(resultVector[ LATITUDE]) - EARTH_RADIUS*c;/*kilometers*/
 
-	if(resultVector[ LATITUDE] > (KPI/2.0)) resultVector[ LATITUDE] -= K2PI;
+	if(resultVector[ LATITUDE] > (M_PI/2.0)) resultVector[ LATITUDE] -= 2.*M_PI;
 
-	resultVector[LATITUDE]  = resultVector[LATITUDE]/KDEG2RAD;
-	resultVector[LONGITUDE] = resultVector[LONGITUDE]/KDEG2RAD;
-	if(resultVector[LONGITUDE] < -180.0) resultVector[LONGITUDE] +=360;
+	resultVector[LATITUDE]  *= M_180_PI;
+	resultVector[LONGITUDE] *= M_180_PI;
+	if(resultVector[LONGITUDE] < -180.0) resultVector[LONGITUDE] += 360;
 	else if(resultVector[LONGITUDE] > 180.0) resultVector[LONGITUDE] -= 360;
 
 	return resultVector;

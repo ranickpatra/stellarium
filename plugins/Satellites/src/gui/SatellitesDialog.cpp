@@ -32,10 +32,11 @@
 #include <QMessageBox>
 
 #include "StelApp.hpp"
-#include "StelCore.hpp"
 #include "ui_satellitesDialog.h"
 #include "SatellitesDialog.hpp"
 #include "SatellitesImportDialog.hpp"
+#include "SatellitesFilterDialog.hpp"
+#include "SatellitesCommDialog.hpp"
 #include "SatellitesListModel.hpp"
 #include "SatellitesListFilterModel.hpp"
 #include "Satellites.hpp"
@@ -48,25 +49,24 @@
 #include "StelFileMgr.hpp"
 #include "StelTranslator.hpp"
 #include "StelActionMgr.hpp"
-#include "StelUtils.hpp"
 #include "StelMainView.hpp"
 
-#include "external/qxlsx/xlsxdocument.h"
-#include "external/qxlsx/xlsxchartsheet.h"
-#include "external/qxlsx/xlsxcellrange.h"
-#include "external/qxlsx/xlsxchart.h"
-#include "external/qxlsx/xlsxrichstring.h"
-#include "external/qxlsx/xlsxworkbook.h"
+#if defined(ENABLE_XLSX) && (SATELLITES_PLUGIN_IRIDIUM == 1)
+#include <xlsxdocument.h>
+#include <xlsxcellrange.h>
 using namespace QXlsx;
+#endif
 
 const QString SatellitesDialog::dash = QChar(0x2014);
 
 SatellitesDialog::SatellitesDialog()
 	: StelDialog("Satellites")
 	, satelliteModified(false)
-	, updateTimer(Q_NULLPTR)
-	, importWindow(Q_NULLPTR)
-	, filterModel(Q_NULLPTR)
+	, updateTimer(nullptr)
+	, importWindow(nullptr)
+	, filterWindow(nullptr)
+	, commWindow(nullptr)
+	, filterModel(nullptr)
 	, checkStateRole(Qt::UserRole)
 	, delimiter(", ")	
 {
@@ -82,13 +82,25 @@ SatellitesDialog::~SatellitesDialog()
 	{
 		updateTimer->stop();
 		delete updateTimer;
-		updateTimer = Q_NULLPTR;
+		updateTimer = nullptr;
 	}
 
 	if (importWindow)
 	{
 		delete importWindow;
-		importWindow = Q_NULLPTR;
+		importWindow = nullptr;
+	}
+
+	if (filterWindow)
+	{
+		delete filterWindow;
+		filterWindow = nullptr;
+	}
+
+	if (commWindow)
+	{
+		delete commWindow;
+		commWindow = nullptr;
 	}
 
 	delete ui;
@@ -118,9 +130,9 @@ void SatellitesDialog::createDialogContent()
 	ui->tabs->removeTab(ui->tabs->indexOf(ui->iridiumTab));
 #endif
 	ui->tabs->setCurrentIndex(0);	
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &SatellitesDialog::retranslate);
 	Satellites* plugin = GETSTELMODULE(Satellites);
 
 	// Kinetic scrolling
@@ -129,25 +141,13 @@ void SatellitesDialog::createDialogContent()
 	if (gui)
 	{
 		enableKineticScrolling(gui->getFlagUseKineticScrolling());
-		connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+		connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &SatellitesDialog::enableKineticScrolling);
 	}
 
 	// Remove any test from "color buttons"
 	ui->satMarkerColorPickerButton->setText("");
 	ui->satOrbitColorPickerButton->setText("");
 	ui->satInfoColorPickerButton->setText("");
-
-	// Set size of buttons
-	QSize bs = QSize(26, 26);
-	ui->addSatellitesButton->setFixedSize(bs);
-	ui->removeSatellitesButton->setFixedSize(bs);
-	ui->satMarkerColorPickerButton->setFixedSize(bs);
-	ui->satOrbitColorPickerButton->setFixedSize(bs);
-	ui->satInfoColorPickerButton->setFixedSize(bs);
-	ui->addSourceButton->setFixedSize(bs);
-	ui->deleteSourceButton->setFixedSize(bs);
-	ui->editSourceButton->setFixedSize(bs);
-	ui->saveSourceButton->setFixedSize(bs);	
 
 	// Settings tab / updates group
 	// These controls are refreshed by updateSettingsPage(), which in
@@ -156,99 +156,136 @@ void SatellitesDialog::createDialogContent()
 	connectBoolProperty(ui->internetUpdatesCheckbox, "Satellites.updatesEnabled");
 	connectBoolProperty(ui->checkBoxAutoAdd,         "Satellites.autoAddEnabled");
 	connectBoolProperty(ui->checkBoxAutoRemove,      "Satellites.autoRemoveEnabled");
+	connectBoolProperty(ui->checkBoxAutoDisplay,     "Satellites.autoDisplayEnabled");
 	connectIntProperty(ui->updateFrequencySpinBox,   "Satellites.updateFrequencyHours");
 	ui->jumpToSourcesButton->setEnabled(ui->checkBoxAutoAdd);
-	connect(ui->updateButton,            SIGNAL(clicked()),         this,   SLOT(updateTLEs()));
-	connect(ui->jumpToSourcesButton,     SIGNAL(clicked()),         this,   SLOT(jumpToSourcesTab()));
-	connect(plugin, SIGNAL(updateStateChanged(Satellites::UpdateState)), this, SLOT(showUpdateState(Satellites::UpdateState)));
-	connect(plugin, SIGNAL(tleUpdateComplete(int, int, int, int)),       this, SLOT(showUpdateCompleted(int, int, int, int)));
+	connect(ui->updateButton,        &QPushButton::clicked, this, &SatellitesDialog::updateTLEs);
+	connect(ui->jumpToSourcesButton, &QPushButton::clicked, this, &SatellitesDialog::jumpToSourcesTab);
+	connect(plugin, &Satellites::updateStateChanged, this, &SatellitesDialog::showUpdateState);
+	connect(plugin, &Satellites::tleUpdateComplete,  this, &SatellitesDialog::showUpdateCompleted);
 
 	updateTimer = new QTimer(this);
-	connect(updateTimer, SIGNAL(timeout()), this, SLOT(updateCountdown()));
+	connect(updateTimer, &QTimer::timeout, this, &SatellitesDialog::updateCountdown);
 	updateTimer->start(7000);
 
-	// Settings tab / General settings group
-	connectBoolProperty(ui->labelsGroup,    "Satellites.flagLabelsVisible");
-	connectIntProperty(ui->fontSizeSpinBox, "Satellites.labelFontSize");
-	connect(ui->restoreDefaultsButton, SIGNAL(clicked()), this, SLOT(restoreDefaults()));
-	connect(ui->saveSettingsButton,    SIGNAL(clicked()), this, SLOT(saveSettings()));
-
-	// Settings tab / realistic mode group
-	connectBoolProperty(ui->iconicGroup,             "Satellites.flagIconicMode");
+	// Settings tab / Visualisation settings group
+	// Logic sub-group: Labels
+	connectBoolProperty(ui->labelsCheckBox,     "Satellites.flagLabelsVisible");
+	connectIntProperty(ui->fontSizeSpinBox,     "Satellites.labelFontSize");
+	connect(ui->labelsCheckBox, &QCheckBox::clicked, ui->fontSizeSpinBox, &QSpinBox::setEnabled);
+	ui->fontSizeSpinBox->setEnabled(ui->labelsCheckBox->isChecked());
+	// Logic sub-group: Orbit lines
+	connectBoolProperty(ui->orbitLinesCheckBox, "Satellites.flagOrbitLines");
+	connectIntProperty(ui->orbitSegmentsSpin,   "Satellites.orbitLineSegments");
+	connectIntProperty(ui->orbitFadeSpin,       "Satellites.orbitLineFadeSegments");
+	connectIntProperty(ui->orbitDurationSpin,   "Satellites.orbitLineSegmentDuration");
+	connectIntProperty(ui->orbitThicknessSpin,  "Satellites.orbitLineThickness");
+	connect(ui->orbitLinesCheckBox, &QCheckBox::clicked, this, &SatellitesDialog::handleOrbitLinesGroup);
+	handleOrbitLinesGroup(ui->orbitLinesCheckBox->isChecked());
+	// Logic sub-group: Umbra
+	connectBoolProperty(ui->umbraCheckBox,      "Satellites.flagUmbraVisible");
+	connectBoolProperty(ui->umbraAtAltitude,    "Satellites.flagUmbraAtFixedAltitude");
+	connectDoubleProperty(ui->umbraAltitude,    "Satellites.umbraAltitude");
+	connect(ui->umbraCheckBox, &QCheckBox::clicked, this, &SatellitesDialog::handleUmbraGroup);
+	handleUmbraGroup(ui->umbraCheckBox->isChecked());
+	// Logic sub-group: Markers
+	connectBoolProperty(ui->iconicCheckBox,		"Satellites.flagIconicMode");
+	connectBoolProperty(ui->coloredInvisibleSatellites, "Satellites.flagColoredInvisible");
 	connectBoolProperty(ui->hideInvisibleSatellites, "Satellites.flagHideInvisible");
+	connect(ui->iconicCheckBox, &QCheckBox::clicked, ui->hideInvisibleSatellites, &QCheckBox::setEnabled);
+	ui->hideInvisibleSatellites->setEnabled(ui->iconicCheckBox->isChecked());
+	// Logic sub-group: Colors
+	ui->invisibleColorButton->setup("Satellites.invisibleSatelliteColor", "Satellites/invisible_satellite_color");
+	ui->transitColorButton  ->setup("Satellites.transitSatelliteColor",   "Satellites/transit_satellite_color");
+	ui->umbraColor          ->setup("Satellites.umbraColor",              "Satellites/umbra_color");
+	ui->penumbraColor       ->setup("Satellites.penumbraColor",           "Satellites/penumbra_color");
+	// Logic sub-group: Penumbra
+	connectBoolProperty(ui->penumbraCheckBox,    "Satellites.flagPenumbraVisible");
+	// Logic sub-group: Visual filter / Altitude range
+	connectBoolProperty(ui->altitudeCheckBox,     "Satellites.flagVFAltitude");
+	connectDoubleProperty(ui->minAltitude,        "Satellites.minVFAltitude");
+	connectDoubleProperty(ui->maxAltitude,        "Satellites.maxVFAltitude");
+	enableMinMaxAltitude(ui->altitudeCheckBox->isChecked());
+	connect(ui->altitudeCheckBox, &QCheckBox::clicked, this, &SatellitesDialog::enableMinMaxAltitude);
+	// Logic sub-group: Visual filter / Magnitude range
+	connectBoolProperty(ui->magnitudeCheckBox,    "Satellites.flagVFMagnitude");
+	connectDoubleProperty(ui->minMagnitude,       "Satellites.minVFMagnitude");
+	connectDoubleProperty(ui->maxMagnitude,       "Satellites.maxVFMagnitude");
+	enableMinMaxMagnitude(ui->magnitudeCheckBox->isChecked());
+	connect(ui->magnitudeCheckBox, &QCheckBox::clicked, this, &SatellitesDialog::enableMinMaxMagnitude);
 
-	// Settings tab / colors group
-	connectColorButton(ui->invisibleColorButton, "Satellites.invisibleSatelliteColor", "Satellites/invisible_satellite_color");
-	connectColorButton(ui->transitColorButton,   "Satellites.transitSatelliteColor",   "Satellites/transit_satellite_color");
-
-	// Settings tab - populate all values
+	connect(ui->restoreDefaultsButton, &QPushButton::clicked, this, &SatellitesDialog::restoreDefaults);
+	connect(ui->saveSettingsButton,    &QPushButton::clicked, this, &SatellitesDialog::saveSettings);
 	updateSettingsPage();
-
-	// Settings tab / orbit lines group
-	connectBoolProperty(ui->orbitLinesGroup,  "Satellites.flagOrbitLines");
-	connectIntProperty(ui->orbitSegmentsSpin, "Satellites.orbitLineSegments");
-	connectIntProperty(ui->orbitFadeSpin,     "Satellites.orbitLineFadeSegments");
-	connectIntProperty(ui->orbitDurationSpin, "Satellites.orbitLineSegmentDuration");
 
 	// Satellites tab
 	filterModel = new SatellitesListFilterModel(this);
 	filterModel->setSourceModel(plugin->getSatellitesListModel());
 	filterModel->setFilterCaseSensitivity(Qt::CaseInsensitive);
 	ui->satellitesList->setModel(filterModel);
-	connect(ui->lineEditSearch, SIGNAL(textChanged(QString)), filterModel, SLOT(setFilterWildcard(QString)));
+	connect(ui->lineEditSearch, &QLineEdit::textChanged, filterModel, &SatellitesListFilterModel::setFilterWildcard);
 
 	QAction *clearAction = ui->lineEditSearch->addAction(QIcon(":/graphicGui/backspace-white.png"),
 							     QLineEdit::ActionPosition::TrailingPosition);
-	connect(clearAction, SIGNAL(triggered()), this, SLOT(searchSatellitesClear()));
+	connect(clearAction, &QAction::triggered, this, &SatellitesDialog::searchSatellitesClear);
 
 	QItemSelectionModel* selectionModel = ui->satellitesList->selectionModel();
-	connect(selectionModel, SIGNAL(selectionChanged(QItemSelection,QItemSelection)),
-		     this, SLOT(updateSatelliteData()));	
-	connect(ui->satellitesList, SIGNAL(doubleClicked(QModelIndex)),
-		     this, SLOT(trackSatellite(QModelIndex)));
+	connect(selectionModel, &QItemSelectionModel::selectionChanged, this, &SatellitesDialog::updateSatelliteData);
+	connect(ui->satellitesList, &QListView::doubleClicked, this, &SatellitesDialog::trackSatellite);
 
 	// Two-state input, three-state display
 	setRightSideToROMode();
-	connect(ui->displayedCheckbox, SIGNAL(clicked(bool)), ui->displayedCheckbox, SLOT(setChecked(bool)));
-	connect(ui->orbitCheckbox,     SIGNAL(clicked(bool)), ui->orbitCheckbox,     SLOT(setChecked(bool)));
-	connect(ui->userCheckBox,      SIGNAL(clicked(bool)), ui->userCheckBox,      SLOT(setChecked(bool)));
+	connect(ui->displayedCheckbox, &QCheckBox::clicked, ui->displayedCheckbox, &QCheckBox::setChecked);
+	connect(ui->orbitCheckbox,     &QCheckBox::clicked, ui->orbitCheckbox,     &QCheckBox::setChecked);
+	connect(ui->userCheckBox,      &QCheckBox::clicked, ui->userCheckBox,      &QCheckBox::setChecked);
 
 	// Because the previous signals and slots were connected first,
 	// they will be executed before these.
-	connect(ui->displayedCheckbox, SIGNAL(clicked()), this, SLOT(setFlags()));
-	connect(ui->orbitCheckbox,     SIGNAL(clicked()), this, SLOT(setFlags()));
-	connect(ui->userCheckBox,      SIGNAL(clicked()), this, SLOT(setFlags()));
+	connect(ui->displayedCheckbox, &QCheckBox::clicked, this, &SatellitesDialog::setFlags);
+	connect(ui->orbitCheckbox,     &QCheckBox::clicked, this, &SatellitesDialog::setFlags);
+	connect(ui->userCheckBox,      &QCheckBox::clicked, this, &SatellitesDialog::setFlags);
 
-	connect(ui->satMarkerColorPickerButton, SIGNAL(clicked(bool)), this, SLOT(askSatMarkerColor()));
-	connect(ui->satOrbitColorPickerButton,  SIGNAL(clicked(bool)), this, SLOT(askSatOrbitColor()));
-	connect(ui->satInfoColorPickerButton,   SIGNAL(clicked(bool)), this, SLOT(askSatInfoColor()));
-	connect(ui->descriptionTextEdit,        SIGNAL(textChanged()), this, SLOT(descriptionTextChanged()));
+	connect(ui->satMarkerColorPickerButton, &QToolButton::clicked, this, &SatellitesDialog::askSatMarkerColor);
+	connect(ui->satOrbitColorPickerButton,  &QToolButton::clicked, this, &SatellitesDialog::askSatOrbitColor);
+	connect(ui->satInfoColorPickerButton,   &QToolButton::clicked, this, &SatellitesDialog::askSatInfoColor);
+	connect(ui->descriptionTextEdit,        &QTextEdit::textChanged, this, &SatellitesDialog::descriptionTextChanged);
+	// Satellites tab / TLE group
+	connectIntProperty(ui->validAgeSpinBox, "Satellites.tleEpochAgeDays");
+	connect(ui->validAgeSpinBox, qOverload<int>(&QSpinBox::valueChanged), this, &SatellitesDialog::updateFilteredSatellitesList);
 
-	connect(ui->groupsListWidget, SIGNAL(itemChanged(QListWidgetItem*)),
-		     this, SLOT(handleGroupChanges(QListWidgetItem*)));
+	connect(ui->groupsListWidget, &QListWidget::itemChanged, this, &SatellitesDialog::handleGroupChanges);
 
-	connect(ui->groupFilterCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(filterListByGroup(int)));
-	connect(ui->groupFilterCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(setRightSideToROMode()));
+	connect(ui->groupFilterCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &SatellitesDialog::filterListByGroup);
+	connect(ui->groupFilterCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &SatellitesDialog::setRightSideToROMode);
 
 	importWindow = new SatellitesImportDialog();
-	connect(ui->addSatellitesButton, SIGNAL(clicked()),            importWindow, SLOT(setVisible()));
-	connect(importWindow, SIGNAL(satellitesAccepted(TleDataList)), this,         SLOT(addSatellites(TleDataList)));
-	connect(ui->removeSatellitesButton, SIGNAL(clicked()),         this,         SLOT(removeSatellites()));
+	connect(ui->addSatellitesButton, &QToolButton::clicked, importWindow, [this] { importWindow->setVisible(true); });
+	connect(importWindow, &SatellitesImportDialog::satellitesAccepted, this, &SatellitesDialog::addSatellites);
+	connect(ui->removeSatellitesButton, &QToolButton::clicked, this, &SatellitesDialog::removeSatellites);
+	connect(ui->selectAllButton, &QToolButton::clicked, this, &SatellitesDialog::selectFilteredSatellitesList);
+
+	filterWindow = new SatellitesFilterDialog();
+	connect(ui->customFilterButton, &QToolButton::clicked, filterWindow, [this] { filterWindow->setVisible(true); });
+
+	commWindow = new SatellitesCommDialog();
+	connect(ui->commSatelliteButton, &QToolButton::clicked, commWindow, [this] { commWindow->setVisible(true); });
 
 	// Sources tab
-	connect(ui->sourceList, SIGNAL(currentRowChanged(int)),			this, SLOT(updateButtonsProperties()));
-	connect(ui->sourceList, SIGNAL(itemChanged(QListWidgetItem*)),		this,	SLOT(saveSourceList()));
-	connect(ui->sourceList, SIGNAL(itemDoubleClicked(QListWidgetItem *)),	this,	SLOT(editSourceRow()));
+	connect(ui->sourceList, &QListWidget::currentRowChanged, this, &SatellitesDialog::updateButtonsProperties);
+	connect(ui->sourceList, &QListWidget::itemChanged,       this, &SatellitesDialog::saveSourceList);
+	connect(ui->sourceList, &QListWidget::itemDoubleClicked, this, &SatellitesDialog::editSourceRow);
 	//FIXME: pressing Enter cause a call of addSourceRow() method...
-	//connect(ui->sourceEdit, SIGNAL(returnPressed()),	this,	SLOT(saveEditedSource()));
-	connect(ui->deleteSourceButton, SIGNAL(clicked()),	this, SLOT(deleteSourceRow()));
-	connect(ui->addSourceButton, SIGNAL(clicked()),	this, SLOT(addSourceRow()));
-	connect(ui->editSourceButton, SIGNAL(clicked()),	this, SLOT(editSourceRow()));
-	connect(ui->saveSourceButton, SIGNAL(clicked()),	this, SLOT(saveEditedSource()));
-	connect(plugin, SIGNAL(satGroupVisibleChanged()), this, SLOT(updateSatelliteAndSaveData()));
-	connect(plugin, SIGNAL(settingsChanged()), this, SLOT(toggleCheckableSources()));
+	//connect(ui->sourceEdit, &QLineEdit::returnPressed,      this, &SatellitesDialog::saveEditedSource);
+	connect(ui->deleteSourceButton, &QToolButton::clicked, this, &SatellitesDialog::deleteSourceRow);
+	connect(ui->addSourceButton, &QToolButton::clicked,    this, &SatellitesDialog::addSourceRow);
+	connect(ui->editSourceButton, &QToolButton::clicked,   this, &SatellitesDialog::editSourceRow);
+	connect(ui->saveSourceButton, &QToolButton::clicked,   this, &SatellitesDialog::saveEditedSource);
+	connect(ui->resetSourcesButton, &QToolButton::clicked, this, &SatellitesDialog::restoreTleSources);
+	connect(plugin, &Satellites::satGroupVisibleChanged,   this, &SatellitesDialog::updateSatelliteAndSaveData);
+	connect(plugin, &Satellites::settingsChanged,          this, &SatellitesDialog::toggleCheckableSources);
+	connect(plugin, &Satellites::customFilterChanged,      this, &SatellitesDialog::updateFilteredSatellitesList);
 	// bug #1350669 (https://bugs.launchpad.net/stellarium/+bug/1350669)
-	connect(ui->sourceList, SIGNAL(currentRowChanged(int)), ui->sourceList, SLOT(repaint()));
+	connect(ui->sourceList, &QListWidget::currentRowChanged, ui->sourceList, qOverload<>(&QListWidget::repaint));
 	ui->editSourceButton->setEnabled(false);
 	ui->deleteSourceButton->setEnabled(false);
 	ui->saveSourceButton->setEnabled(false);
@@ -263,14 +300,38 @@ void SatellitesDialog::createDialogContent()
 #if(SATELLITES_PLUGIN_IRIDIUM == 1)
 	initListIridiumFlares();
 	ui->flaresPredictionDepthSpinBox->setValue(plugin->getIridiumFlaresPredictionDepth());
-	connect(ui->flaresPredictionDepthSpinBox, SIGNAL(valueChanged(int)), plugin, SLOT(setIridiumFlaresPredictionDepth(int)));
-	connect(ui->predictIridiumFlaresPushButton, SIGNAL(clicked()), this, SLOT(predictIridiumFlares()));
-	connect(ui->predictedIridiumFlaresSaveButton, SIGNAL(clicked()), this, SLOT(savePredictedIridiumFlares()));
-	connect(ui->iridiumFlaresTreeWidget, SIGNAL(doubleClicked(QModelIndex)), this, SLOT(selectCurrentIridiumFlare(QModelIndex)));
+	connect(ui->flaresPredictionDepthSpinBox, qOverload<int>(&QSpinBox::valueChanged), plugin, &Satellites::setIridiumFlaresPredictionDepth);
+	connect(ui->predictIridiumFlaresPushButton, &QPushButton::clicked, this, &SatellitesDialog::predictIridiumFlares);
+	connect(ui->predictedIridiumFlaresSaveButton, &QPushButton::clicked, this, &SatellitesDialog::savePredictedIridiumFlares);
+	connect(ui->iridiumFlaresTreeWidget, &QTreeWidget::doubleClicked, this, &SatellitesDialog::selectCurrentIridiumFlare);
 #endif
+}
 
-	QString style = "QLabel { color: rgb(238, 238, 238); }";
-	ui->labelAutoAdd->setStyleSheet(style);
+void SatellitesDialog::enableMinMaxAltitude(bool state)
+{
+	ui->minAltitude->setEnabled(state);
+	ui->maxAltitude->setEnabled(state);
+}
+
+void SatellitesDialog::enableMinMaxMagnitude(bool state)
+{
+	ui->minMagnitude->setEnabled(state);
+	ui->maxMagnitude->setEnabled(state);
+}
+
+void SatellitesDialog::handleOrbitLinesGroup(bool state)
+{
+	ui->orbitSegmentsSpin->setEnabled(state);
+	ui->orbitFadeSpin->setEnabled(state);
+	ui->orbitDurationSpin->setEnabled(state);
+	ui->orbitThicknessSpin->setEnabled(state);
+}
+
+void SatellitesDialog::handleUmbraGroup(bool state)
+{
+	ui->umbraAtAltitude->setEnabled(state);
+	ui->umbraAltitude->setEnabled(state);
+	ui->penumbraCheckBox->setEnabled(state);
 }
 
 void SatellitesDialog::askSatMarkerColor()
@@ -285,7 +346,7 @@ void SatellitesDialog::askSatMarkerColor()
 	QColor c = QColorDialog::getColor(buttonMarkerColor, &StelMainView::getInstance(), "");
 	if (c.isValid())
 	{
-		Vec3f vColor = Vec3f(c.redF(), c.greenF(), c.blueF());
+		Vec3f vColor(c);
 		SatelliteP sat;
 		// colourize all selected satellites
 		for (int i = 0; i < selection.size(); i++)
@@ -296,7 +357,7 @@ void SatellitesDialog::askSatMarkerColor()
 		}
 		// colourize the button
 		buttonMarkerColor = c;
-		ui->satMarkerColorPickerButton->setStyleSheet("QPushButton { background-color:" + buttonMarkerColor.name() + "; }");
+		ui->satMarkerColorPickerButton->setStyleSheet("QToolButton { background-color:" + buttonMarkerColor.name() + "; }");
 		saveSatellites();
 	}
 }
@@ -313,7 +374,7 @@ void SatellitesDialog::askSatOrbitColor()
 	QColor c = QColorDialog::getColor(buttonOrbitColor, &StelMainView::getInstance(), "");
 	if (c.isValid())
 	{
-		Vec3f vColor = Vec3f(c.redF(), c.greenF(), c.blueF());
+		Vec3f vColor(c);
 		SatelliteP sat;
 		// colourize all selected satellites
 		for (int i = 0; i < selection.size(); i++)
@@ -324,7 +385,7 @@ void SatellitesDialog::askSatOrbitColor()
 		}
 		// colourize the button
 		buttonOrbitColor = c;
-		ui->satOrbitColorPickerButton->setStyleSheet("QPushButton { background-color:" + buttonOrbitColor.name() + "; }");
+		ui->satOrbitColorPickerButton->setStyleSheet("QToolButton { background-color:" + buttonOrbitColor.name() + "; }");
 		saveSatellites();
 	}
 }
@@ -341,7 +402,7 @@ void SatellitesDialog::askSatInfoColor()
 	QColor c = QColorDialog::getColor(buttonInfoColor, &StelMainView::getInstance(), "");
 	if (c.isValid())
 	{
-		Vec3f vColor = Vec3f(c.redF(), c.greenF(), c.blueF());
+		Vec3f vColor(c);
 		SatelliteP sat;
 		// colourize all selected satellites
 		for (int i = 0; i < selection.size(); i++)
@@ -352,7 +413,7 @@ void SatellitesDialog::askSatInfoColor()
 		}
 		// colourize the button
 		buttonInfoColor = c;
-		ui->satInfoColorPickerButton->setStyleSheet("QPushButton { background-color:" + buttonInfoColor.name() + "; }");
+		ui->satInfoColorPickerButton->setStyleSheet("QToolButton { background-color:" + buttonInfoColor.name() + "; }");
 		saveSatellites();
 	}
 }
@@ -374,11 +435,7 @@ void SatellitesDialog::descriptionTextChanged()
 	{
 		const QModelIndex& index = selection.at(i);
 		sat = SatellitesMgr->getById(index.data(Qt::UserRole).toString());
-
-		if (sat->description != newdesc)
-		{
-			sat->description = newdesc;
-		}
+		sat->description = newdesc;
 	}
 	saveSatellites();
 }
@@ -393,33 +450,46 @@ void SatellitesDialog::filterListByGroup(int index)
 	if (index < 0)
 		return;
 
+	const QMap<QString, SatFlag> secondaryFilter = {
+		{ "all",				SatNoFlags },
+		{ "[displayed]",		SatDisplayed },
+		{ "[userdefined]",		SatUser },
+		{ "[undisplayed]",		SatNotDisplayed },
+		{ "[newlyadded]",		SatNew },
+		{ "[orbiterror]",		SatError },
+		{ "[reentry]",			SatReentry },
+		{ "[smallsize]",		SatSmallSize },
+		{ "[mediumsize]",		SatMediumSize },
+		{ "[largesize]",		SatLargeSize },
+		{ "[LEO]",			SatLEO },
+		{ "[GSO]",			SatGSO },
+		{ "[MEO]",			SatMEO },
+		{ "[HEO]",			SatHEO },
+		{ "[HGSO]",			SatHGSO },
+		{ "[polarorbit]",		SatPolarOrbit },
+		{ "[equatorialorbit]",	SatEquatOrbit },
+		{ "[PSSO]",			SatPSSO },
+		{ "[HEarthO]",		SatHEarthO },
+		{ "[outdatedTLE]",		SatOutdatedTLE },
+		{ "[custom]",			SatCustomFilter },
+		{ "[communication]",	SatCommunication },
+		{ "[activeOS]",		SatActiveOS },
+		{ "[operationalOS]",	SatOperationalOS },
+		{ "[nonopOS]",		SatNonoperationalOS },
+		{ "[partiallyopOS]",	SatPartiallyOperationalOS },
+		{ "[standbyOS]",		SatStandbyOS },
+		{ "[spareOS]",		SatSpareOS },
+		{ "[extmissionOS]",	SatExtendedMissionOS },
+		{ "[decayedOS]",		SatDecayedOS }
+	};
+
+	ui->customFilterButton->setEnabled(false);
 	QString groupId = ui->groupFilterCombo->itemData(index).toString();
-	if (groupId == "all")
-		filterModel->setSecondaryFilters(QString(), SatNoFlags);
-	else if (groupId == "[displayed]")
-		filterModel->setSecondaryFilters(QString(), SatDisplayed);
-	else if (groupId == "[undisplayed]")
-		filterModel->setSecondaryFilters(QString(), SatNotDisplayed);
-	else if (groupId == "[newlyadded]")
-		filterModel->setSecondaryFilters(QString(), SatNew);
-	else if (groupId == "[orbiterror]")
-		filterModel->setSecondaryFilters(QString(), SatError);
-	else if (groupId == "[smallsize]")
-		filterModel->setSecondaryFilters(QString(), SatSmallSize);
-	else if (groupId == "[mediumsize]")
-		filterModel->setSecondaryFilters(QString(), SatMediumSize);
-	else if (groupId == "[largesize]")
-		filterModel->setSecondaryFilters(QString(), SatLargeSize);
-	else if (groupId == "[LEO]")
-		filterModel->setSecondaryFilters(QString(), SatLEO);
-	else if (groupId == "[GSO]")
-		filterModel->setSecondaryFilters(QString(), SatGSO);
-	else if (groupId == "[MEO]")
-		filterModel->setSecondaryFilters(QString(), SatMEO);
-	else if (groupId == "[HEO]")
-		filterModel->setSecondaryFilters(QString(), SatHEO);
-	else if (groupId == "[HGSO]")
-		filterModel->setSecondaryFilters(QString(), SatHGSO);
+	if (groupId == "[custom]")
+		ui->customFilterButton->setEnabled(true);
+
+	if (groupId.contains("[") || groupId=="all")
+		filterModel->setSecondaryFilters(QString(), secondaryFilter.value(groupId, SatNoFlags));
 	else
 		filterModel->setSecondaryFilters(groupId, SatNoFlags);
 
@@ -434,6 +504,21 @@ void SatellitesDialog::filterListByGroup(int index)
 		first = ui->satellitesList->model()->index(0, 0);
 	selectionModel->setCurrentIndex(first, QItemSelectionModel::NoUpdate);
 	ui->satellitesList->scrollTo(first);
+}
+
+void SatellitesDialog::updateFilteredSatellitesList()
+{
+	QString groupId = ui->groupFilterCombo->currentData(Qt::UserRole).toString();
+	if (groupId == "[outdatedTLE]" || groupId == "[custom]" || groupId == "[communication]" || groupId == "[reentry]")
+	{
+		filterListByGroup(ui->groupFilterCombo->currentIndex());
+	}
+}
+
+void SatellitesDialog::selectFilteredSatellitesList()
+{
+	ui->satellitesList->selectionModel()->clearSelection();
+	ui->satellitesList->selectAll();
 }
 
 void SatellitesDialog::updateSatelliteAndSaveData()
@@ -461,9 +546,9 @@ void SatellitesDialog::updateSatelliteData()
 	Vec3f mColor, oColor, iColor;
 
 	// set default
-	buttonMarkerColor = QColor(QColor::fromRgbF(0.4, 0.4, 0.4));
-	buttonOrbitColor = QColor(QColor::fromRgbF(0.4, 0.4, 0.4));
-	buttonInfoColor = QColor(QColor::fromRgbF(0.4, 0.4, 0.4));
+	buttonMarkerColor = QColor(QColor::fromRgbF(0.7f, 0.7f, 0.7f));
+	buttonOrbitColor = QColor(QColor::fromRgbF(0.7f, 0.7f, 0.7f));
+	buttonInfoColor = QColor(QColor::fromRgbF(0.7f, 0.7f, 0.7f));
 
 	if (selection.count() > 1)
 	{
@@ -500,9 +585,9 @@ void SatellitesDialog::updateSatelliteData()
 				// if there are, return grey
 				if (sat->hintColor != mColor || sat->orbitColor != oColor || sat->infoColor != iColor)
 				{
-					mColor = Vec3f(0.4f, 0.4f, 0.4f);
-					oColor = Vec3f(0.4f, 0.4f, 0.4f);
-					iColor = Vec3f(0.4f, 0.4f, 0.4f);
+					mColor = Vec3f(0.7f, 0.7f, 0.7f);
+					oColor = Vec3f(0.7f, 0.7f, 0.7f);
+					iColor = Vec3f(0.7f, 0.7f, 0.7f);
 					break;
 				}
 			}
@@ -529,33 +614,29 @@ void SatellitesDialog::updateSatelliteData()
 
 			ui->descriptionTextEdit->setText(descText);
 		}
+
+		emit SatellitesMgr->satSelectionChanged("");
 	}
 	else
 	{
 		QModelIndex& index = selection.first();
+		QString id = index.data(Qt::UserRole).toString();
+
 		float stdMagnitude = index.data(SatStdMagnitudeRole).toFloat();
-		QString stdMagString = dash;
-		if (stdMagnitude<99.f)
-			stdMagString = QString::number(stdMagnitude, 'f', 2);
+		QString stdMagString = (stdMagnitude<99.f) ? QString::number(stdMagnitude, 'f', 2) : dash;
 		float rcs = index.data(SatRCSRole).toFloat();
-		QString rcsString = dash;
-		if (rcs > 0.f)
-			rcsString = QString::number(rcs, 'f', 3);
+		QString rcsString = (rcs > 0.f) ? QString::number(rcs, 'f', 4) : dash;
 		int perigee = qRound(index.data(SatPerigeeRole).toFloat());
-		QString perigeeString = dash;
-		if (perigee>0)
-			perigeeString = QString::number(perigee);
+		QString perigeeString = (perigee>0) ? QString::number(perigee) : dash;
 		int apogee = qRound(index.data(SatApogeeRole).toFloat());
-		QString apogeeString = dash;
-		if (apogee>0)
-			apogeeString = QString::number(apogee);
+		QString apogeeString = (apogee>0) ? QString::number(apogee) : dash;
 		float period = index.data(SatPeriodRole).toFloat();
-		QString periodString = dash;
-		if (period>0.f)
-			periodString = QString::number(period, 'f', 2);
+		QString periodString = (period>0.f) ? QString::number(period, 'f', 2) : dash;
+		QString cosparID = index.data(SatCosparIDRole).toString();
+
 		ui->nameEdit->setText(index.data(Qt::DisplayRole).toString());
-		ui->noradNumberEdit->setText(index.data(Qt::UserRole).toString());
-		ui->cosparNumberEdit->setText(index.data(SatCosparIDRole).toString());
+		ui->noradNumberEdit->setText(id);
+		ui->cosparNumberEdit->setText(cosparID.isEmpty() ? dash : cosparID);
 		// NOTE: Description is deliberately displayed untranslated!
 		ui->descriptionTextEdit->setText(index.data(SatDescriptionRole).toString());
 		ui->stdMagnitudeLineEdit->setText(stdMagString);
@@ -570,20 +651,21 @@ void SatellitesDialog::updateSatelliteData()
 		ui->labelTleEpochData->setText(index.data(SatTLEEpochRole).toString());
 
 		// get color of the one selected sat
-		QString id = index.data(Qt::UserRole).toString();
 		SatelliteP sat = SatellitesMgr->getById(id);
 		mColor = sat->hintColor;
 		oColor = sat->orbitColor;
 		iColor = sat->infoColor;
+
+		emit SatellitesMgr->satSelectionChanged(id);
 	}
 
 	// colourize the colorpicker button
 	buttonMarkerColor=mColor.toQColor(); // .setRgbF(mColor.v[0], mColor.v[1], mColor.v[2]);
-	ui->satMarkerColorPickerButton->setStyleSheet("QPushButton { background-color:" + buttonMarkerColor.name() + "; }");
+	ui->satMarkerColorPickerButton->setStyleSheet("QToolButton { background-color:" + buttonMarkerColor.name() + "; }");
 	buttonOrbitColor=oColor.toQColor(); // .setRgbF(oColor.v[0], oColor.v[1], oColor.v[2]);
-	ui->satOrbitColorPickerButton->setStyleSheet("QPushButton { background-color:" + buttonOrbitColor.name() + "; }");
+	ui->satOrbitColorPickerButton->setStyleSheet("QToolButton { background-color:" + buttonOrbitColor.name() + "; }");
 	buttonInfoColor=iColor.toQColor(); // .setRgbF(iColor.v[0], iColor.v[1], iColor.v[2]);
-	ui->satInfoColorPickerButton->setStyleSheet("QPushButton { background-color:" + buttonInfoColor.name() + "; }");
+	ui->satInfoColorPickerButton->setStyleSheet("QToolButton { background-color:" + buttonInfoColor.name() + "; }");
 
 	// bug #1350669 (https://bugs.launchpad.net/stellarium/+bug/1350669)
 	ui->satellitesList->repaint();
@@ -657,7 +739,7 @@ void SatellitesDialog::updateSatelliteData()
 	// Nice list of checkable, translated groups that allows adding new groups
 	ui->groupsListWidget->blockSignals(true);
 	ui->groupsListWidget->clear();
-	for (const auto& group : qAsConst(globalGroups))
+	for (const auto& group : std::as_const(globalGroups))
 	{
 		QListWidgetItem* item = new QListWidgetItem(q_(group),
 							    ui->groupsListWidget);
@@ -684,24 +766,18 @@ void SatellitesDialog::saveSatellites(void)
 
 void SatellitesDialog::populateAboutPage()
 {
-	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
-
 	QString jsonFileName("<tt>satellites.json</tt>");
 	QString oldJsonFileName("<tt>satellites.json.old</tt>");
 	QString html = "<html><head></head><body>";
-	html += "<h2>" + q_("Stellarium Satellites Plugin") + "</h2><table width=\"90%\">";
+	html += "<h2>" + q_("Stellarium Satellites Plugin") + "</h2><table class='layout' width=\"90%\">";
 	html += "<tr width=\"30%\"><td><strong>" + q_("Version") + "</strong></td><td>" + SATELLITES_PLUGIN_VERSION + "</td></td>";
 	html += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + SATELLITES_PLUGIN_LICENSE + "</td></tr>";
-	html += "<tr><td rowspan=2><strong>" + q_("Authors") + "</strong></td><td>Matthew Gates &lt;matthewg42@gmail.com&gt;</td></td>";
+	html += "<tr><td rowspan=\"2\"><strong>" + q_("Authors") + "</strong></td><td>Matthew Gates &lt;matthewg42@gmail.com&gt;</td></td>";
 	html += "<tr><td>Jose Luis Canales &lt;jlcanales.gasco@gmail.com&gt;</td></tr>";
-	html += "<tr><td rowspan=4><strong>" + q_("Contributors") + "</strong></td><td>Bogdan Marinov &lt;bogdan.marinov84@gmail.com&gt;</td></tr>";
-#if (SATELLITES_PLUGIN_IRIDIUM == 1)
-	html += "<tr><td>Nick Fedoseev &lt;nick.ut2uz@gmail.com&gt; (" + q_("Iridium flares") + ")</td></tr>";
-#else
+	html += "<tr><td rowspan=\"5\"><strong>" + q_("Contributors") + "</strong></td><td>Bogdan Marinov &lt;bogdan.marinov84@gmail.com&gt;</td></tr>";
 	html += "<tr><td>Nick Fedoseev &lt;nick.ut2uz@gmail.com&gt;</td></tr>";
-#endif
-	html += "<tr><td>Alexander Wolf &lt;alex.v.wolf@gmail.com&gt;</td></tr>";
+	html += "<tr><td>Alexander Wolf</td></tr>";
+	html += "<tr><td>Alexander Duytschaever</td></tr>";
 	html += "<tr><td>Georg Zotti</td></tr></table>";
 
 	html += "<p>" + q_("The Satellites plugin predicts the positions of artificial satellites in Earth orbit.") + "</p>";
@@ -712,10 +788,7 @@ void SatellitesDialog::populateAboutPage()
 	html += "<li>" + q_("Orbital elements go out of date pretty quickly (over mere weeks, sometimes days).  To get useful data out, you need to update the TLE data regularly.") + "</li>";
 	// TRANSLATORS: The translated names of the button and the tab are filled in automatically. You can check the original names in Stellarium. File names are not translated.
 	QString resetSettingsText = QString(q_("Clicking the \"%1\" button in the \"%2\" tab of this dialog will revert to the default %3 file.  The old file will be backed up as %4.  This can be found in the user data directory, under \"modules/Satellites/\"."))
-			.arg(ui->restoreDefaultsButton->text())
-			.arg(ui->tabs->tabText(ui->tabs->indexOf(ui->settingsTab)))
-			.arg(jsonFileName)
-			.arg(oldJsonFileName);
+			.arg(ui->restoreDefaultsButton->text(), ui->tabs->tabText(ui->tabs->indexOf(ui->settingsTab)), jsonFileName, oldJsonFileName);
 	html += "<li>" + resetSettingsText + "</li>";
 	html += "<li>" + q_("The value of perigee and apogee altitudes compute for mean Earth radius.") + "</li>";
 	html += "<li>" + q_("The Satellites plugin is still under development.  Some features are incomplete, missing or buggy.") + "</li>";
@@ -728,12 +801,47 @@ void SatellitesDialog::populateAboutPage()
 	html += "<li>" + q_("Geosynchronous orbit (GSO) and geostationary orbit (GEO) are orbits with inclination of orbits below 25 degrees, eccentricity below 0.25 and period in range 1100-2000 minutes (orbits around Earth matching Earth's sidereal rotation period). ") + "</li>";
 	html += "<li>" + q_("Highly elliptical orbit (HEO): geocentric orbits with altitudes of perigee below 70000 km, inclination of orbits in range 0-180 degrees, eccentricity at least 0.25 and period below 14000 minutes.") + "</li>";
 	html += "<li>" + q_("High geosynchronous orbit (HGSO): geocentric orbits above the altitude of geosynchronous orbit: inclination of orbits in range 25-180 degrees, eccentricity below 0.25 and period in range 1100-2000 minutes.") + "</li>";
+	// Definition from WP: https://en.wikipedia.org/wiki/High_Earth_orbit
+	html += "<li>" + q_("High Earth orbit (HEO or HEO/E): a geocentric orbit with an altitude entirely above that of a geosynchronous orbit (35786 kilometres). The orbital periods of such orbits are greater than 24 hours, therefore satellites in such orbits have an apparent retrograde motion.") + "</li>";
+	html += "</ul></p>";
+
+	html += "<h3>" + q_("Inclination classifications for geocentric orbits") + "</h3><p><ul>";
+	html += "<li>" + q_("Equatorial orbit: an orbit whose inclination in reference to the equatorial plane is (or very close to) 0 degrees.") + "</li>";
+	html += "<li>" + q_("Polar orbit: a satellite that passes above or nearly above both poles of the planet on each revolution. Therefore it has an inclination of (or very close to) 90 degrees.") + "</li>";
+	html += "<li>" + q_("Polar sun-synchronous orbit (PSSO): A nearly polar orbit that passes the equator at the same local time on every pass. Useful for image-taking satellites because shadows will be the same on every pass. Typical Sun-synchronous orbits around Earth are about 600–800 km in altitude, with periods in the 96–100-minute range, and inclinations of around 98 degrees.") + "</li>";
+	html += "</ul></p>";
+
+	// TRANSLATORS: Title of a section in the About tab of the Satellites window
+	html += "<h3>" + q_("Communication links") + "</h3>";
+	html += "<p>" + q_("Many satellites having transmitters (transceivers and transponders) with many modes for telemetry and data packets. You should to know which demodulator you need to decode telemetry and packets:");
+	html += "<ul>";
+	html += "<li>APT &mdash; " + q_("Automatic Picture Transmission") + "</li>";
+	html += "<li>LRPT &mdash; " + q_("Low Resolution Picture Transmission") + "</li>";
+	html += "<li>HRPT &mdash; " + q_("High Resolution Picture Transmission") + "</li>";
+	html += "<li>AHRPT &mdash; " + q_("Advanced High Resolution Picture Transmission") + "</li>";
+	html += "<li>AX.25 &mdash; " + q_("Amateur Radio adaptation of X.25 packet protocol") + "</li>";
+	html += "<li>CW &mdash; " + q_("Continuous Wave, Morse Code") + "</li>";
+	html += "<li>AM &mdash; " + q_("Amplitude Modulation") + "</li>";
+	html += "<li>FM &mdash; " + q_("Frequency Modulation") + "</li>";
+	html += "<li>DUV &mdash; " + q_("Data Under Voice") + "</li>";
+	html += "<li>FSK &mdash; " + q_("Frequency Shift Keying") + "</li>";
+	html += "<li>GFSK &mdash; " + q_("Gaussian Frequency Shift Keying") + "</li>";
+	html += "<li>GMSK &mdash; " + q_("Gaussian Minimum Shift Keying") + "</li>";
+	html += "<li>AFSK &mdash; " + q_("Audio Frequency Shift Keying") + "</li>";
+	html += "<li>ASK &mdash; " + q_("Amplitude-shift Keying") + "</li>";
+	html += "<li>PSK &mdash; " + q_("Phase-shift Keying") + "</li>";
+	html += "<li>BPSK &mdash; " + q_("Binary Phase-shift Keying") + "</li>";
+	html += "<li>QPSK &mdash; " + q_("Quadrature Phase-shift Keying") + "</li>";
+	html += "<li>OQPSK &mdash; " + q_("Offset Quadrature Phase-shift Keying") + "</li>";
+	html += "<li>DPSK &mdash; " + q_("Differential Phase-shift Keying") + "</li>";
+	html += "<li>BOC &mdash; " + q_("Binary Offset Carrier") + "</li>";
+	html += "<li>MBOC &mdash; " + q_("Multiplexed Binary Offset Carrier") + "</li>";
 	html += "</ul></p>";
 
 	// TRANSLATORS: Title of a section in the About tab of the Satellites window
 	html += "<h3>" + q_("TLE data updates") + "</h3>";
 	html += "<p>" + q_("The Satellites plugin can automatically download TLE data from Internet sources, and by default the plugin will do this if the existing data is more than 72 hours old. ");
-	html += "</p><p>" + QString(q_("If you disable Internet updates, you may update from a file on your computer.  This file must be in the same format as the Celestrak updates (see %1 for an example).").arg("<a href=\"http://celestrak.com/NORAD/elements/visual.txt\">visual.txt</a>"));
+	html += "</p><p>" + QString(q_("If you disable Internet updates, you may update from a file on your computer.  This file must be in the same format as the Celestrak updates (see %1 for an example).").arg("<a href=\"https://celestrak.org/NORAD/elements/visual.txt\">visual.txt</a>"));
 	html += "</p><p>" + q_("<b>Note:</b> if the name of a satellite in update data has anything in square brackets at the end, it will be removed before the data is used.");
 	html += "</p>";
 
@@ -743,11 +851,11 @@ void SatellitesDialog::populateAboutPage()
 
 	html += "<h3>" + q_("Technical notes") + "</h3>";
 	html += "<p>" + q_("Positions are calculated using the SGP4 & SDP4 methods, using NORAD TLE data as the input.") + " ";
-	html +=               q_("The orbital calculation code is written by Jose Luis Canales according to the revised Spacetrack Report #3 (including Spacetrack Report #6)") + " <a href=\"http://www.celestrak.com/publications/AIAA/2006-6753\">[*]</a>. ";
-	html +=               q_("To calculate an approximate visual magnitude of satellites we use data from Mike McCants' database (with permissions) of the radar cross-section (RCS) and standard magnitudes.") + " ";
-	html +=               q_("Formula to calculate an approximate visual magnitude of satellites from the standard magnitude may be found at Mike McCants website") + " <a href=\"https://www.prismnet.com/~mmccants/tles/mccdesc.html\">[**]</a>. ";
-	html +=               q_("We use a spherical shape of satellite to calculate an approximate visual magnitude from RCS values.") + " ";
-	html +=               q_("For modelling Starlink magnitudes we use Anthony Mallama's formula") + " <a href=\"http://www.satobs.org/seesat/Aug-2020/0079.html\">[***]</a>.</p>";
+	html +=         q_("The orbital calculation code is written by Jose Luis Canales according to the revised Spacetrack Report #3 (including Spacetrack Report #6)") + " <a href=\"https://celestrak.org/publications/AIAA/2006-6753\">[*]</a>. ";
+	html +=         q_("To calculate an approximate visual magnitude of satellites we use the radar cross-section (RCS) and standard magnitudes from Mike McCants' database (with permissions); the radar cross-section (RCS) from CelesTrack database; the standard magnitudes from the database of the MMT-9 observatory (Kazan Federal University)") + " <a href=\"http://mmt.favor2.info/satellites\">[**]</a>. ";
+	html +=         q_("Formula to calculate an approximate visual magnitude of satellites from the standard magnitude may be found at Mike McCants website") + " <a href=\"https://mmccants.org/tles/mccdesc.html\">[***]</a>. ";
+	html +=         q_("We use a spherical shape of satellite to calculate an approximate visual magnitude from RCS values.") + " ";
+	html +=         q_("For modelling Starlink magnitudes we use Anthony Mallama's formula") + " <a href=\"http://www.satobs.org/seesat/Aug-2020/0079.html\">[****]</a>.</p>";
 
 	html += StelApp::getInstance().getModuleMgr().getStandardSupportLinksInfo("Satellites plugin");
 	html += "</body></html>";
@@ -805,10 +913,7 @@ void SatellitesDialog::showUpdateState(Satellites::UpdateState state)
 	}
 }
 
-void SatellitesDialog::showUpdateCompleted(int updated,
-					   int total,
-					   int added,
-					   int missing)
+void SatellitesDialog::showUpdateCompleted(int updated, int total, int added, int missing)
 {
 	Satellites* plugin = GETSTELMODULE(Satellites);
 	QString message;
@@ -819,7 +924,7 @@ void SatellitesDialog::showUpdateCompleted(int updated,
 	ui->nextUpdateLabel->setText(message.arg(updated).arg(total).arg(added).arg(missing));
 	// display the status for another full interval before refreshing status
 	updateTimer->start();
-	ui->lastUpdateDateTimeEdit->setDateTime(plugin->getLastUpdate());
+	ui->lastUpdateDateTimeEdit->setDateTime(plugin->getLastUpdate().first);
 	populateFilterMenu();
 }
 
@@ -843,7 +948,7 @@ void SatellitesDialog::saveEditedSource()
 
 	// Changes to item data (text or check state) are connected to
 	// saveSourceList(), so there's no need to call it explicitly.
-	if (ui->sourceList->currentItem()!=Q_NULLPTR)
+	if (ui->sourceList->currentItem()!=nullptr)
 		ui->sourceList->currentItem()->setText(u);
 	else if (ui->sourceList->findItems(u, Qt::MatchExactly).count() <= 0)
 	{
@@ -908,7 +1013,7 @@ void SatellitesDialog::addSourceRow(void)
 	ui->sourceEdit->selectAll();
 	ui->sourceEdit->setFocus();
 	ui->sourceList->blockSignals(true);
-	ui->sourceList->setCurrentItem(Q_NULLPTR);
+	ui->sourceList->setCurrentItem(nullptr);
 	ui->sourceList->blockSignals(false);
 }
 
@@ -960,9 +1065,27 @@ void SatellitesDialog::restoreDefaults(void)
 		updateSettingsPage();
 		populateFilterMenu();
 		populateSourcesList();
+		// handle GUI elements
+		ui->fontSizeSpinBox->setEnabled(ui->labelsCheckBox->isChecked());
+		handleOrbitLinesGroup(ui->orbitLinesCheckBox->isChecked());
+		handleUmbraGroup(ui->umbraCheckBox->isChecked());
+		ui->hideInvisibleSatellites->setEnabled(ui->iconicCheckBox->isChecked());
 	}
 	else
 		qDebug() << "[Satellites] restore defaults is canceled...";
+}
+
+void SatellitesDialog::restoreTleSources(void)
+{
+	if (askConfirmation())
+	{
+		qDebug() << "[Satellites] restore TLE sources...";
+		GETSTELMODULE(Satellites)->restoreDefaultTleSources();
+		GETSTELMODULE(Satellites)->loadSettings();
+		populateSourcesList();
+	}
+	else
+		qDebug() << "[Satellites] restore TLE sources is canceled...";
 }
 
 void SatellitesDialog::updateSettingsPage()
@@ -975,7 +1098,7 @@ void SatellitesDialog::updateSettingsPage()
 		ui->updateButton->setText(q_("Update now"));
 	else
 		ui->updateButton->setText(q_("Update from files"));
-	ui->lastUpdateDateTimeEdit->setDateTime(plugin->getLastUpdate());
+	ui->lastUpdateDateTimeEdit->setDateTime(plugin->getLastUpdate().first);
 
 	updateCountdown();
 }
@@ -1003,9 +1126,11 @@ void SatellitesDialog::populateFilterMenu()
 
 	// Add special groups - their IDs deliberately use JSON-incompatible chars.
 	ui->groupFilterCombo->insertItem(0, q_("[orbit calculation error]"), QVariant("[orbiterror]"));
+	ui->groupFilterCombo->insertItem(0, q_("[atmospheric entry]"), QVariant("[reentry]"));
 	ui->groupFilterCombo->insertItem(0, q_("[all newly added]"), QVariant("[newlyadded]"));
 	ui->groupFilterCombo->insertItem(0, q_("[all not displayed]"), QVariant("[undisplayed]"));
 	ui->groupFilterCombo->insertItem(0, q_("[all displayed]"), QVariant("[displayed]"));
+	ui->groupFilterCombo->insertItem(0, q_("[all communications]"), QVariant("[communication]"));
 	ui->groupFilterCombo->insertItem(0, q_("[small satellites]"), QVariant("[smallsize]"));
 	ui->groupFilterCombo->insertItem(0, q_("[medium satellites]"), QVariant("[mediumsize]"));
 	ui->groupFilterCombo->insertItem(0, q_("[large satellites]"), QVariant("[largesize]"));
@@ -1019,31 +1144,70 @@ void SatellitesDialog::populateFilterMenu()
 	ui->groupFilterCombo->insertItem(0, q_("[HEO satellites]"), QVariant("[HEO]"));
 	// TRANSLATORS: HGEO = High geosynchronous orbit
 	ui->groupFilterCombo->insertItem(0, q_("[HGSO satellites]"), QVariant("[HGSO]"));
+	ui->groupFilterCombo->insertItem(0, q_("[polar orbit satellites]"), QVariant("[polarorbit]"));
+	ui->groupFilterCombo->insertItem(0, q_("[equatorial orbit satellites]"), QVariant("[equatorialorbit]"));
+	// TRANSLATORS: PSSO = Polar sun synchronous orbit
+	ui->groupFilterCombo->insertItem(0, q_("[PSSO satellites]"), QVariant("[PSSO]"));
+	// TRANSLATORS: HEO/E = High Earth orbit
+	ui->groupFilterCombo->insertItem(0, q_("[HEO/E satellites]"), QVariant("[HEarthO]"));
+	ui->groupFilterCombo->insertItem(0, q_("[outdated TLE]"), QVariant("[outdatedTLE]"));
+	ui->groupFilterCombo->insertItem(0, q_("[custom filter]"), QVariant("[custom]"));
+	ui->groupFilterCombo->insertItem(0, q_("[all user defined]"), QVariant("[userdefined]"));	
+	// Add special groups - based on SATCAT Operational Status
+	// TRANSLATORS: Satellite group [SATCAT Operational Status]: Active status does not require power or communications (e.g., geodetic satellites); Active is any satellite with an operational status of +, P, B, S, or X.
+	ui->groupFilterCombo->insertItem(0, q_("[active satellites]"), QVariant("[activeOS]"));
+	// TRANSLATORS: Satellite group [SATCAT Operational Status]: Satellites that are fully functioning
+	ui->groupFilterCombo->insertItem(0, q_("[operational satellites]"), QVariant("[operationalOS]"));
+	// TRANSLATORS: Satellite group [SATCAT Operational Status]: Satellites that are no longer functioning
+	ui->groupFilterCombo->insertItem(0, q_("[non-operational satellites]"), QVariant("[nonopOS]"));
+	// TRANSLATORS: Satellite group [SATCAT Operational Status]: Satellites that are partially fulfilling primary mission or secondary mission(s)
+	ui->groupFilterCombo->insertItem(0, q_("[partially operational satellites]"), QVariant("[partiallyopOS]"));
+	// TRANSLATORS: Satellite group [SATCAT Operational Status]: Previously operational satellite put into reserve status
+	ui->groupFilterCombo->insertItem(0, q_("[backup / standby satellites]"), QVariant("[standbyOS]"));
+	// TRANSLATORS: Satellite group [SATCAT Operational Status]: New satellite awaiting full activation
+	ui->groupFilterCombo->insertItem(0, q_("[spare satellites]"), QVariant("[spareOS]"));
+	// TRANSLATORS: Satellite group [SATCAT Operational Status]: Satellites with extended mission(s)
+	ui->groupFilterCombo->insertItem(0, q_("[extended mission]"), QVariant("[extmissionOS]"));
+	// TRANSLATORS: Satellite group [SATCAT Operational Status]: Satellites that are decayed
+	ui->groupFilterCombo->insertItem(0, q_("[decayed satellites]"), QVariant("[decayedOS]"));
+	// Special group - All satellites (this item should be latest in the list)
 	ui->groupFilterCombo->insertItem(0, q_("[all]"), QVariant("all"));
 
 	// Restore current selection
-	index = 0;
-	if (!selectedId.isEmpty())
-	{
-		index = ui->groupFilterCombo->findData(selectedId);
-		if (index < 0)
-			index = 0;
-	}
+	index = (!selectedId.isEmpty()) ? qMax(0, ui->groupFilterCombo->findData(selectedId)) : 0;
+
 	ui->groupFilterCombo->setCurrentIndex(index);
 	ui->groupFilterCombo->blockSignals(false);
 }
 
 void SatellitesDialog::populateInfo()
 {
+	QString vr = q_("Valid range");
 	ui->labelRCS->setText(QString("%1, %2<sup>2</sup>:").arg(q_("RCS"), qc_("m","distance")));
 	ui->labelRCS->setToolTip(QString("<p>%1</p>").arg(q_("Radar cross-section (RCS) is a measure of how detectable an object is with a radar. A larger RCS indicates that an object is more easily detected.")));
 	ui->labelStdMagnitude->setToolTip(QString("<p>%1</p>").arg(q_("The standard magnitude of a satellite is defined as its apparent magnitude when at half-phase and at a distance 1000 km from the observer.")));
-	// TRANSLATORS: duration
-	ui->orbitDurationSpin->setSuffix(qc_(" s","time unit"));
-	// TRANSLATORS: duration
-	ui->labelSegmentLength->setText(q_("Segment length:"));
-	// TRANSLATORS: duration
-	ui->updateFrequencySpinBox->setSuffix(qc_(" h","time unit"));
+	// TRANSLATORS: duration in seconds
+	QString s = qc_("s","time");
+	ui->orbitDurationSpin->setSuffix(QString(" %1").arg(s));
+	// TRANSLATORS: duration in hours
+	ui->updateFrequencySpinBox->setSuffix(QString(" %1").arg(qc_("h","time")));
+	// TRANSLATORS: Unit of measure for distance - kilometers
+	QString km = qc_("km", "distance");
+	QString px = qc_("px", "pixels");
+	ui->minAltitude->setSuffix(QString(" %1").arg(km));
+	ui->minAltitude->setToolTip(QString("%1: %2..%3 %4").arg(vr, QString::number(ui->minAltitude->minimum(), 'f', 0), QString::number(ui->minAltitude->maximum(), 'f', 0), km));
+	ui->maxAltitude->setSuffix(QString(" %1").arg(km));
+	ui->maxAltitude->setToolTip(QString("%1: %2..%3 %4").arg(vr, QString::number(ui->maxAltitude->minimum(), 'f', 0), QString::number(ui->maxAltitude->maximum(), 'f', 0), km));
+	ui->altitudeCheckBox->setToolTip(QString("<p>%1</p>").arg(q_("Display satellites and their orbits within selected range of altitudes only.")));
+	ui->umbraAltitude->setSuffix(QString(" %1").arg(km));
+	ui->umbraAltitude->setToolTip(QString("<p>%1. %2: %3..%4 %5</p>").arg(q_("Altitude of imagined satellite"), vr, QString::number(ui->umbraAltitude->minimum(), 'f', 1), QString::number(ui->umbraAltitude->maximum(), 'f', 1), km));
+	ui->orbitSegmentsSpin->setToolTip(QString("<p>%1. %2: %3..%4</p>").arg(q_("Number of segments: number of segments used to draw the line"), vr, QString::number(ui->orbitSegmentsSpin->minimum()), QString::number(ui->orbitSegmentsSpin->maximum())));
+	ui->orbitDurationSpin->setToolTip(QString("<p>%1. %2: %3..%4 %5</p>").arg(q_("Segment length: duration of a single segment in seconds"), vr, QString::number(ui->orbitDurationSpin->minimum()), QString::number(ui->orbitDurationSpin->maximum()), s));
+	ui->orbitFadeSpin->setToolTip(QString("<p>%1. %2: %3..%4</p>").arg(q_("Fade length: number of segments used to draw each end of the line"), vr, QString::number(ui->orbitFadeSpin->minimum()), QString::number(ui->orbitFadeSpin->maximum())));
+	ui->orbitThicknessSpin->setToolTip(QString("%1: %2..%3 %4").arg(q_("Orbit line thickness"), QString::number(ui->orbitThicknessSpin->minimum()), QString::number(ui->orbitThicknessSpin->maximum()), px));
+	ui->orbitThicknessSpin->setSuffix(QString(" %1").arg(px));
+	ui->minMagnitude->setToolTip(QString("%1: %2..%3").arg(vr, QString::number(ui->minMagnitude->minimum(), 'f', 2), QString::number(ui->minMagnitude->maximum(), 'f', 2)));
+	ui->maxMagnitude->setToolTip(QString("%1: %2..%3").arg(vr, QString::number(ui->maxMagnitude->minimum(), 'f', 2), QString::number(ui->maxMagnitude->maximum(), 'f', 2)));
 }
 
 void SatellitesDialog::populateSourcesList()
@@ -1214,6 +1378,7 @@ void SatellitesDialog::setFlags()
 void SatellitesDialog::setRightSideToROMode()
 {
 	ui->removeSatellitesButton->setEnabled(false);
+	ui->commSatelliteButton->setEnabled(false);
 	ui->displayedCheckbox->setEnabled(false);
 	ui->displayedCheckbox->setChecked(false);
 	ui->orbitCheckbox->setEnabled(false);
@@ -1247,12 +1412,12 @@ void SatellitesDialog::setRightSideToROMode()
 	ui->periodLineEdit->setText(QString());
 
 	// set default
-	buttonMarkerColor = QColor(QColor::fromRgbF(0.4, 0.4, 0.4));
-	buttonOrbitColor = QColor(QColor::fromRgbF(0.4, 0.4, 0.4));
-	buttonInfoColor = QColor(QColor::fromRgbF(0.4, 0.4, 0.4));
-	ui->satMarkerColorPickerButton->setStyleSheet("QPushButton { background-color:" + buttonMarkerColor.name() + "; }");
-	ui->satOrbitColorPickerButton->setStyleSheet("QPushButton { background-color:" + buttonOrbitColor.name() + "; }");
-	ui->satInfoColorPickerButton->setStyleSheet("QPushButton { background-color:" + buttonInfoColor.name() + "; }");
+	buttonMarkerColor = QColor(QColor::fromRgbF(0.7f, 0.7f, 0.7f));
+	buttonOrbitColor = QColor(QColor::fromRgbF(0.7f, 0.7f, 0.7f));
+	buttonInfoColor = QColor(QColor::fromRgbF(0.7f, 0.7f, 0.7f));
+	ui->satMarkerColorPickerButton->setStyleSheet("QToolButton { background-color:" + buttonMarkerColor.name() + "; }");
+	ui->satOrbitColorPickerButton->setStyleSheet("QToolButton { background-color:" + buttonOrbitColor.name() + "; }");
+	ui->satInfoColorPickerButton->setStyleSheet("QToolButton { background-color:" + buttonInfoColor.name() + "; }");
 }
 
 // The status of elements on right side of GUI may be changed when satellite is selected
@@ -1271,6 +1436,7 @@ void SatellitesDialog::setRightSideToRWMode()
 	ui->stdMagnitudeLineEdit->setEnabled(true);
 	ui->rcsLineEdit->setEnabled(true);
 	ui->removeSatellitesButton->setEnabled(true);
+	ui->commSatelliteButton->setEnabled(true);
 	ui->perigeeLineEdit->setEnabled(true);
 	ui->apogeeLineEdit->setEnabled(true);
 	ui->periodLineEdit->setEnabled(true);
@@ -1284,7 +1450,7 @@ void SatellitesDialog::handleGroupChanges(QListWidgetItem* item)
 	{
 		// Harmonize the item with the rest...
 		flags ^= Qt::ItemIsEditable;
-		item->setFlags(flags | Qt::ItemIsUserCheckable | Qt::ItemIsTristate);
+		item->setFlags(flags | Qt::ItemIsUserCheckable | Qt::ItemIsAutoTristate);
 		item->setCheckState(Qt::Checked);
 		QString groupId = item->text().trimmed();
 		item->setData(Qt::UserRole, groupId);
@@ -1347,7 +1513,7 @@ void SatellitesDialog::updateTLEs(void)
 	}
 	else
 	{
-		QStringList updateFiles = QFileDialog::getOpenFileNames(Q_NULLPTR,
+		QStringList updateFiles = QFileDialog::getOpenFileNames(&StelMainView::getInstance(),
 									q_("Select TLE Update File"),
 									StelFileMgr::getDesktopDir(),
 									"*.*");
@@ -1447,16 +1613,21 @@ void SatellitesDialog::selectCurrentIridiumFlare(const QModelIndex &modelIndex)
 
 void SatellitesDialog::savePredictedIridiumFlares()
 {
-	QString filter = q_("Microsoft Excel Open XML Spreadsheet");
-	filter.append(" (*.xlsx);;");
-	filter.append(q_("CSV (Comma delimited)"));
-	filter.append(" (*.csv)");
-	QString defaultFilter("(*.xlsx)");
-	QString filePath = QFileDialog::getSaveFileName(Q_NULLPTR,
-							q_("Save predicted Iridium flares as..."),
-							QDir::homePath() + "/iridium_flares.xlsx",
-							filter,
-							&defaultFilter);
+	QString csv  = QString("%1 (*.csv)").arg(q_("CSV (Comma delimited)"));
+	QString xlsx = QString("%1 (*.xlsx)").arg(q_("Microsoft Excel Open XML Spreadsheet"));
+	QString filter, defaultExtension;
+
+	#ifdef ENABLE_XLSX
+	filter = QString("%1;;%2") .arg(xlsx, csv);
+	defaultExtension = "xlsx";
+	#else
+	filter = csv;
+	defaultExtension = "csv";
+	#endif
+
+	QString defaultFilter = QString("(*.%1)").arg(defaultExtension);
+	QString dir = QString("%1/iridium_flares.%2").arg(QDir::homePath(), defaultExtension);
+	QString filePath = QFileDialog::getSaveFileName(&StelMainView::getInstance(), q_("Save predicted Iridium flares as..."), dir, filter, &defaultFilter);
 
 	int count = ui->iridiumFlaresTreeWidget->topLevelItemCount();
 	int columns = iridiumFlaresHeader.size();
@@ -1472,8 +1643,11 @@ void SatellitesDialog::savePredictedIridiumFlares()
 		}
 
 		QTextStream predictedIridiumFlaresList(&predictedIridiumFlares);
+		#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+		predictedIridiumFlaresList.setEncoding(QStringConverter::Utf8);
+		#else
 		predictedIridiumFlaresList.setCodec("UTF-8");
-
+		#endif
 		predictedIridiumFlaresList << iridiumFlaresHeader.join(delimiter) << StelUtils::getEndLineChar();
 
 		for (int i = 0; i < count; i++)
@@ -1492,6 +1666,7 @@ void SatellitesDialog::savePredictedIridiumFlares()
 	}
 	else
 	{
+		#ifdef ENABLE_XLSX
 		int *width;
 		width = new int[columns];
 		QString sData;
@@ -1540,6 +1715,7 @@ void SatellitesDialog::savePredictedIridiumFlares()
 
 		delete[] width;
 		xlsx.saveAs(filePath);
+		#endif
 	}
 }
 #endif

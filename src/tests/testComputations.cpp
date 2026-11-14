@@ -54,16 +54,12 @@ void TestComputations::testJDFromBesselianEpoch()
 		double JD = StelUtils::getJDFromBesselianEpoch(besselianEpoch);
 
 		QVERIFY2(qAbs(JD-expectedJD)<=ERROR_LOW_LIMIT, qPrintable(QString("Julian date for Besselian epoch %1 is %2 (expected %3)")
-									.arg(QString::number(besselianEpoch, 'f', 6))
-									.arg(QString::number(JD, 'f', 4))
-									.arg(QString::number(expectedJD, 'f', 4))));
+			.arg(QString::number(besselianEpoch, 'f', 6), QString::number(JD, 'f', 4), QString::number(expectedJD, 'f', 4))));
 	}
 }
 
 void TestComputations::testIsPowerOfTwo()
 {
-	int n;
-	bool f, r;
 	QVariantList data;
 	data	<< 0	<< true;
 	data	<< 1	<< true;
@@ -78,21 +74,18 @@ void TestComputations::testIsPowerOfTwo()
 
 	while (data.count() >= 2)
 	{
-		n	= data.takeFirst().toInt();
-		f	= data.takeFirst().toBool();
+		int n	= data.takeFirst().toInt();
+		bool f	= data.takeFirst().toBool();
 
-		r = StelUtils::isPowerOfTwo(n);
+		bool r = StelUtils::isPowerOfTwo(n);
 
 		QVERIFY2(r==f, qPrintable(QString("%1 %2 power of two (expected: %3)")
-					   .arg(n)
-					   .arg(r ? "is":"is not")
-					   .arg(f)));
+			.arg(n).arg(r ? "is":"is not").arg(f)));
 	}
 }
 
 void TestComputations::testGetBiggerPowerOfTwo()
 {
-	int n, e, r;
 	QVariantList data;
 	data	<< 0	<< 1;
 	data	<< 1	<< 1;
@@ -114,21 +107,17 @@ void TestComputations::testGetBiggerPowerOfTwo()
 
 	while (data.count() >= 2)
 	{
-		n	= data.takeFirst().toInt();
-		e	= data.takeFirst().toInt();
-		r	= StelUtils::getBiggerPowerOfTwo(n);
+		int n	= data.takeFirst().toInt();
+		int e	= data.takeFirst().toInt();
+		int r	= StelUtils::getBiggerPowerOfTwo(n);
 
 		QVERIFY2(r==e, qPrintable(QString("Number: %1 getBiggerPowerOfTwo(): %2 (expected: %3)")
-					   .arg(n)
-					   .arg(r)
-					   .arg(e)));
+			.arg(n).arg(r).arg(e)));
 	}
 }
 
 void TestComputations::testDayInYear()
 {
-	int year, month, day, en, n;
-
 	QVariantList data;
 	data	<< 2000	<< 1	<< 1	<< 1;
 	data	<< 2019	<< 1	<< 1	<< 1;
@@ -139,27 +128,20 @@ void TestComputations::testDayInYear()
 
 	while (data.count() >= 4)
 	{
-		year	= data.takeFirst().toInt();
-		month	= data.takeFirst().toInt();
-		day	= data.takeFirst().toInt();
-		en	= data.takeFirst().toInt();
+		int year	= data.takeFirst().toInt();
+		int month	= data.takeFirst().toInt();
+		int day	= data.takeFirst().toInt();
+		int en	= data.takeFirst().toInt();
 
-		n = StelUtils::dayInYear(year, month, day);
+		int n = StelUtils::dayInYear(year, month, day);
 
 		QVERIFY2(n==en, qPrintable(QString("%1-%2-%3 is %4 day (expected: %5)")
-					   .arg(year)
-					   .arg(month)
-					   .arg(day)
-					   .arg(n)
-					   .arg(en)));
+				.arg(year).arg(month).arg(day).arg(n).arg(en)));
 	}
 }
 
 void TestComputations::testYearFraction()
 {
-	int year, month, day;
-	double fraction, efrac;
-
 	QVariantList data;
 	data	<< 2000	<< 1	<< 1	<< 2000.00274;
 	data	<< 2019	<< 1	<< 1	<< 2019.00274;
@@ -170,26 +152,21 @@ void TestComputations::testYearFraction()
 
 	while (data.count() >= 4)
 	{
-		year	= data.takeFirst().toInt();
-		month	= data.takeFirst().toInt();
-		day	= data.takeFirst().toInt();
-		efrac	= data.takeFirst().toDouble();
+		int year	= data.takeFirst().toInt();
+		int month	= data.takeFirst().toInt();
+		int day	= data.takeFirst().toInt();
+		double efrac	= data.takeFirst().toDouble();
 
-		fraction = StelUtils::yearFraction(year, month, day);
+		double fraction = StelUtils::yearFraction(year, month, day);
 
 		QVERIFY2(qAbs(fraction-efrac)<=ERROR_HIGH_LIMIT, qPrintable(QString("%1-%2-%3 is %4 (expected: %5)")
-					   .arg(year)
-					   .arg(month)
-					   .arg(day)
-					   .arg(QString::number(fraction, 'f', 5))
-					   .arg(QString::number(efrac, 'f', 5))));
+			.arg(year).arg(month).arg(day).arg(QString::number(fraction, 'f', 5), QString::number(efrac, 'f', 5))));
 	}
 }
 
 void TestComputations::testEquToEqlTransformations()
 {
-	double eps0 = 23.4392911*M_PI/180.;
-	double ra, dec, lambdaE, lambda, betaE, beta;
+	const double eps0 = 23.4392911*M_PI/180.;
 
 	QVariantList data;
 	//                  RA                   DE                     Lambda           Beta
@@ -201,31 +178,27 @@ void TestComputations::testEquToEqlTransformations()
 
 	while (data.count() >= 4)
 	{
-		ra	= data.takeFirst().toDouble();
-		dec	= data.takeFirst().toDouble();
-		lambdaE	= data.takeFirst().toDouble();
-		betaE	= data.takeFirst().toDouble();
+		double ra	= data.takeFirst().toDouble();
+		double dec	= data.takeFirst().toDouble();
+		double lambdaE	= data.takeFirst().toDouble();
+		double betaE	= data.takeFirst().toDouble();
 
+		double lambda, beta;
 		StelUtils::equToEcl(ra*M_PI/180., dec*M_PI/180., eps0, &lambda, &beta);
 
 		lambda *= 180/M_PI;
 		beta *= 180/M_PI;
 
 		QVERIFY2(qAbs(lambda-lambdaE)<=ERROR_LOW_LIMIT && qAbs(lambda-lambdaE)<=ERROR_LOW_LIMIT,
-				qPrintable(QString("RA/Dec: %1/%2 Lam/Bet: %3/%4 (expected Lam/Bet: %5/%6)")
-					   .arg(QString::number(ra, 'f', 5))
-					   .arg(QString::number(dec, 'f', 5))
-					   .arg(QString::number(lambda, 'f', 5))
-					   .arg(QString::number(beta, 'f', 5))
-					   .arg(QString::number(lambdaE, 'f', 5))
-					   .arg(QString::number(betaE, 'f', 5))));
+			qPrintable(QString("RA/Dec: %1/%2 Lam/Bet: %3/%4 (expected Lam/Bet: %5/%6)")
+			.arg(QString::number(ra, 'f', 5), QString::number(dec, 'f', 5), QString::number(lambda, 'f', 5),
+			     QString::number(beta, 'f', 5), QString::number(lambdaE, 'f', 5), QString::number(betaE, 'f', 5))));
 	}
 }
 
 void TestComputations::testEclToEquTransformations()
 {
-	double eps0 = 23.4392911*M_PI/180.;
-	double ra, dec, raE, decE, lambda, beta;
+	const double eps0 = 23.4392911*M_PI/180.;
 
 	QVariantList data;
 	//                  RA                   DE                     Lambda           Beta
@@ -237,33 +210,27 @@ void TestComputations::testEclToEquTransformations()
 
 	while (data.count() >= 4)
 	{
-		raE	= data.takeFirst().toDouble();
-		decE	= data.takeFirst().toDouble();
-		lambda	= data.takeFirst().toDouble();
-		beta	= data.takeFirst().toDouble();
+		double raE	= data.takeFirst().toDouble();
+		double decE	= data.takeFirst().toDouble();
+		double lambda	= data.takeFirst().toDouble();
+		double beta	= data.takeFirst().toDouble();
 
+		double ra, dec;
 		StelUtils::eclToEqu(lambda*M_PI/180., beta*M_PI/180., eps0, &ra, &dec);
 
 		ra *= 180/M_PI;
 		dec *= 180/M_PI;
 
 		QVERIFY2(qAbs(ra-raE)<=ERROR_LOW_LIMIT && qAbs(dec-decE)<=ERROR_LOW_LIMIT,
-				qPrintable(QString("Lam/Bet: %1/%2 RA/Dec: %3/%4 (expected RA/Dec: %5/%6)")
-					   .arg(QString::number(lambda, 'f', 5))
-					   .arg(QString::number(beta, 'f', 5))
-					   .arg(QString::number(ra, 'f', 5))
-					   .arg(QString::number(dec, 'f', 5))
-					   .arg(QString::number(raE, 'f', 5))
-					   .arg(QString::number(decE, 'f', 5))));
+			qPrintable(QString("Lam/Bet: %1/%2 RA/Dec: %3/%4 (expected RA/Dec: %5/%6)")
+			.arg(QString::number(lambda, 'f', 5), QString::number(beta, 'f', 5), QString::number(ra, 'f', 5),
+			     QString::number(dec, 'f', 5), QString::number(raE, 'f', 5), QString::number(decE, 'f', 5))));
 	}
 }
 
 void TestComputations::testSpheToRectTransformations()
 {
-	double longitude, latitude;
-	float longitudeF1, latitudeF1, longitudeF2, latitudeF2;
-	Vec3f eVec3f, rVec3f;
-	Vec3d eVec3d, rVec3d1, rVec3d2;
+	const double r = 1.;
 
 	QVariantList data;
 	//     Longitude          Latitude         Expected
@@ -277,49 +244,47 @@ void TestComputations::testSpheToRectTransformations()
 
 	while (data.count() >= 3)
 	{
-		longitude	= data.takeFirst().toDouble();
-		latitude	= data.takeFirst().toDouble();
-		longitudeF1	=float(longitude);
-		latitudeF1		=float(latitude);
-		longitudeF2	=float(longitude);
-		latitudeF2		=float(latitude);
-		eVec3f	= Vec3f(data.takeFirst().toString());
-		eVec3d	= eVec3f.toVec3d();
+		double longitude	= data.takeFirst().toDouble();
+		double latitude	= data.takeFirst().toDouble();
+		float longitudeF1	= float(longitude);
+		float latitudeF1	= float(latitude);
+		float longitudeF2	= float(longitude);
+		float latitudeF2	= float(latitude);
+		Vec3f eVec3f		= Vec3f(data.takeFirst().toString());
+		Vec3d eVec3d		= eVec3f.toVec3d();
 
+		Vec3f rVec3f;
+		Vec3d rVec3d1, rVec3d2, rVec3d1r;
 		StelUtils::spheToRect(longitudeF1*M_PI_180f, latitudeF1*M_PI_180f, rVec3f);
 		StelUtils::spheToRect(longitudeF2*M_PI_180f, latitudeF2*M_PI_180f, rVec3d2);
-		StelUtils::spheToRect(longitude*M_PI/180., latitude*M_PI/180., rVec3d1);
+		StelUtils::spheToRect(longitude*M_PI/180.,   latitude*M_PI/180.,   rVec3d1);
+
+		StelUtils::spheToRect(longitude*M_PI/180., latitude*M_PI/180., r, rVec3d1r);
 
 		QVERIFY2(qAbs(rVec3f[0]-eVec3f[0])<=ERROR_HIGH_LIMIT && qAbs(rVec3f[1]-eVec3f[1])<=ERROR_HIGH_LIMIT && qAbs(rVec3f[2]-eVec3f[2])<=ERROR_HIGH_LIMIT,
 				qPrintable(QString("Long/Lat: %1/%2 = %3 (expected %4)")
-					   .arg(QString::number(longitude, 'f', 4))
-					   .arg(QString::number(latitude, 'f', 4))
-					   .arg(rVec3f.toString())
-					   .arg(eVec3f.toString())));
+				.arg(QString::number(longitude, 'f', 4), QString::number(latitude, 'f', 4),
+				     rVec3f.toString(), eVec3f.toString())));
 
 		QVERIFY2(qAbs(rVec3d2[0]-eVec3d[0])<=ERROR_HIGH_LIMIT && qAbs(rVec3d2[1]-eVec3d[1])<=ERROR_HIGH_LIMIT && qAbs(rVec3d2[2]-eVec3d[2])<=ERROR_HIGH_LIMIT,
 				qPrintable(QString("Long/Lat: %1/%2 = %3 (expected %4)")
-					   .arg(QString::number(longitude, 'f', 4))
-					   .arg(QString::number(latitude, 'f', 4))
-					   .arg(rVec3d2.toString())
-					   .arg(eVec3d.toString())));
+				.arg(QString::number(longitude, 'f', 4), QString::number(latitude, 'f', 4),
+				     rVec3d2.toString(), eVec3d.toString())));
 
 		QVERIFY2(qAbs(rVec3d1[0]-eVec3d[0])<=ERROR_HIGH_LIMIT && qAbs(rVec3d1[1]-eVec3d[1])<=ERROR_HIGH_LIMIT && qAbs(rVec3d1[2]-eVec3d[2])<=ERROR_HIGH_LIMIT,
 				qPrintable(QString("Long/Lat: %1/%2 = %3 (expected %4)")
-					   .arg(QString::number(longitude, 'f', 4))
-					   .arg(QString::number(latitude, 'f', 4))
-					   .arg(rVec3d1.toString())
-					   .arg(eVec3d.toString())));
+				.arg(QString::number(longitude, 'f', 4), QString::number(latitude, 'f', 4),
+				     rVec3d1.toString(), eVec3d.toString())));
+
+		QVERIFY2(qAbs(rVec3d1r[0]-eVec3d[0])<=ERROR_HIGH_LIMIT && qAbs(rVec3d1r[1]-eVec3d[1])<=ERROR_HIGH_LIMIT && qAbs(rVec3d1r[2]-eVec3d[2])<=ERROR_HIGH_LIMIT,
+				qPrintable(QString("Long/Lat: %1/%2 = %3 (expected %4)")
+				.arg(QString::number(longitude, 'f', 4), QString::number(latitude, 'f', 4),
+				     rVec3d1r.toString(), eVec3d.toString())));
 	}
 }
 
 void TestComputations::testRectToSpheTransformations()
 {
-	float longitude, latitude, longitudef, latitudef, longitudeE, latitudeE;
-	double longituded, latituded, longitudes, latitudes;
-	Vec3f rVec3f;
-	Vec3d rVec3d;
-
 	QVariantList data;
 	//     Longitude          Latitude         Source
 	data <<     0.		<<   0.		<< "1,0,0";
@@ -330,56 +295,57 @@ void TestComputations::testRectToSpheTransformations()
 
 	while (data.count() >= 3)
 	{
-		longitudeE	= data.takeFirst().toFloat();
-		latitudeE		= data.takeFirst().toFloat();
-		rVec3f		= Vec3f(data.takeFirst().toString());
-		rVec3d		= rVec3f.toVec3d();
+		float longitudeE	= data.takeFirst().toFloat();
+		float latitudeE	= data.takeFirst().toFloat();
+		Vec3f rVec3f		= Vec3f(data.takeFirst().toString());
+		Vec3d rVec3d		= rVec3f.toVec3d();
+		Vec3d rVec3d1r	= rVec3d;
 
-		StelUtils::rectToSphe(&longitude, &latitude, rVec3f);
+		float longitude, latitude, longitudef, latitudef;
+		double longituded, latituded, longitudes, latitudes, longitude1r, latitude1r, r = 1.;
+		StelUtils::rectToSphe(&longitude,  &latitude,  rVec3f);
 		StelUtils::rectToSphe(&longitudef, &latitudef, rVec3d);
 		StelUtils::rectToSphe(&longituded, &latituded, rVec3d);
 		StelUtils::rectToSphe(&longitudes, &latitudes, rVec3f);
 
-		longitude		*= M_180_PIf;
-		longitudef		*= M_180_PIf;
+		StelUtils::rectToSphe(&longitude1r, &latitude1r, &r, rVec3d1r);
+
+		longitude	*= M_180_PIf;
+		longitudef	*= M_180_PIf;
 		longituded	*= M_180_PI;
 		longitudes	*= M_180_PI;
-		latitude		*= M_180_PIf;
-		latitudef		*= M_180_PIf;
-		latituded		*= M_180_PI;
-		latitudes		*= M_180_PI;
+		latitude	*= M_180_PIf;
+		latitudef	*= M_180_PIf;
+		latituded	*= M_180_PI;
+		latitudes	*= M_180_PI;
+
+		longitude1r	*= M_180_PI;
+		latitude1r	*= M_180_PI;
 
 		QVERIFY2(qAbs(longitude-longitudeE)<=ERROR_HIGH_LIMIT && qAbs(latitude-latitudeE)<=ERROR_HIGH_LIMIT,
 				qPrintable(QString("Vec3 %1 = Long/Lat: %2/%3 (expected %4/%5)")
-					   .arg(rVec3f.toString())
-					   .arg(QString::number(longitude, 'f', 4))
-					   .arg(QString::number(latitude, 'f', 4))
-					   .arg(QString::number(longitudeE, 'f', 4))
-					   .arg(QString::number(latitudeE, 'f', 4))));
+				.arg(rVec3f.toString(), QString::number(longitude, 'f', 4), QString::number(latitude, 'f', 4),
+				     QString::number(longitudeE, 'f', 4), QString::number(latitudeE, 'f', 4))));
 
 		QVERIFY2(qAbs(longitudef-longitudeE)<=ERROR_HIGH_LIMIT && qAbs(latitudef-latitudeE)<=ERROR_HIGH_LIMIT,
 				qPrintable(QString("Vec3 %1 = Long/Lat: %2/%3 (expected %4/%5)")
-					   .arg(rVec3d.toString())
-					   .arg(QString::number(longitudef, 'f', 4))
-					   .arg(QString::number(latitudef, 'f', 4))
-					   .arg(QString::number(longitudeE, 'f', 4))
-					   .arg(QString::number(latitudeE, 'f', 4))));
+				.arg(rVec3d.toString(), QString::number(longitudef, 'f', 4), QString::number(latitudef, 'f', 4),
+				     QString::number(longitudeE, 'f', 4), QString::number(latitudeE, 'f', 4))));
 
 		QVERIFY2(qAbs(longituded-(double)longitudeE)<=ERROR_HIGH_LIMIT && qAbs(latituded-(double)latitudeE)<=ERROR_HIGH_LIMIT,
 				qPrintable(QString("Vec3 %1 = Long/Lat: %2/%3 (expected %4/%5)")
-					   .arg(rVec3d.toString())
-					   .arg(QString::number(longituded, 'f', 4))
-					   .arg(QString::number(latituded, 'f', 4))
-					   .arg(QString::number(longitudeE, 'f', 4))
-					   .arg(QString::number(latitudeE, 'f', 4))));
+				.arg(rVec3d.toString(), QString::number(longituded, 'f', 4), QString::number(latituded, 'f', 4),
+				     QString::number(longitudeE, 'f', 4), QString::number(latitudeE, 'f', 4))));
 
 		QVERIFY2(qAbs(longitudes-(double)longitudeE)<=ERROR_HIGH_LIMIT && qAbs(latitudes-(double)latitudeE)<=ERROR_HIGH_LIMIT,
 				qPrintable(QString("Vec3 %1 = Long/Lat: %2/%3 (expected %4/%5)")
-					   .arg(rVec3f.toString())
-					   .arg(QString::number(longitudes, 'f', 4))
-					   .arg(QString::number(latitudes, 'f', 4))
-					   .arg(QString::number(longitudeE, 'f', 4))
-					   .arg(QString::number(latitudeE, 'f', 4))));
+				.arg(rVec3f.toString(), QString::number(longitudes, 'f', 4), QString::number(latitudes, 'f', 4),
+				     QString::number(longitudeE, 'f', 4), QString::number(latitudeE, 'f', 4))));
+
+		QVERIFY2(qAbs(longitude1r-(double)longitudeE)<=ERROR_HIGH_LIMIT && qAbs(latitude1r-(double)latitudeE)<=ERROR_HIGH_LIMIT,
+				qPrintable(QString("Vec3 %1 = Long/Lat: %2/%3 (expected %4/%5)")
+				.arg(rVec3d1r.toString(), QString::number(longitude1r, 'f', 4), QString::number(latitude1r, 'f', 4),
+				     QString::number(longitudeE, 'f', 4), QString::number(latitudeE, 'f', 4))));
 	}
 }
 
@@ -391,25 +357,25 @@ void TestComputations::testVector2Operators()
 	bool expected, result;
 	QVariantList data;
 	//           Vec(1)       Vec(2)      Compare   Sum         Diff                   Mul                  Scal. M.           C.W.M.
-	data << "0,0"	<< "0,0"	<< true	<<  "0,0"	<<   "0,0"	<<   "0,0"	<<  "0,0"		<< "0,0";
+	data << "0,0"	<< "0,0"	<< true		<<  "0,0"	<<   "0,0"	<<   "0,0"	<<  "0,0"		<< "0,0";
 	data << "0,0"	<< "1,0"	<< false	<<  "1,0"	<<  "-1,0"	<<   "0,0"	<<  "0,0"		<< "0,0";
 	data << "0,0"	<< "1,1"	<< false	<<  "1,1"	<< "-1,-1"	<<   "0,0"	<<  "0,0"		<< "0,0";
 	data << "1,1"	<< "0,0"	<< false	<<  "1,1"	<<   "1,1"	<<   "0,0"	<<  "2,2"		<< "1,1";
-	data << "1,1"	<< "1,1"	<< true	<<  "2,2"	<<   "0,0"	<<   "1,1"	<<  "2,2"		<< "1,1";
-	data << "1,-1"	<< "1,-1"	<< true	<< "2,-2"	<<   "0,0"	<<   "1,1"	<< "2,-2"		<< "1,1";
+	data << "1,1"	<< "1,1"	<< true		<<  "2,2"	<<   "0,0"	<<   "1,1"	<<  "2,2"		<< "1,1";
+	data << "1,-1"	<< "1,-1"	<< true		<< "2,-2"	<<   "0,0"	<<   "1,1"	<< "2,-2"		<< "1,1";
 	data << "1,-1"	<< "-1,1"	<< false	<<  "0,0"	<<   "2,-2"	<< "-1,-1"	<< "2,-2"		<< "1,1";
 
 	while (data.count() >= 8)
 	{
 		firstF		= Vec2f(data.takeFirst().toString());
-		secondF	= Vec2f(data.takeFirst().toString());
+		secondF		= Vec2f(data.takeFirst().toString());
 		vecF		= firstF;
 		expected	= data.takeFirst().toBool();
-		sumF	= Vec2f(data.takeFirst().toString());
+		sumF		= Vec2f(data.takeFirst().toString());
 		diffF		= Vec2f(data.takeFirst().toString());
 		mulF		= Vec2f(data.takeFirst().toString());
 		smF		= Vec2f(data.takeFirst().toString());
-		cwmF	= Vec2f(data.takeFirst().toString());
+		cwmF		= Vec2f(data.takeFirst().toString());
 
 		firstD.set((double)firstF[0], (double)firstF[1]);
 		vecD		= firstD;
@@ -431,126 +397,81 @@ void TestComputations::testVector2Operators()
 
 		result = (firstF==secondF);
 		QVERIFY2(result==expected, qPrintable(QString("%1 == %2 (result: %3; expected: %4)")
-						      .arg(firstF.toString()).arg(secondF.toString())
-						      .arg(result).arg(expected)));
+			.arg(firstF.toString(), secondF.toString()).arg(result).arg(expected)));
 		result = (firstD==secondD);
 		QVERIFY2(result==expected, qPrintable(QString("%1 == %2 (result: %3; expected: %4)")
-						      .arg(firstD.toString()).arg(secondD.toString())
-						      .arg(result).arg(expected)));
+			.arg(firstD.toString(), secondD.toString()).arg(result).arg(expected)));
 		result = (firstI==secondI);
 		QVERIFY2(result==expected, qPrintable(QString("%1 == %2 (result: %3; expected: %4)")
-						      .arg(firstI.toString()).arg(secondI.toString())
-						      .arg(result).arg(expected)));
+			.arg(firstI.toString(), secondI.toString()).arg(result).arg(expected)));
 
 		result = (firstF!=secondF);
 		QVERIFY2(result!=expected, qPrintable(QString("%1 != %2 (result: %3; expected: %4)")
-						      .arg(firstF.toString()).arg(secondF.toString())
-						      .arg(result).arg(expected)));
+			.arg(firstF.toString(), secondF.toString()).arg(result).arg(expected)));
 		result = (firstD!=secondD);
 		QVERIFY2(result!=expected, qPrintable(QString("%1 != %2 (result: %3; expected: %4)")
-						      .arg(firstD.toString()).arg(secondD.toString())
-						      .arg(result).arg(expected)));
+			.arg(firstD.toString(), secondD.toString()).arg(result).arg(expected)));
 		result = (firstI!=secondI);
 		QVERIFY2(result!=expected, qPrintable(QString("%1 != %2 (result: %3; expected: %4)")
-						      .arg(firstI.toString()).arg(secondI.toString())
-						      .arg(result).arg(expected)));
+			.arg(firstI.toString(), secondI.toString()).arg(result).arg(expected)));
 
 		Vec2f sumFR = firstF+secondF;
 		QVERIFY2(sumFR==sumF, qPrintable(QString("%1 + %2 = %3 (expected: %4)")
-						 .arg(firstF.toString())
-						 .arg(secondF.toString())
-						 .arg(sumFR.toString())
-						 .arg(sumF.toString())));
+			.arg(firstF.toString(), secondF.toString(), sumFR.toString(), sumF.toString())));
 		Vec2d sumDR = firstD+secondD;
 		QVERIFY2(sumDR==sumD, qPrintable(QString("%1 + %2 = %3 (expected: %4)")
-						 .arg(firstD.toString())
-						 .arg(secondD.toString())
-						 .arg(sumDR.toString())
-						 .arg(sumD.toString())));
+			.arg(firstD.toString(), secondD.toString(), sumDR.toString(), sumD.toString())));
 		Vec2i sumIR = firstI+secondI;
 		QVERIFY2(sumIR==sumI, qPrintable(QString("%1 + %2 = %3 (expected: %4)")
-						 .arg(firstI.toString())
-						 .arg(secondI.toString())
-						 .arg(sumIR.toString())
-						 .arg(sumI.toString())));
+			.arg(firstI.toString(), secondI.toString(), sumIR.toString(), sumI.toString())));
 
 		Vec2f diffFR = firstF-secondF;
 		QVERIFY2(diffFR==diffF, qPrintable(QString("%1 - %2 = %3 (expected: %4)")
-						 .arg(firstF.toString())
-						 .arg(secondF.toString())
-						 .arg(diffFR.toString())
-						 .arg(diffF.toString())));
+			.arg(firstF.toString(), secondF.toString(), diffFR.toString(), diffF.toString())));
 
 		Vec2d diffDR = firstD-secondD;
 		QVERIFY2(diffDR==diffD, qPrintable(QString("%1 - %2 = %3 (expected: %4)")
-						 .arg(firstD.toString())
-						 .arg(secondD.toString())
-						 .arg(diffDR.toString())
-						 .arg(diffD.toString())));
+			.arg(firstD.toString(), secondD.toString(), diffDR.toString(), diffD.toString())));
 
 		Vec2i diffIR = firstI-secondI;
 		QVERIFY2(diffIR==diffI, qPrintable(QString("%1 - %2 = %3 (expected: %4)")
-						 .arg(firstI.toString())
-						 .arg(secondI.toString())
-						 .arg(diffIR.toString())
-						 .arg(diffI.toString())));
+			.arg(firstI.toString(), secondI.toString(), diffIR.toString(), diffI.toString())));
 
 		Vec2f mulFR = firstF*secondF;
 		QVERIFY2(mulFR==mulF, qPrintable(QString("%1 * %2 = %3 (expected: %4)")
-						 .arg(firstF.toString())
-						 .arg(secondF.toString())
-						 .arg(mulFR.toString())
-						 .arg(mulF.toString())));
+			.arg(firstF.toString(), secondF.toString(), mulFR.toString(), mulF.toString())));
 
 		Vec2d mulDR = firstD*secondD;
 		QVERIFY2(mulDR==mulD, qPrintable(QString("%1 * %2 = %3 (expected: %4)")
-						 .arg(firstD.toString())
-						 .arg(secondD.toString())
-						 .arg(mulDR.toString())
-						 .arg(mulD.toString())));
+			.arg(firstD.toString(), secondD.toString(), mulDR.toString(), mulD.toString())));
 
 		Vec2i mulIR = firstI*secondI;
 		QVERIFY2(mulIR==mulI, qPrintable(QString("%1 * %2 = %3 (expected: %4)")
-						 .arg(firstI.toString())
-						 .arg(secondI.toString())
-						 .arg(mulIR.toString())
-						 .arg(mulI.toString())));
+			.arg(firstI.toString(), secondI.toString(), mulIR.toString(), mulI.toString())));
 
 		Vec2f smFR = firstF*2.f;
 		QVERIFY2(smFR==smF, qPrintable(QString("%1 * 2.f = %2 (expected: %3)")
-						 .arg(firstF.toString())
-						 .arg(smFR.toString())
-						 .arg(smF.toString())));
+			.arg(firstF.toString(), smFR.toString(), smF.toString())));
 
 		Vec2d smDR = firstD*2.;
 		QVERIFY2(smDR==smD, qPrintable(QString("%1 * 2.0 = %2 (expected: %3)")
-						 .arg(firstD.toString())
-						 .arg(smDR.toString())
-						 .arg(smD.toString())));
+			.arg(firstD.toString(), smDR.toString(), smD.toString())));
 
 		Vec2i smIR = firstI*2;
 		QVERIFY2(smIR==smI, qPrintable(QString("%1 * 2 = %2 (expected: %3)")
-						 .arg(firstI.toString())
-						 .arg(smIR.toString())
-						 .arg(smI.toString())));
+			.arg(firstI.toString(), smIR.toString(), smI.toString())));
 
 		vecF *= firstF;
 		QVERIFY2(vecF==cwmF, qPrintable(QString("%1 * %1 = %2 (expected: %3)")
-						 .arg(firstF.toString())
-						 .arg(vecF.toString())
-						 .arg(cwmF.toString())));
+			.arg(firstF.toString(), vecF.toString(), cwmF.toString())));
 
 		vecD *= firstD;
 		QVERIFY2(vecD==cwmD, qPrintable(QString("%1 * %1 = %2 (expected: %3)")
-						 .arg(firstD.toString())
-						 .arg(vecD.toString())
-						 .arg(cwmD.toString())));
+			.arg(firstD.toString(), vecD.toString(), cwmD.toString())));
 
 		vecI *= firstI;
 		QVERIFY2(vecI==cwmI, qPrintable(QString("%1 * %1 = %2 (expected: %3)")
-						 .arg(firstI.toString())
-						 .arg(vecI.toString())
-						 .arg(cwmI.toString())));
+			.arg(firstI.toString(), vecI.toString(), cwmI.toString())));
 	}
 }
 
@@ -562,27 +483,27 @@ void TestComputations::testVector3Operators()
 	bool expected, result;
 	QVariantList data;
 	//           Vec(1)               Vec(2)              Compare   Sum                Diff                   Scal. M.
-	data << "0,0,0"	<< "0,0,0"	<< true	<<  "0,0,0"	<<    "0,0,0"	<<   "0,0,0";
-	data << "0,0,0"	<< "1,0,0"	<< false	<<  "1,0,0"	<<   "-1,0,0"	<<   "0,0,0";
-	data << "0,0,0"	<< "1,1,0"	<< false	<<  "1,1,0"	<< " -1,-1,0"	<<   "0,0,0";
-	data << "0,0,0"	<< "1,1,1"	<< false	<<  "1,1,1"	<< "-1,-1,-1"	<<   "0,0,0";
-	data << "1,1,1"	<< "0,0,0"	<< false	<<  "1,1,1"	<<    "1,1,1"	<<   "2,2,2";
-	data << "1,1,1"	<< "1,1,1"	<< true	<<  "2,2,2"	<<    "0,0,0"	<<   "2,2,2";
-	data << "1,-1,0"	<< "1,-1,0"	<< true	<< "2,-2,0"	<<    "0,0,0"	<<  "2,-2,0";
+	data << "0,0,0"		<< "0,0,0"	<< true		<<  "0,0,0"	<<    "0,0,0"	<<   "0,0,0";
+	data << "0,0,0"		<< "1,0,0"	<< false	<<  "1,0,0"	<<   "-1,0,0"	<<   "0,0,0";
+	data << "0,0,0"		<< "1,1,0"	<< false	<<  "1,1,0"	<< " -1,-1,0"	<<   "0,0,0";
+	data << "0,0,0"		<< "1,1,1"	<< false	<<  "1,1,1"	<< "-1,-1,-1"	<<   "0,0,0";
+	data << "1,1,1"		<< "0,0,0"	<< false	<<  "1,1,1"	<<    "1,1,1"	<<   "2,2,2";
+	data << "1,1,1"		<< "1,1,1"	<< true		<<  "2,2,2"	<<    "0,0,0"	<<   "2,2,2";
+	data << "1,-1,0"	<< "1,-1,0"	<< true		<< "2,-2,0"	<<    "0,0,0"	<<  "2,-2,0";
 	data << "1,-1,0"	<< "-1,1,0"	<< false	<<  "0,0,0"	<<   "2,-2,0"	<<  "2,-2,0";
 
 	while (data.count() >= 7)
 	{
 		firstF		= Vec3f(data.takeFirst().toString());
-		secondF	= Vec3f(data.takeFirst().toString());
+		secondF		= Vec3f(data.takeFirst().toString());
 		expected	= data.takeFirst().toBool();
-		sumF	= Vec3f(data.takeFirst().toString());
+		sumF		= Vec3f(data.takeFirst().toString());
 		diffF		= Vec3f(data.takeFirst().toString());
 		smF		= Vec3f(data.takeFirst().toString());
 
-		firstD	= firstF.toVec3d();
-		secondD	= secondF.toVec3d();
-		sumD	= sumF.toVec3d();
+		firstD		= firstF.toVec3d();
+		secondD		= secondF.toVec3d();
+		sumD		= sumF.toVec3d();
 		diffD		= diffF.toVec3d();
 		smD		= smF.toVec3d();
 
@@ -594,87 +515,57 @@ void TestComputations::testVector3Operators()
 
 		result = (firstF==secondF);
 		QVERIFY2(result==expected, qPrintable(QString("%1 == %2 (result: %3; expected: %4)")
-						      .arg(firstF.toString()).arg(secondF.toString())
-						      .arg(result).arg(expected)));
+			.arg(firstF.toString(), secondF.toString()).arg(result).arg(expected)));
 		result = (firstD==secondD);
 		QVERIFY2(result==expected, qPrintable(QString("%1 == %2 (result: %3; expected: %4)")
-						      .arg(firstD.toString()).arg(secondD.toString())
-						      .arg(result).arg(expected)));
+			.arg(firstD.toString(), secondD.toString()).arg(result).arg(expected)));
 		result = (firstI==secondI);
 		QVERIFY2(result==expected, qPrintable(QString("%1 == %2 (result: %3; expected: %4)")
-						      .arg(firstI.toString()).arg(secondI.toString())
-						      .arg(result).arg(expected)));
+			.arg(firstI.toString(), secondI.toString()).arg(result).arg(expected)));
 
 		result = (firstF!=secondF);
 		QVERIFY2(result!=expected, qPrintable(QString("%1 != %2 (result: %3; expected: %4)")
-						      .arg(firstF.toString()).arg(secondF.toString())
-						      .arg(result).arg(expected)));
+			.arg(firstF.toString(), secondF.toString()).arg(result).arg(expected)));
 		result = (firstD!=secondD);
 		QVERIFY2(result!=expected, qPrintable(QString("%1 != %2 (result: %3; expected: %4)")
-						      .arg(firstD.toString()).arg(secondD.toString())
-						      .arg(result).arg(expected)));
+			.arg(firstD.toString(), secondD.toString()).arg(result).arg(expected)));
 		result = (firstI!=secondI);
 		QVERIFY2(result!=expected, qPrintable(QString("%1 != %2 (result: %3; expected: %4)")
-						      .arg(firstI.toString()).arg(secondI.toString())
-						      .arg(result).arg(expected)));
+			.arg(firstI.toString(), secondI.toString()).arg(result).arg(expected)));
 
 		Vec3f sumFR = firstF+secondF;
 		QVERIFY2(sumFR==sumF, qPrintable(QString("%1 + %2 = %3 (expected: %4)")
-						 .arg(firstF.toString())
-						 .arg(secondF.toString())
-						 .arg(sumFR.toString())
-						 .arg(sumF.toString())));
+			.arg(firstF.toString(), secondF.toString(), sumFR.toString(), sumF.toString())));
 		Vec3d sumDR = firstD+secondD;
 		QVERIFY2(sumDR==sumD, qPrintable(QString("%1 + %2 = %3 (expected: %4)")
-						 .arg(firstD.toString())
-						 .arg(secondD.toString())
-						 .arg(sumDR.toString())
-						 .arg(sumD.toString())));
+			.arg(firstD.toString(), secondD.toString(), sumDR.toString(), sumD.toString())));
 		Vec3i sumIR = firstI+secondI;
 		QVERIFY2(sumIR==sumI, qPrintable(QString("%1 + %2 = %3 (expected: %4)")
-						 .arg(firstI.toString())
-						 .arg(secondI.toString())
-						 .arg(sumIR.toString())
-						 .arg(sumI.toString())));
+			.arg(firstI.toString(), secondI.toString(), sumIR.toString(), sumI.toString())));
 
 		Vec3f diffFR = firstF-secondF;
 		QVERIFY2(diffFR==diffF, qPrintable(QString("%1 - %2 = %3 (expected: %4)")
-						 .arg(firstF.toString())
-						 .arg(secondF.toString())
-						 .arg(diffFR.toString())
-						 .arg(diffF.toString())));
+			.arg(firstF.toString(), secondF.toString(), diffFR.toString(), diffF.toString())));
 
 		Vec3d diffDR = firstD-secondD;
 		QVERIFY2(diffDR==diffD, qPrintable(QString("%1 - %2 = %3 (expected: %4)")
-						 .arg(firstD.toString())
-						 .arg(secondD.toString())
-						 .arg(diffDR.toString())
-						 .arg(diffD.toString())));
+			.arg(firstD.toString(), secondD.toString(), diffDR.toString(), diffD.toString())));
 
 		Vec3i diffIR = firstI-secondI;
 		QVERIFY2(diffIR==diffI, qPrintable(QString("%1 - %2 = %3 (expected: %4)")
-						 .arg(firstI.toString())
-						 .arg(secondI.toString())
-						 .arg(diffIR.toString())
-						 .arg(diffI.toString())));
+			.arg(firstI.toString(), secondI.toString(), diffIR.toString(), diffI.toString())));
 
 		Vec3f smFR = firstF*2.f;
 		QVERIFY2(smFR==smF, qPrintable(QString("%1 * 2.f = %2 (expected: %3)")
-						 .arg(firstF.toString())
-						 .arg(smFR.toString())
-						 .arg(smF.toString())));
+			.arg(firstF.toString(), smFR.toString(), smF.toString())));
 
 		Vec3d smDR = firstD*2.;
 		QVERIFY2(smDR==smD, qPrintable(QString("%1 * 2.0 = %2 (expected: %3)")
-						 .arg(firstD.toString())
-						 .arg(smDR.toString())
-						 .arg(smD.toString())));
+			.arg(firstD.toString(), smDR.toString(), smD.toString())));
 
 		Vec3i smIR = firstI*2;
 		QVERIFY2(smIR==smI, qPrintable(QString("%1 * 2 = %2 (expected: %3)")
-						 .arg(firstI.toString())
-						 .arg(smIR.toString())
-						 .arg(smI.toString())));
+			.arg(firstI.toString(), smIR.toString(), smI.toString())));
 	}
 }
 
@@ -696,11 +587,7 @@ void TestComputations::testIntMod()
 		int eR = data.takeFirst().toInt();
 		int r = StelUtils::imod(a, b);
 
-		QVERIFY2(r==eR, qPrintable(QString("%1 mod %2 = %3 (expected %4)")
-					   .arg(a)
-					   .arg(b)
-					   .arg(r)
-					   .arg(eR)));
+		QVERIFY2(r==eR, qPrintable(QString("%1 mod %2 = %3 (expected %4)").arg(a).arg(b).arg(r).arg(eR)));
 	}
 }
 
@@ -724,10 +611,7 @@ void TestComputations::testIntDiv()
 		int r = a/b;
 
 		QVERIFY2(r==eR, qPrintable(QString("Integer division %1 / %2 = %3 (expected %4)")
-					   .arg(a)
-					   .arg(b)
-					   .arg(r)
-					   .arg(eR)));
+				.arg(a).arg(b).arg(r).arg(eR)));
 	}
 }
 
@@ -752,10 +636,7 @@ void TestComputations::testIntFloorDiv()
 		int r = StelUtils::intFloorDiv(a, b);
 
 		QVERIFY2(r==eR, qPrintable(QString("Integer division %1 / %2 = %3 (expected %4)")
-					   .arg(a)
-					   .arg(b)
-					   .arg(r)
-					   .arg(eR)));
+				.arg(a).arg(b).arg(r).arg(eR)));
 	}
 }
 
@@ -778,10 +659,7 @@ void TestComputations::testFloatMod()
 		float r = StelUtils::fmodpos(a, b);
 
 		QVERIFY2(qAbs(r-eR)<=1e-5, qPrintable(QString("%1 mod %2 = %3 (expected %4)")
-					   .arg(QString::number(a, 'f', 2))
-					   .arg(QString::number(b, 'f', 2))
-					   .arg(QString::number(r, 'f', 2))
-					   .arg(QString::number(eR, 'f', 2))));
+			.arg(QString::number(a, 'f', 2), QString::number(b, 'f', 2), QString::number(r, 'f', 2), QString::number(eR, 'f', 2))));
 	}
 }
 
@@ -804,10 +682,7 @@ void TestComputations::testDoubleMod()
 		double r = StelUtils::fmodpos(a, b);
 
 		QVERIFY2(qAbs(r-eR)<=1e-5, qPrintable(QString("%1 mod %2 = %3 (expected %4)")
-					   .arg(QString::number(a, 'f', 2))
-					   .arg(QString::number(b, 'f', 2))
-					   .arg(QString::number(r, 'f', 2))
-					   .arg(QString::number(eR, 'f', 2))));
+			.arg(QString::number(a, 'f', 2), QString::number(b, 'f', 2), QString::number(r, 'f', 2), QString::number(eR, 'f', 2))));
 	}
 }
 
@@ -815,18 +690,14 @@ void TestComputations::testExp()
 {
 	QList<float> data;
 	data << -1.f << -0.75f << -0.5f << -0.25f << 0.f << 0.25f << 0.5f << 0.75f << 1.f;
-	float v, e, r, err;
 	for (int i = 0; i < data.size(); ++i)
 	{
-		v = data.at(i);
-		e = exp(v);
-		r = StelUtils::fastExp(v);
-		err = qAbs(e-r);
+		float v = data.at(i);
+		float e = exp(v);
+		float r = StelUtils::fastExp(v);
+		float err = qAbs(e-r);
 		QVERIFY2(err<=1e-2, qPrintable(QString("value: %1 std. exp: %2 fast exp: %3 (error: %4)")
-					   .arg(QString::number(v, 'f', 5))
-					   .arg(QString::number(e, 'f', 5))
-					   .arg(QString::number(r, 'f', 5))
-					   .arg(QString::number(err, 'f', 5))));
+			.arg(QString::number(v, 'f', 5), QString::number(e, 'f', 5), QString::number(r, 'f', 5), QString::number(err, 'f', 5))));
 	}
 }
 
@@ -834,18 +705,14 @@ void TestComputations::testACos()
 {
 	QList<float> data;
 	data << 0.f << 0.25f << 0.75f << -0.75f << -0.25f << 0.5f << -0.5f;
-	float v, e, r, err;
 	for (int i = 0; i < data.size(); ++i)
 	{
-		v = data.at(i);
-		e = acos(v);
-		r = StelUtils::fastAcos(v);
-		err = qAbs(e-r);
+		float v = data.at(i);
+		float e = acos(v);
+		float r = StelUtils::fastAcos(v);
+		float err = qAbs(e-r);
 		QVERIFY2(err<=2e-2, qPrintable(QString("value: %1 std. acos: %2 fast acos: %3 (error: %4)")
-					   .arg(QString::number(v, 'f', 5))
-					   .arg(QString::number(e, 'f', 5))
-					   .arg(QString::number(r, 'f', 5))
-					   .arg(QString::number(err, 'f', 5))));
+			.arg(QString::number(v, 'f', 5), QString::number(e, 'f', 5), QString::number(r, 'f', 5), QString::number(err, 'f', 5))));
 	}
 }
 
@@ -864,10 +731,7 @@ void TestComputations::testSign()
 		int e = data.takeFirst().toInt();
 		int r = StelUtils::sign(a);
 
-		QVERIFY2(r==e, qPrintable(QString("number: %1 sign: %2 (expected: %3)")
-					   .arg(a)
-					   .arg(r)
-					   .arg(e)));
+		QVERIFY2(r==e, qPrintable(QString("number: %1 sign: %2 (expected: %3)").arg(a).arg(r).arg(e)));
 	}
 
 	data.clear();
@@ -884,9 +748,7 @@ void TestComputations::testSign()
 		int r = StelUtils::sign(a);
 
 		QVERIFY2(r==e, qPrintable(QString("number: %1 sign: %2 (expected: %3)")
-					   .arg(QString::number(a, 'f', 1))
-					   .arg(r)
-					   .arg(e)));
+			.arg(QString::number(a, 'f', 1)).arg(r).arg(e)));
 	}
 
 	data.clear();
@@ -903,9 +765,7 @@ void TestComputations::testSign()
 		int r = StelUtils::sign(a);
 
 		QVERIFY2(r==e, qPrintable(QString("number: %1 sign: %2 (expected: %3)")
-					   .arg(QString::number(a, 'f', 1))
-					   .arg(r)
-					   .arg(e)));
+			.arg(QString::number(a, 'f', 1)).arg(r).arg(e)));
 	}
 }
 
@@ -917,12 +777,31 @@ void TestComputations::testInterpolation()
 	QVERIFY2(abs(i3-.8761253) < 0.000001,
 		 qPrintable(QString("Interpol3 returned %1").arg(QString::number(i3, 'g', 7))));
 	const double i5=StelUtils::interpolate5(0.2777778,                             // Meeus 1998, Ex.3e
-					  StelUtils::dmsToRad(0, 54, 36.125),
-					  StelUtils::dmsToRad(0, 54, 24.606),
-					  StelUtils::dmsToRad(0, 54, 15.486),
-					  StelUtils::dmsToRad(0, 54, 08.694),
-					  StelUtils::dmsToRad(0, 54, 04.133));
+			StelUtils::dmsToRad(0, 54, 36.125),
+			StelUtils::dmsToRad(0, 54, 24.606),
+			StelUtils::dmsToRad(0, 54, 15.486),
+			StelUtils::dmsToRad(0, 54, 08.694),
+			StelUtils::dmsToRad(0, 54, 04.133));
 	double res5=StelUtils::dmsToRad(0, 54, 13.369);
 	QVERIFY2(abs(i5-res5)<0.000001,
-		 qPrintable(QString("Interpol5 returned %1, not %2").arg(QString::number(i5), 'g', 7).arg(QString::number(res5), 'g', 7)));
+		 qPrintable(QString("Interpol5 returned %1, not %2").arg(QString::number(i5, 'g', 7).arg(QString::number(res5, 'g', 7)))));
+}
+
+void TestComputations::testIsWithin()
+{
+	int a = 1, b = 5, c = 8;
+	QVERIFY2( StelUtils::isWithin(b, a, c), qPrintable(QString("%1 in [%2, %3]").arg(b).arg(a).arg(c)));
+	QVERIFY2(!StelUtils::isWithin(a, b, c), qPrintable(QString("%1 in [%2, %3]").arg(a).arg(b).arg(c)));
+	QVERIFY2(!StelUtils::isWithin(c, a, b), qPrintable(QString("%1 in [%2, %3]").arg(c).arg(a).arg(b)));
+	QVERIFY2( StelUtils::isWithin(b, b, c), qPrintable(QString("%1 in [%2, %3]").arg(b).arg(b).arg(c)));
+
+	float i = 1.f, j = 5.f, k = 8.f;
+	QVERIFY2( StelUtils::isWithin(j, i, k), qPrintable(QString("%1 in [%2, %3]")
+		.arg(QString::number(j,'f',3), QString::number(i,'f',3), QString::number(k,'f',3))));
+	QVERIFY2(!StelUtils::isWithin(i, j, k), qPrintable(QString("%1 in [%2, %3]")
+		.arg(QString::number(i,'f',3), QString::number(j,'f',3), QString::number(k,'f',3))));
+	QVERIFY2(!StelUtils::isWithin(k, i, j), qPrintable(QString("%1 in [%2, %3]")
+		.arg(QString::number(k,'f',3), QString::number(i,'f',3), QString::number(j,'f',3))));
+	QVERIFY2( StelUtils::isWithin(j, j, k), qPrintable(QString("%1 in [%2, %3]")
+		.arg(QString::number(j,'f',3), QString::number(j,'f',3), QString::number(k,'f',3))));
 }

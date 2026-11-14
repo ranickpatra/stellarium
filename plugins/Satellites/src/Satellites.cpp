@@ -26,10 +26,8 @@
 #include "StelLocation.hpp"
 #include "StelObjectMgr.hpp"
 #include "StelModuleMgr.hpp"
-#include "StelLocaleMgr.hpp"
 #include "StelFileMgr.hpp"
 #include "StelTextureMgr.hpp"
-#include "StelIniParser.hpp"
 #include "Satellites.hpp"
 #include "Satellite.hpp"
 #include "SatellitesListModel.hpp"
@@ -43,7 +41,11 @@
 #include "StelUtils.hpp"
 #include "StelActionMgr.hpp"
 
+#if USE_BUNDLED_QTCOMPRESS
 #include "external/qtcompress/qzipreader.h"
+#else
+#include <private/qzipreader_p.h>
+#endif
 
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -51,12 +53,299 @@
 #include <QDebug>
 #include <QFileInfo>
 #include <QFile>
+#include <QFont>
 #include <QTimer>
+#include <QTimeZone>
 #include <QVariantMap>
 #include <QVariant>
 #include <QDir>
 #include <QTemporaryFile>
-#include <QRegExp>
+#include <QRegularExpression>
+#include <QBuffer>
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+#include <QtConcurrent>
+#endif
+
+namespace
+{
+
+QByteArray unzipData(const QByteArray& fd)
+{
+	QTemporaryFile zip;
+	if (!zip.open())
+	{
+		qWarning() << "[Satellites] Unable to open a temporary file";
+		return fd;
+	}
+
+	// qWarning() << "[Satellites] Processing a ZIP archive...";
+	zip.write(fd);
+	zip.close();
+	QString archive = zip.fileName();
+	QByteArray data;
+
+#if USE_BUNDLED_QTCOMPRESS
+	Stel::QZipReader reader(archive);
+	if (reader.status() != Stel::QZipReader::NoError)
+#else
+	QZipReader reader(archive);
+	if (reader.status() != QZipReader::NoError)
+#endif
+	{
+		qWarning() << "[Satellites] Unable to open as a ZIP archive";
+		return fd;
+	}
+	for (const auto& info : reader.fileInfoList())
+	{
+		// qWarning() << "[Satellites] Processing:" << info.filePath;
+		if (info.isFile)
+			data.append(reader.fileData(info.filePath));
+	}
+	return data;
+}
+
+struct SatCsvEntry
+{
+	QString object_id;
+	QString epoch;
+	double mean_motion;
+	double eccentricity;
+	double inclination;
+	double ra_of_asc_node;
+	double arg_of_pericenter;
+	double mean_anomaly;
+	int ephemeris_type;
+	QString classification_type;
+	int element_set_no;
+	int rev_at_epoch;
+	double bstar;
+	double mean_motion_dot;
+	double mean_motion_ddot;
+};
+
+void addTleChecksum(QString& line)
+{
+	int sum = 0;
+	for (const auto c : line)
+	{
+		const auto u = c.unicode();
+		if ('0' <= u && u <= '9')
+			sum += u - '0';
+		else if (u == '-')
+			sum += 1;
+	}
+	line += QString::number(sum % 10);
+}
+
+QString formatTleEpoch(const QString& epochFromCSV)
+{
+	// The expected format is QDateTime's "yyyy-MM-ddTHH:mm:ss.z", followed by 3 digits of microseconds.
+	// But parsing this using QDateTime::fromString() is awfully slow (more than 70× slower than this code).
+	if (epochFromCSV.size() != 26 ||
+	    epochFromCSV[4] != '-' ||
+	    epochFromCSV[7] != '-' ||
+	    epochFromCSV[10] != 'T' ||
+	    epochFromCSV[13] != ':' ||
+	    epochFromCSV[16] != ':' ||
+	    epochFromCSV[19] != '.')
+	{
+		return {};
+	}
+	bool yOK = false, mthOK = false, dOK = false, hOK = false, minOK = false, sOK = false, usOK = false;
+	const auto year = epochFromCSV.mid(0, 4).toUInt(&yOK);
+	const auto month = epochFromCSV.mid(5, 2).toUInt(&mthOK);
+	const auto day = epochFromCSV.mid(8, 2).toUInt(&dOK);
+	const auto hour = epochFromCSV.mid(11, 2).toUInt(&hOK);
+	const auto minute = epochFromCSV.mid(14, 2).toUInt(&minOK);
+	const auto second = epochFromCSV.mid(17, 2).toUInt(&sOK);
+	const auto microsecond = epochFromCSV.mid(20, 6).toUInt(&usOK);
+	if (!yOK|| !mthOK|| !dOK|| !hOK|| !minOK|| !sOK|| !usOK) return {};
+
+	const auto ms = microsecond / 1000;
+	const auto microsecTail = microsecond - ms * 1000;
+	const auto epoch = QDateTime(QDate(year, month, day), QTime(hour, minute, second, ms), QTimeZone(0));
+	if (!epoch.isValid()) return {};
+	static const auto epoch0 = QDateTime(QDate(year, 1, 1), QTime(0,0,0), QTimeZone(0));
+	// The +1 shifts refence to "Jan 0" instead of Jan 1
+	const auto diffInDays = 1 + (epoch0.msecsTo(epoch) + microsecTail * 1e-3) / 86400e3;
+	const auto epochYear = epoch.date().year();
+	const auto res = QString("%1%2").arg(epochYear % 100, 2, 10, QLatin1Char('0'))
+	                                .arg(diffInDays, 12, 'f', 8, QLatin1Char('0'));
+	return res;
+}
+
+// These are given at https://celestrak.org/NORAD/documentation/tle-fmt.php
+const QString TLE_LINE1_TEMPLATE = "1 NNNNNU NNNNNAAA NNNNN.NNNNNNNN +.NNNNNNNN +NNNNN-N +NNNNN-N N NNNNN";
+const QString TLE_LINE2_TEMPLATE = "2 NNNNN NNN.NNNN NNN.NNNN NNNNNNN NNN.NNNN NNN.NNNN NN.NNNNNNNNNNNNNN";
+
+bool tleLineValid(const QString& line, const QString& lineTemplate)
+{
+	if (line.size() != lineTemplate.size()) return false;
+
+	for (int n = 0; n < lineTemplate.size(); ++n)
+	{
+		const auto c = line[n].unicode();
+		const auto t = lineTemplate[n].unicode();
+		if (t == 'A' || t == 'U')
+			continue;
+		if (t == 'N')
+		{
+			if(c != ' ' && !('0' <= c && c <= '9'))
+				return false;
+		}
+		else if (t == '+' || t == '-')
+		{
+			if (c != '+' && c != '-' && c != ' ')
+				return false;
+		}
+		else if (t != c)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+#define TLE_POS_MUST_BE_AT(line,tleLineNum,N) { if (line.size() != N) { warn( \
+	QString("Invalid TLE line %1 is being generated for CSV data").arg(tleLineNum), \
+	QString("Current length must be %1, but is %2.\nCurrent incomplete line: \"%3\"").arg(N).arg(line.size()).arg(line)); \
+	return {}; } }
+#define TLE_POS_MUST_BE_LE(line,tleLineNum,N) { if (line.size() > N) { warn( \
+	QString("Invalid TLE line %1 is being generated for CSV data").arg(tleLineNum), \
+	QString("Current length must be <=%1, but is %2.\nCurrent incomplete line: \"%3\"").arg(N).arg(line.size()).arg(line)); \
+	return {}; } }
+
+QString generateTleLine1(const SatCsvEntry& data,
+                         const std::function<void(const QString&,const QString&)>& warn)
+{
+	QString line = L1S("1 00000");
+	if (data.classification_type.size() == 1)
+	{
+		line += data.classification_type;
+	}
+	else
+	{
+		warn("Bad classification type", "not one character. Assuming Unknown.");
+		line += 'U';
+	}
+	line += ' ';
+
+	auto object_id = data.object_id;
+	if (object_id.isEmpty())
+		object_id = "    -    ";
+	if (object_id.size() < 6)
+	{
+		warn("Bad object id",
+		     QString("too short: %1 chars. Skipping the object.").arg(object_id.size()));
+		return {};
+	}
+	// Skip the '-' in the object_id, and omit first two digits of the year
+	line += object_id[2];
+	line += object_id[3];
+	line += object_id.mid(5, 6);
+	TLE_POS_MUST_BE_LE(line,1, 17);
+	line.resize(18, QLatin1Char(' ')); // pad to the next field
+	const auto epochStr = formatTleEpoch(data.epoch);
+	if (epochStr.isEmpty())
+	{
+		warn("Bad epoch", "failed to parse it according to the standard format");
+	}
+	line += epochStr;
+	TLE_POS_MUST_BE_AT(line,1, 32);
+	line += ' ';
+
+	auto meanMotionDotStr = QString("%1 ").arg(data.mean_motion_dot, 11, 'f', 8, QLatin1Char(' '));
+	meanMotionDotStr.replace("0.", ".");
+	line += meanMotionDotStr;
+	TLE_POS_MUST_BE_AT(line,1, 44);
+
+	auto meanMotionDDotStr = QString("%1 ").arg(data.mean_motion_ddot * 10, 11, 'e', 4);
+	meanMotionDDotStr.replace(".", "")
+	                 .replace("e+00", "+0")
+	                 .replace("e-0", "-")
+	                 .replace("e+0", "+");
+	line += meanMotionDDotStr;
+	TLE_POS_MUST_BE_AT(line,1, 53);
+
+	auto bstarStr = QString("%1 ").arg(data.bstar * 10, 11, 'e', 4);
+	bstarStr.replace(".", "")
+	        .replace("e+00", "+0")
+	        .replace("e-0", "-")
+	        .replace("e+0", "+");
+	line += bstarStr;
+	TLE_POS_MUST_BE_AT(line,1, 62);
+
+	if (data.ephemeris_type > 9)
+	{
+		warn("Bad ephemeris type", "must be single-digit, but isn't. Skipping this object");
+		return {};
+	}
+	line += QString::number(data.ephemeris_type);
+	TLE_POS_MUST_BE_AT(line,1, 63);
+	line += ' ';
+
+	if (data.element_set_no > 9999)
+	{
+		warn("Bad element set number type",
+		     QString("%1 > 999. Skipping this object").arg(data.ephemeris_type));
+		return {};
+	}
+	line += QString("%1").arg(data.element_set_no, 4);
+	TLE_POS_MUST_BE_AT(line,1, 68);
+
+	addTleChecksum(line);
+	TLE_POS_MUST_BE_AT(line,1, 69);
+
+	if (!tleLineValid(line, TLE_LINE1_TEMPLATE))
+	{
+		warn("Invalid TLE generated", QString("the following line doesn't match the template: \"%1\"").arg(line));
+		return {};
+	}
+
+	return line;
+}
+
+QString generateTleLine2(const SatCsvEntry& data,
+                         const std::function<void(const QString&,const QString&)>& warn)
+{
+	QString line = L1S("2 00000 ");
+	line += QString("%1 ").arg(data.inclination, 8, 'f', 4);
+	TLE_POS_MUST_BE_AT(line,2, 17);
+
+	line += QString("%1 ").arg(data.ra_of_asc_node, 8, 'f', 4);
+	TLE_POS_MUST_BE_AT(line,2, 26);
+
+	line += QString("%1 ").arg(data.eccentricity, 8, 'f', 7).replace("0.", "");
+	TLE_POS_MUST_BE_AT(line,2, 34);
+
+	line += QString("%1 ").arg(data.arg_of_pericenter, 8, 'f', 4);
+	TLE_POS_MUST_BE_AT(line,2, 43);
+
+	line += QString("%1 ").arg(data.mean_anomaly, 8, 'f', 4);
+	TLE_POS_MUST_BE_AT(line,2, 52);
+
+	line += QString("%1").arg(data.mean_motion, 11, 'f', 8);
+	TLE_POS_MUST_BE_AT(line,2, 63);
+
+	line += QString("%1").arg(data.rev_at_epoch, 5);
+	TLE_POS_MUST_BE_AT(line,2, 68);
+
+	addTleChecksum(line);
+	TLE_POS_MUST_BE_AT(line,2, 69);
+
+	if (!tleLineValid(line, TLE_LINE2_TEMPLATE))
+	{
+		warn("Invalid TLE generated", QString("the following line doesn't match the template: \"%1\"").arg(line));
+		return {};
+	}
+
+	return line;
+}
+
+#undef TLE_POS_MUST_BE_AT
+#undef TLE_POS_MUST_BE_LE
+
+}
 
 StelModule* SatellitesStelPluginInterface::getStelModule() const
 {
@@ -85,36 +374,49 @@ StelPluginInfo SatellitesStelPluginInterface::getPluginInfo() const
 QString Satellites::SatellitesCatalogVersion = "0.12.0";
 
 Satellites::Satellites()
-	: satelliteListModel(Q_NULLPTR)
-	, toolbarButton(Q_NULLPTR)
-	, earth(Q_NULLPTR)
-	, defaultHintColor(0.0f, 0.4f, 0.6f)	
+	: satelliteListModel(nullptr)
+	, toolbarButton(nullptr)
+	, earth(nullptr)
+	, defaultHintColor(0.7f, 0.7f, 0.7f)
 	, updateState(CompleteNoUpdates)
-	, downloadMgr(Q_NULLPTR)
-	, progressBar(Q_NULLPTR)
+	, downloadMgr(nullptr)
+	, progressBar(nullptr)
 	, numberDownloadsComplete(0)
-	, updateTimer(Q_NULLPTR)
+	, updateTimer(nullptr)
 	, updatesEnabled(false)
 	, autoAddEnabled(false)
 	, autoRemoveEnabled(false)
+	, autoDisplayEnabled(true)
 	, updateFrequencyHours(0)
+	, flagUmbraVisible(false)
+	, flagUmbraAtFixedAltitude(false)
+	, umbraColor(1.0f, 0.0f, 0.0f)
+	, fixedUmbraAltitude(1000.0)
+	, flagPenumbraVisible(false)
+	, penumbraColor(1.0f, 0.0f, 0.0f)
+	, lastSelectedSatellite(QString())
 	#if(SATELLITES_PLUGIN_IRIDIUM == 1)
 	, iridiumFlaresPredictionDepth(7)
 	#endif
 {
 	setObjectName("Satellites");
+#ifndef NO_GUI
 	configDialog = new SatellitesDialog();
+#endif
 }
 
 void Satellites::deinit()
 {
 	Satellite::hintTexture.clear();
 	texPointer.clear();
+	texCross.clear();
 }
 
 Satellites::~Satellites()
 {
+#ifndef NO_GUI
 	delete configDialog;
+#endif
 }
 
 
@@ -139,6 +441,7 @@ void Satellites::init()
 		{
 			//qDebug() << "Satellites: created section in config file.";
 			restoreDefaultSettings();
+			restoreDefaultTleSources();
 		}
 
 		// populate settings from main config file.
@@ -149,34 +452,38 @@ void Satellites::init()
 
 		// Load and find resources used in the plugin
 		texPointer = StelApp::getInstance().getTextureManager().createTexture(StelFileMgr::getInstallationDir()+"/textures/pointeur5.png");
+		texCross = StelApp::getInstance().getTextureManager().createTexture(StelFileMgr::getInstallationDir()+"/textures/cross.png");
 		Satellite::hintTexture = StelApp::getInstance().getTextureManager().createTexture(":/satellites/hint.png");
 
 		// key bindings and other actions		
 		QString satGroup = N_("Satellites");
 		addAction("actionShow_Satellite_Hints", satGroup, N_("Artificial satellites"), "flagHintsVisible", "Ctrl+Z");
 		addAction("actionShow_Satellite_Labels", satGroup, N_("Satellite labels"), "flagLabelsVisible", "Alt+Shift+Z");
-		addAction("actionShow_Satellite_ConfigDialog_Global", satGroup, N_("Satellites configuration window"), configDialog, "visible", "Alt+Z");		
+#ifndef NO_GUI
+		addAction("actionShow_Satellite_ConfigDialog_Global", satGroup, N_("Show settings dialog"), configDialog, "visible", "Alt+Z");
 
 		// Gui toolbar button
 		StelGui* gui = dynamic_cast<StelGui*>(StelApp::getInstance().getGui());
-		if (gui!=Q_NULLPTR)
+		if (gui)
 		{
-			toolbarButton = new StelButton(Q_NULLPTR,
+			toolbarButton = new StelButton(nullptr,
 						       QPixmap(":/satellites/bt_satellites_on.png"),
 						       QPixmap(":/satellites/bt_satellites_off.png"),
 						       QPixmap(":/graphicGui/miscGlow32x32.png"),
-						       "actionShow_Satellite_Hints");
+						       "actionShow_Satellite_Hints",
+						       false,
+						       "actionShow_Satellite_ConfigDialog_Global");
 			gui->getButtonBar()->addButton(toolbarButton, "065-pluginsGroup");
 		}
+#endif
 	}
 	catch (std::runtime_error &e)
 	{
 		qWarning() << "[Satellites] init error: " << e.what();
 		return;
 	}
-
 	// If the json file does not already exist, create it from the resource in the Qt resource
-	if(QFileInfo(catalogPath).exists())
+	if(QFileInfo::exists(catalogPath))
 	{
 		if (!checkJsonFileFormat() || readCatalogVersion() != SatellitesCatalogVersion)
 		{
@@ -186,42 +493,58 @@ void Satellites::init()
 	}
 	else
 	{
-		qDebug() << "[Satellites] satellites.json does not exist - copying default file to " << QDir::toNativeSeparators(catalogPath);
+		qInfo().noquote() << "[Satellites] satellites.json does not exist - copying default file to " << QDir::toNativeSeparators(catalogPath);
 		restoreDefaultCatalog();
 	}
 
-	qDebug() << "[Satellites] loading catalogue file:" << QDir::toNativeSeparators(catalogPath);
+	qInfo().noquote() << "[Satellites] loading catalogue file:" << QDir::toNativeSeparators(catalogPath);
 
 	// create satellites according to content of satellites.json file
 	loadCatalog();
+	// create list of "supergroups" for satellites
+	createSuperGroupsList();
 
 	// Set up download manager and the update schedule
 	downloadMgr = new QNetworkAccessManager(this);
-	connect(downloadMgr, SIGNAL(finished(QNetworkReply*)),
-	        this, SLOT(saveDownloadedUpdate(QNetworkReply*)));
+	connect(downloadMgr, &QNetworkAccessManager::finished, this, &Satellites::saveDownloadedUpdate);
 	updateState = CompleteNoUpdates;
 	updateTimer = new QTimer(this);
 	updateTimer->setSingleShot(false);   // recurring check for update
 	updateTimer->setInterval(13000);     // check once every 13 seconds to see if it is time for an update
-	connect(updateTimer, SIGNAL(timeout()), this, SLOT(checkForUpdate()));
+	connect(updateTimer, &QTimer::timeout, this, &Satellites::checkForUpdate);
 	updateTimer->start();
 
-	earth = GETSTELMODULE(SolarSystem)->getEarth();
+	SolarSystem* ssystem = GETSTELMODULE(SolarSystem);
+	earth = ssystem->getEarth();
+	sun = ssystem->getSun();
 	GETSTELMODULE(StelObjectMgr)->registerStelObjectMgr(this);
 
 	// Handle changes to the observer location or wide range of dates:
 	StelCore* core = StelApp::getInstance().getCore();
-	connect(core, SIGNAL(locationChanged(StelLocation)), this, SLOT(updateObserverLocation(StelLocation)));
-	connect(core, SIGNAL(configurationDataSaved()), this, SLOT(saveSettings()));
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(translateData()));
+	connect(core, &StelCore::locationChanged, this, &Satellites::updateObserverLocation);
+	connect(core, &StelCore::configurationDataSaved, this, &Satellites::saveSettings);
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &Satellites::translateData);
+
+	connect(this, &Satellites::satSelectionChanged, this, &Satellites::changeSelectedSatellite);
 
 	bindingGroups();
+}
+
+void Satellites::setLastUpdate(QDateTime last)
+{
+	lastUpdate.first = last.toUTC();
+	lastUpdate.second = StelUtils::qDateTimeToJd(lastUpdate.first);
+}
+void Satellites::setLastUpdate(double last)
+{
+	lastUpdate.second = last;
+	lastUpdate.first = StelUtils::jdToQDateTime(lastUpdate.second, Qt::UTC);
 }
 
 void Satellites::translateData()
 {
 	bindingGroups();
-	for (const auto& sat : qAsConst(satellites))
+	for (const auto& sat : std::as_const(satellites))
 	{
 		if (sat->initialized)
 			sat->recomputeSatData();
@@ -241,14 +564,13 @@ void Satellites::bindingGroups()
 	QString satGroup = N_("Satellites");
 	QString showSatGroup = q_("Show satellites from the group");
 	QString hideSatGroup = q_("Hide satellites from the group");
-	QStringList::const_iterator constIterator;
-	for (constIterator = groups.constBegin(); constIterator != groups.constEnd(); ++constIterator)
+	for (auto constIterator = groups.constBegin(); constIterator != groups.constEnd(); ++constIterator)
 	{
 		QString groupId = (*constIterator).toLocal8Bit().constData();
 		QString actionShowName = QString("actionShow_Satellite_Group_%1").arg(groupId);
 		QString actionShowDescription = QString("%1 \"%2\"").arg(showSatGroup, q_(groupId));
 		StelAction* actionShow = actionMgr->findAction(actionShowName);
-		if (actionShow!=Q_NULLPTR)
+		if (actionShow)
 			actionMgr->findAction(actionShowName)->setText(actionShowDescription);
 		else
 			addAction(actionShowName, satGroup, actionShowDescription, this, [=](){setSatGroupVisible(groupId, true);});
@@ -256,7 +578,7 @@ void Satellites::bindingGroups()
 		QString actionHideName = QString("actionHide_Satellite_Group_%1").arg(groupId);
 		QString actionHideDescription = QString("%1 \"%2\"").arg(hideSatGroup, q_(groupId));
 		StelAction* actionHide = actionMgr->findAction(actionHideName);
-		if (actionHide!=Q_NULLPTR)
+		if (actionHide)
 			actionMgr->findAction(actionHideName)->setText(actionHideDescription);
 		else
 			addAction(actionHideName, satGroup, actionHideDescription, this, [=](){setSatGroupVisible(groupId, false);});
@@ -265,7 +587,7 @@ void Satellites::bindingGroups()
 
 void Satellites::setSatGroupVisible(const QString& groupId, bool visible)
 {
-	for (const auto& sat : qAsConst(satellites))
+	for (const auto& sat : std::as_const(satellites))
 	{
 		if (sat->initialized && sat->groups.contains(groupId))
 		{
@@ -287,7 +609,7 @@ bool Satellites::backupCatalog(bool deleteOriginal)
 	}
 
 	QString backupPath = catalogPath + ".old";
-	if (QFileInfo(backupPath).exists())
+	if (QFileInfo::exists(backupPath))
 		QFile(backupPath).remove();
 
 	if (old.copy(backupPath))
@@ -296,18 +618,17 @@ bool Satellites::backupCatalog(bool deleteOriginal)
 		{
 			if (!old.remove())
 			{
-				qWarning() << "[Satellites] WARNING: unable to remove old catalogue file!";
+				qWarning() << "[Satellites] Unable to remove old catalogue file!";
 				return false;
 			}
 		}
 	}
 	else
 	{
-		qWarning() << "[Satellites] WARNING: failed to back up catalogue file as"
+		qWarning() << "[Satellites] Failed to back up catalogue file as"
 			   << QDir::toNativeSeparators(backupPath);
 		return false;
 	}
-
 	return true;
 }
 
@@ -353,19 +674,23 @@ QList<StelObjectP> Satellites::searchAround(const Vec3d& av, double limitFov, co
 StelObjectP Satellites::searchByNameI18n(const QString& nameI18n) const
 {
 	if (!hintFader)
-		return Q_NULLPTR;
+		return nullptr;
 
 	StelCore* core = StelApp::getInstance().getCore();
 
 	if (qAbs(core->getTimeRate())>=Satellite::timeRateLimit) // Do not show satellites when time rate is over limit
-		return Q_NULLPTR;
+		return nullptr;
 
 	if (core->getCurrentPlanet()!=earth || !isValidRangeDates(core))
-		return Q_NULLPTR;
+		return nullptr;
 	
 	QString objw = nameI18n.toUpper();
 	
 	StelObjectP result = searchByNoradNumber(objw);
+	if (result)
+		return result;
+
+	result = searchByInternationalDesignator(objw);
 	if (result)
 		return result;
 
@@ -378,21 +703,21 @@ StelObjectP Satellites::searchByNameI18n(const QString& nameI18n) const
 		}
 	}
 
-	return Q_NULLPTR;
+	return nullptr;
 }
 
 StelObjectP Satellites::searchByName(const QString& englishName) const
 {
 	if (!hintFader)
-		return Q_NULLPTR;
+		return nullptr;
 
 	StelCore* core = StelApp::getInstance().getCore();
 
 	if (qAbs(core->getTimeRate())>=Satellite::timeRateLimit) // Do not show satellites when time rate is over limit
-		return Q_NULLPTR;
+		return nullptr;
 
 	if (core->getCurrentPlanet()!=earth || !isValidRangeDates(core))
-		return Q_NULLPTR;
+		return nullptr;
 
 	QString objw = englishName.toUpper();
 	
@@ -400,6 +725,10 @@ StelObjectP Satellites::searchByName(const QString& englishName) const
 	if (result)
 		return result;
 	
+	result = searchByInternationalDesignator(objw);
+	if (result)
+		return result;
+
 	for (const auto& sat : satellites)
 	{
 		if (sat->initialized && sat->displayed)
@@ -409,7 +738,7 @@ StelObjectP Satellites::searchByName(const QString& englishName) const
 		}
 	}
 
-	return Q_NULLPTR;
+	return nullptr;
 }
 
 StelObjectP Satellites::searchByID(const QString &id) const
@@ -422,27 +751,28 @@ StelObjectP Satellites::searchByID(const QString &id) const
 		}
 	}
 
-	return Q_NULLPTR;
+	return nullptr;
 }
 
 StelObjectP Satellites::searchByNoradNumber(const QString &noradNumber) const
 {
 	if (!hintFader)
-		return Q_NULLPTR;
+		return nullptr;
 
 	StelCore* core = StelApp::getInstance().getCore();
 
 	if (qAbs(core->getTimeRate())>=Satellite::timeRateLimit) // Do not show satellites when time rate is over limit
-		return Q_NULLPTR;
+		return nullptr;
 
 	if (core->getCurrentPlanet()!=earth || !isValidRangeDates(core))
-		return Q_NULLPTR;
+		return nullptr;
 	
 	// If the search string is a catalogue number...
-	QRegExp regExp("^(NORAD)\\s*(\\d+)\\s*$");
-	if (regExp.exactMatch(noradNumber))
+	static const QRegularExpression regExp("^(NORAD)\\s*(\\d+)\\s*$");
+	QRegularExpressionMatch match=regExp.match(noradNumber);
+	if (match.hasMatch())
 	{
-		QString numberString = regExp.cap(2);
+		QString numberString = match.captured(2);
 		
 		for (const auto& sat : satellites)
 		{
@@ -457,9 +787,43 @@ StelObjectP Satellites::searchByNoradNumber(const QString &noradNumber) const
 	return StelObjectP();
 }
 
-QStringList Satellites::listMatchingObjects(const QString& objPrefix, int maxNbItem, bool useStartOfWords) const
+StelObjectP Satellites::searchByInternationalDesignator(const QString &intlDesignator) const
 {
-	QStringList result;
+	if (!hintFader)
+		return nullptr;
+
+	StelCore* core = StelApp::getInstance().getCore();
+
+	if (qAbs(core->getTimeRate())>=Satellite::timeRateLimit) // Do not show satellites when time rate is over limit
+		return nullptr;
+
+	if (core->getCurrentPlanet()!=earth || !isValidRangeDates(core))
+		return nullptr;
+
+	// If the search string is an international designator...
+	static const QRegularExpression regExp("^(\\d+)-(\\w*)\\s*$");
+	QRegularExpressionMatch match=regExp.match(intlDesignator);
+	if (match.hasMatch())
+	{
+		QString designator = QString("%1-%2").arg(match.captured(1), match.captured(2));
+
+		for (const auto& sat : satellites)
+		{
+			if (sat->initialized && sat->displayed)
+			{
+				if (sat->getInternationalDesignator() == designator)
+					return qSharedPointerCast<StelObject>(sat);
+			}
+		}
+	}
+
+	return StelObjectP();
+}
+
+
+QVector<QPair<QString,StelObjectP>> Satellites::listMatchingObjects(const QString& objPrefix, int maxNbItem, bool useStartOfWords) const
+{
+	QVector<QPair<QString,StelObjectP>> result;
 	if (!hintFader || maxNbItem <= 0)
 		return result;
 
@@ -474,53 +838,66 @@ QStringList Satellites::listMatchingObjects(const QString& objPrefix, int maxNbI
 	QString objw = objPrefix.toUpper();
 
 	QString numberPrefix;
-	QRegExp regExp("^(NORAD)\\s*(\\d+)\\s*$");
-	if (regExp.exactMatch(objw))
+	static const QRegularExpression regExp("^(NORAD)\\s*(\\d+)\\s*$");
+	QRegularExpressionMatch match=regExp.match(objw);
+	if (match.hasMatch())
 	{
-		QString numberString = regExp.cap(2);
+		QString numberString = match.captured(2);
 		bool ok;
 		/* int number = */ numberString.toInt(&ok);
 		if (ok)
 			numberPrefix = numberString;
 	}
 
-	QStringList names;
+	QString designatorPrefix;
+	static const QRegularExpression regExp2("^(\\d+)-(\\w*)\\s*$");
+	QRegularExpressionMatch match2=regExp2.match(objw);
+	if (match2.hasMatch())
+		designatorPrefix = QString("%1-%2").arg(match2.captured(1), match2.captured(2));
+
+	QVector<QPair<QString,StelObjectP>> names;
 	for (const auto& sobj : satellites)
 	{
 		if (!sobj->initialized || !sobj->displayed)
 			continue;
 
-		names.append(sobj->getNameI18n());
-		names.append(sobj->getEnglishName());
+		names.append({sobj->getNameI18n(), StelObjectP(sobj)});
+		names.append({sobj->getEnglishName(), StelObjectP(sobj)});
 		if (!numberPrefix.isEmpty() && sobj->getCatalogNumberString().startsWith(numberPrefix))
-			names.append(QString("NORAD %1").arg(sobj->getCatalogNumberString()));
+			names.append({QString("NORAD %1").arg(sobj->getCatalogNumberString()), StelObjectP(sobj)});
+		if (!designatorPrefix.isEmpty() && sobj->getInternationalDesignator().startsWith(designatorPrefix))
+			names.append({sobj->getInternationalDesignator(), StelObjectP(sobj)});
 	}
 
-	QString fullMatch = "";
-	for (const auto& name : qAsConst(names))
+	QString fullMatchName;
+	StelObjectP fullMatchP;
+	for (const auto& [name,obj] : std::as_const(names))
 	{
 		if (!matchObjectName(name, objPrefix, useStartOfWords))
 			continue;
 
 		if (name==objPrefix)
-			fullMatch = name;
+		{
+			fullMatchName = name;
+			fullMatchP = obj;
+		}
 		else
-			result.append(name);
+			result.append({name, obj});
 
 		if (result.size() >= maxNbItem)
 			break;
 	}
 
-	result.sort();
-	if (!fullMatch.isEmpty())
-		result.prepend(fullMatch);
+	std::sort(result.begin(), result.end(), [](auto& a, auto& b){ return a.first < b.first; });
+	if (!fullMatchName.isEmpty())
+		result.prepend({fullMatchName, fullMatchP});
 
 	return result;
 }
 
-QStringList Satellites::listAllObjects(bool inEnglish) const
+QVector<QPair<QString,StelObjectP>> Satellites::listAllObjects(bool inEnglish) const
 {
-	QStringList result;
+	QVector<QPair<QString,StelObjectP>> result;
 
 	if (!hintFader)
 		return result;
@@ -536,26 +913,71 @@ QStringList Satellites::listAllObjects(bool inEnglish) const
 	for (const auto& sat : satellites)
 	{
 		if (inEnglish)
-			result << sat->getEnglishName();
+			result.append({sat->getEnglishName(), StelObjectP(sat)});
 		else
-			result << sat->getNameI18n();
+			result.append({sat->getNameI18n(), StelObjectP(sat)});
 	}
 	return result;
 }
 
 bool Satellites::configureGui(bool show)
 {
+#ifdef NO_GUI
+	return false;
+#else
 	if (show)
 		configDialog->setVisible(true);
 	return true;
+#endif
 }
 
 void Satellites::restoreDefaults(void)
 {
 	restoreDefaultSettings();
+	restoreDefaultTleSources();
 	restoreDefaultCatalog();	
 	loadCatalog();
 	loadSettings();
+}
+
+void Satellites::restoreDefaultTleSources()
+{
+	// Format: group name, auto-add flag
+	const QMap<QString, bool> celestrak = {
+	        // Special-Interest Satellites
+	        { "last-30-days", false }, { "stations", true }, { "visual", true  }, { "active", false }, { "analyst", false },
+	        // Weather & Earth Resources Satellites
+	        { "weather", false }, { "resource", false }, { "sarsat", false }, { "dmc", false }, { "tdrss", false },
+	        { "argos", false }, { "planet", false }, { "spire", false },
+	        // Communications Satellites
+	        { "geo", false }, { "intelsat", false }, { "eutelsat", false }, { "starlink", true  },  { "qianfan", false }, 
+	        { "kuiper", false }, { "orbcomm", false }, { "amateur", true  }, { "x-comm", false }, { "ses", false }, 
+	        { "telesat", false }, { "oneweb", true  }, { "hulianwang", false }, { "iridium-NEXT", false }, { "globalstar", false }, 
+	        { "satnogs", false }, { "other-comm", false },
+	        // Navigation Satellites
+	        { "gnss", true  }, { "gps-ops", true  }, { "galileo", true  }, { "glo-ops", true  }, { "beidou", true  }, { "sbas", false },
+	        // Scientific Satellites
+	        { "science", true  }, { "geodetic", false },{ "engineering", false }, { "education", false },
+	        // Miscellaneous Satellites
+	        { "military", false }, { "radar", false }, { "cubesat", false }
+	};
+	// Details: https://celestrak.org/NORAD/documentation/gp-data-formats.php
+	QString celestrackBaseURL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=%1&FORMAT=CSV";
+	QStringList urls;
+	// TLE sources from Celestrak
+	for (auto group = celestrak.begin(); group != celestrak.end(); ++group)
+	{
+		QString url = celestrackBaseURL.arg(group.key());
+		if (group.value()) // Auto-add ON!
+			urls << QString("1,%1").arg(url);
+		else
+			urls << url;
+	}
+	// Other sources and supplemental data from Celestrack
+	urls << "https://www.amsat.org/amsat/ftp/keps/current/nasabare.txt"
+	      << "https://mmccants.org/tles/classfd.zip";
+
+	saveTleSources(urls);
 }
 
 void Satellites::restoreDefaultSettings()
@@ -571,7 +993,7 @@ void Satellites::restoreDefaultSettings()
 	conf->setValue("updates_enabled", true);
 	conf->setValue("auto_add_enabled", true);
 	conf->setValue("auto_remove_enabled", true);
-	conf->setValue("hint_color", "0.0,0.4,0.6");
+	conf->setValue("hint_color", "0.7,0.7,0.7");
 	conf->setValue("invisible_satellite_color", "0.2,0.2,0.2");
 	conf->setValue("transit_satellite_color", "0.0,0.0,0.0");
 	conf->setValue("hint_font_size", 10);
@@ -580,61 +1002,45 @@ void Satellites::restoreDefaultSettings()
 	conf->setValue("orbit_line_segments", 90);
 	conf->setValue("orbit_fade_segments", 5);
 	conf->setValue("orbit_segment_duration", 20);
+	conf->setValue("valid_epoch_age", 30);
 	conf->setValue("iconic_mode_enabled", false);
+	conf->setValue("hide_invisible_satellites", false);
+	conf->setValue("colored_invisible_satellites", true);
+	conf->setValue("umbra_flag", false);
+	conf->setValue("umbra_fixed_altitude_flag", false);
+	conf->setValue("umbra_color", "1.0,0.0,0.0");
+	conf->setValue("umbra_fixed_altitude", 1000.0);
+	conf->setValue("penumbra_flag", false);
+	conf->setValue("penumbra_color", "1.0,0.0,0.0");
+	conf->setValue("cf_magnitude_flag", false);
+	conf->setValue("cf_apogee_flag", false);
+	conf->setValue("cf_apogee_min", 20000.);
+	conf->setValue("cf_apogee_max", 55000.);
+	conf->setValue("cf_perigee_flag", false);
+	conf->setValue("cf_perigee_min", 200.);
+	conf->setValue("cf_perigee_max", 1500.);
+	conf->setValue("cf_eccentricity_flag", false);
+	conf->setValue("cf_eccentricity_min", 0.3);
+	conf->setValue("cf_eccentricity_max", 0.9);
+	conf->setValue("cf_period_flag", false);
+	conf->setValue("cf_period_min", 0.);
+	conf->setValue("cf_period_max", 150.);
+	conf->setValue("cf_inclination_flag", false);
+	conf->setValue("cf_inclination_min", 120.);
+	conf->setValue("cf_inclination_max", 180.);
+	conf->setValue("cf_rcs_flag", false);
+	conf->setValue("cf_rcs_min", 0.1);
+	conf->setValue("cf_rcs_max", 100.);
+	conf->setValue("vf_altitude_flag", false);
+	conf->setValue("vf_altitude_min", 200.);
+	conf->setValue("vf_altitude_max", 1500.);
 	
 	conf->endGroup(); // saveTleSources() opens it for itself
-	
-	// TLE update sources
-	QStringList urls;
-	urls << "1,http://www.celestrak.com/NORAD/elements/visual.txt" // Auto-add ON!
-	     << "http://www.celestrak.com/NORAD/elements/tle-new.txt"
-	     << "1,http://www.celestrak.com/NORAD/elements/science.txt"
-	     << "http://www.celestrak.com/NORAD/elements/noaa.txt"
-	     << "http://www.celestrak.com/NORAD/elements/goes.txt"
-	     << "1,http://www.celestrak.com/NORAD/elements/amateur.txt"
-	     << "1,http://www.celestrak.com/NORAD/elements/gps-ops.txt"
-	     << "1,http://www.celestrak.com/NORAD/elements/galileo.txt"
-	     << "http://www.celestrak.com/NORAD/elements/iridium.txt"
-	     << "http://www.celestrak.com/NORAD/elements/iridium-NEXT.txt"
-	     << "http://www.celestrak.com/NORAD/elements/geo.txt"
-	     << "1,http://www.celestrak.com/NORAD/elements/stations.txt"
-	     << "http://www.celestrak.com/NORAD/elements/weather.txt"
-	     << "http://www.celestrak.com/NORAD/elements/resource.txt"
-	     << "http://www.celestrak.com/NORAD/elements/sarsat.txt"
-	     << "http://www.celestrak.com/NORAD/elements/dmc.txt"
-	     << "http://www.celestrak.com/NORAD/elements/tdrss.txt"
-	     << "http://www.celestrak.com/NORAD/elements/argos.txt"
-	     << "http://www.celestrak.com/NORAD/elements/intelsat.txt"
-	     << "http://www.celestrak.com/NORAD/elements/gorizont.txt"
-	     << "http://www.celestrak.com/NORAD/elements/raduga.txt"
-	     << "http://www.celestrak.com/NORAD/elements/molniya.txt"
-	     << "http://www.celestrak.com/NORAD/elements/orbcomm.txt"
-	     << "http://www.celestrak.com/NORAD/elements/globalstar.txt"
-	     << "http://www.celestrak.com/NORAD/elements/x-comm.txt"
-	     << "http://www.celestrak.com/NORAD/elements/other-comm.txt"
-	     << "1,http://www.celestrak.com/NORAD/elements/glo-ops.txt"
-	     << "1,http://www.celestrak.com/NORAD/elements/beidou.txt"
-	     << "http://www.celestrak.com/NORAD/elements/sbas.txt"
-	     << "http://www.celestrak.com/NORAD/elements/nnss.txt"
-	     << "http://www.celestrak.com/NORAD/elements/engineering.txt"
-	     << "http://www.celestrak.com/NORAD/elements/education.txt"
-	     << "http://www.celestrak.com/NORAD/elements/geodetic.txt"
-	     << "http://www.celestrak.com/NORAD/elements/radar.txt"
-	     << "http://www.celestrak.com/NORAD/elements/cubesat.txt"
-	     << "http://www.celestrak.com/NORAD/elements/other.txt"	     
-	     << "1,http://www.celestrak.com/NORAD/elements/supplemental/starlink.txt"
-	     << "https://www.amsat.org/amsat/ftp/keps/current/nasabare.txt"
-	     << "http://www.celestrak.com/NORAD/elements/oneweb.txt"
-	     << "http://www.celestrak.com/NORAD/elements/planet.txt"
-	     << "http://www.celestrak.com/NORAD/elements/spire.txt"
-	     << "1,https://www.prismnet.com/~mmccants/tles/classfd.zip";
-
-	saveTleSources(urls);
 }
 
 void Satellites::restoreDefaultCatalog()
 {
-	if (QFileInfo(catalogPath).exists())
+	if (QFileInfo::exists(catalogPath))
 		backupCatalog(true);
 
 	QFile src(":/satellites/satellites.json");
@@ -654,7 +1060,7 @@ void Satellites::restoreDefaultCatalog()
 		// the json file has been manually removed, that an update is scheduled in a timely
 		// manner
 		StelApp::getInstance().getSettings()->remove("Satellites/last_update");
-		lastUpdate = QDateTime::fromString("2015-05-01T12:00:00", Qt::ISODate);
+		setLastUpdate(QDateTime::fromString("2015-05-01T12:00:00", Qt::ISODate));
 	}
 }
 
@@ -669,19 +1075,33 @@ void Satellites::loadSettings()
 	// Backward compatibility: try to detect and read an old-style array.
 	// TODO: Assume that the user hasn't modified their conf in a stupid way?
 //	if (conf->contains("tle_url0")) // This can skip some operations...
-	QRegExp keyRE("^tle_url\\d+$");
+	static const QRegularExpression keyRE("^tle_url\\d+$");
 	QStringList urls;
+	bool urlWasUpdated = false;
 	for (const auto& key : conf->childKeys())
 	{
-		if (keyRE.exactMatch(key))
+		if (keyRE.match(key).hasMatch())
 		{
 			QString url = conf->value(key).toString();
 			conf->remove(key); // Delete old-style keys
 			if (url.isEmpty())
 				continue;
-			// NOTE: This URL is also hard-coded in restoreDefaultSettings().
-			if (url == "http://celestrak.com/NORAD/elements/visual.txt")
-				url.prepend("1,"); // Same as in the new default configuration
+
+			// celestrak.com moved to celestrak.org
+			if (url.contains("celestrak.com", Qt::CaseInsensitive))
+			{
+				url.replace("celestrak.com", "celestrak.org", Qt::CaseInsensitive);
+				urlWasUpdated = true;
+			}
+
+			// simple text files are removed
+			if (url.contains("celestrak.org", Qt::CaseInsensitive) && url.endsWith(".txt", Qt::CaseInsensitive))
+			{
+				url.replace("NORAD/elements/", "NORAD/elements/gp.php?GROUP=", Qt::CaseInsensitive);
+				url.replace(".txt", "&FORMAT=CSV", Qt::CaseInsensitive);
+				urlWasUpdated = true;
+			}
+
 			urls << url;
 		}
 	}
@@ -689,24 +1109,52 @@ void Satellites::loadSettings()
 	if (!urls.isEmpty())
 	{
 		conf->endGroup();
-		setTleSources(urls);
+		setTleSources(urls);		
+		if (urlWasUpdated)
+		{
+			saveTleSources(urls);
+			qWarning() << "[Satellites] updated an old-style array of TLE sources";
+		}
 		conf->beginGroup("Satellites");
 	}
 	else
 	{
 		int size = conf->beginReadArray("tle_sources");
+		bool urlWasUpdated = false;
 		for (int i = 0; i < size; i++)
 		{
 			conf->setArrayIndex(i);
 			QString url = conf->value("url").toString();
 			if (!url.isEmpty())
 			{
+				// celestrak.com moved to celestrak.org
+				if (url.contains("celestrak.com", Qt::CaseInsensitive))
+				{
+					url.replace("celestrak.com", "celestrak.org", Qt::CaseInsensitive);
+					urlWasUpdated = true;
+				}
+
+				// simple text files are removed
+				if (url.contains("celestrak.org", Qt::CaseInsensitive) && url.endsWith(".txt", Qt::CaseInsensitive))
+				{
+					url.replace("NORAD/elements/", "NORAD/elements/gp.php?GROUP=", Qt::CaseInsensitive);
+					url.replace(".txt", "&FORMAT=CSV", Qt::CaseInsensitive);
+					urlWasUpdated = true;
+				}
+
 				if (conf->value("add_new").toBool())
 					url.prepend("1,");
 				updateUrls.append(url);
 			}
 		}
 		conf->endArray();
+		if (urlWasUpdated)
+		{
+			conf->endGroup();
+			saveTleSources(updateUrls);
+			qWarning() << "[Satellites] updated list of TLE sources";
+			conf->beginGroup("Satellites");
+		}
 	}
 	
 	// NOTE: Providing default values AND using restoreDefaultSettings() to create the section seems redundant. --BM 
@@ -714,31 +1162,93 @@ void Satellites::loadSettings()
 	// updater related settings...
 	updateFrequencyHours = conf->value("update_frequency_hours", 72).toInt();
 	// last update default is the first Towel Day.  <3 DA
-	lastUpdate = QDateTime::fromString(conf->value("last_update", "2001-05-25T12:00:00").toString(), Qt::ISODate);
+	setLastUpdate(QDateTime::fromString(conf->value("last_update", "2001-05-25T12:00:00").toString(), Qt::ISODate));
 	setFlagHintsVisible(conf->value("show_satellite_hints", true).toBool());
 	Satellite::showLabels = conf->value("show_satellite_labels", false).toBool();
 	updatesEnabled = conf->value("updates_enabled", true).toBool();
 	autoAddEnabled = conf->value("auto_add_enabled", true).toBool();
 	autoRemoveEnabled = conf->value("auto_remove_enabled", true).toBool();
+	autoDisplayEnabled = conf->value("auto_display_enabled", true).toBool();
 #if(SATELLITES_PLUGIN_IRIDIUM == 1)
 	iridiumFlaresPredictionDepth = conf->value("flares_prediction_depth", 7).toInt();
 #endif
 
 	// Get a font for labels
-	labelFont.setPixelSize(conf->value("hint_font_size", 10).toInt());
+	labelFontSize = conf->value("hint_font_size", 10).toInt();
 
 	// orbit drawing params
 	Satellite::orbitLinesFlag = conf->value("orbit_line_flag", false).toBool();
 	Satellite::orbitLineSegments = conf->value("orbit_line_segments", 180).toInt();
 	Satellite::orbitLineFadeSegments = conf->value("orbit_fade_segments", 5).toInt();
 	Satellite::orbitLineSegmentDuration = conf->value("orbit_segment_duration", 5).toInt();
+	Satellite::orbitLineThickness = conf->value("orbit_line_thickness", 1).toInt();
 	setInvisibleSatelliteColor(Vec3f(conf->value("invisible_satellite_color", "0.2,0.2,0.2").toString()));
 	setTransitSatelliteColor(Vec3f(conf->value("transit_satellite_color", "0.0,0.0,0.0").toString()));
-	Satellite::timeRateLimit = conf->value("time_rate_limit", 1.0).toDouble();
+	Satellite::timeRateLimit = conf->value("time_rate_limit", 0.1).toDouble();
+	Satellite::tleEpochAge = conf->value("valid_epoch_age", 30).toInt();
+
+	// umbra/penumbra
+	setFlagUmbraVisible(conf->value("umbra_flag", false).toBool());
+	setFlagUmbraAtFixedAltitude(conf->value("umbra_fixed_altitude_flag", false).toBool());
+	setUmbraColor(Vec3f(conf->value("umbra_color", "1.0,0.0,0.0").toString()));
+	setUmbraAltitude(conf->value("umbra_fixed_altitude", 1000.0).toDouble());
+	setFlagPenumbraVisible(conf->value("penumbra_flag", false).toBool());
+	setPenumbraColor(Vec3f(conf->value("penumbra_color", "1.0,0.0,0.0").toString()));
 
 	// iconic mode
 	setFlagIconicMode(conf->value("iconic_mode_enabled", false).toBool());
 	setFlagHideInvisible(conf->value("hide_invisible_satellites", false).toBool());
+	setFlagColoredInvisible(conf->value("colored_invisible_satellites", true).toBool());
+
+	// custom filter
+	setFlagCFKnownStdMagnitude(conf->value("cf_magnitude_flag", false).toBool());
+	setFlagCFApogee(conf->value("cf_apogee_flag", false).toBool());
+	setMinCFApogee(conf->value("cf_apogee_min", 20000.).toDouble());
+	setMaxCFApogee(conf->value("cf_apogee_max", 55000.).toDouble());
+	setFlagCFPerigee(conf->value("cf_perigee_flag", false).toBool());
+	setMinCFPerigee(conf->value("cf_perigee_min", 200.).toDouble());
+	setMaxCFPerigee(conf->value("cf_perigee_max", 1500.).toDouble());
+	setFlagCFEccentricity(conf->value("cf_eccentricity_flag", false).toBool());
+	setMinCFEccentricity(conf->value("cf_eccentricity_min", 0.3).toDouble());
+	setMaxCFEccentricity(conf->value("cf_eccentricity_max", 0.9).toDouble());
+	setFlagCFPeriod(conf->value("cf_period_flag", false).toBool());
+	setMinCFPeriod(conf->value("cf_period_min", 0.).toDouble());
+	setMaxCFPeriod(conf->value("cf_period_max", 150.).toDouble());
+	setFlagCFInclination(conf->value("cf_inclination_flag", false).toBool());
+	setMinCFInclination(conf->value("cf_inclination_min", 120.).toDouble());
+	setMaxCFInclination(conf->value("cf_inclination_max", 180.).toDouble());
+	setFlagCFRCS(conf->value("cf_rcs_flag", false).toBool());
+	setMinCFRCS(conf->value("cf_rcs_min", 0.1).toDouble());
+	setMaxCFRCS(conf->value("cf_rcs_max", 100.).toDouble());
+
+	// visual filter
+	setFlagVFAltitude(conf->value("vf_altitude_flag", false).toBool());
+	setMinVFAltitude(conf->value("vf_altitude_min", 200.).toDouble());
+	setMaxVFAltitude(conf->value("vf_altitude_max", 500.).toDouble());
+	setFlagVFMagnitude(conf->value("vf_magnitude_flag", false).toBool());
+	setMinVFMagnitude(conf->value("vf_magnitude_min", 8.).toDouble());
+	setMaxVFMagnitude(conf->value("vf_magnitude_max", -8.).toDouble());
+
+	// custom filter
+	setFlagCFKnownStdMagnitude(conf->value("cf_magnitude_flag", false).toBool());
+	setFlagCFApogee(conf->value("cf_apogee_flag", false).toBool());
+	setMinCFApogee(conf->value("cf_apogee_min", 20000.).toDouble());
+	setMaxCFApogee(conf->value("cf_apogee_max", 55000.).toDouble());
+	setFlagCFPerigee(conf->value("cf_perigee_flag", false).toBool());
+	setMinCFPerigee(conf->value("cf_perigee_min", 200.).toDouble());
+	setMaxCFPerigee(conf->value("cf_perigee_max", 1500.).toDouble());
+	setFlagCFEccentricity(conf->value("cf_eccentricity_flag", false).toBool());
+	setMinCFEccentricity(conf->value("cf_eccentricity_min", 0.3).toDouble());
+	setMaxCFEccentricity(conf->value("cf_eccentricity_max", 0.9).toDouble());
+	setFlagCFPeriod(conf->value("cf_period_flag", false).toBool());
+	setMinCFPeriod(conf->value("cf_period_min", 0.).toDouble());
+	setMaxCFPeriod(conf->value("cf_period_max", 150.).toDouble());
+	setFlagCFInclination(conf->value("cf_inclination_flag", false).toBool());
+	setMinCFInclination(conf->value("cf_inclination_min", 120.).toDouble());
+	setMaxCFInclination(conf->value("cf_inclination_max", 180.).toDouble());
+	setFlagCFRCS(conf->value("cf_rcs_flag", false).toBool());
+	setMinCFRCS(conf->value("cf_rcs_min", 0.1).toDouble());
+	setMaxCFRCS(conf->value("cf_rcs_max", 100.).toDouble());
 
 	conf->endGroup();
 }
@@ -755,22 +1265,85 @@ void Satellites::saveSettingsToConfig()
 	conf->setValue("updates_enabled", updatesEnabled );
 	conf->setValue("auto_add_enabled", autoAddEnabled);
 	conf->setValue("auto_remove_enabled", autoRemoveEnabled);
+	conf->setValue("auto_display_enabled", autoDisplayEnabled);
 #if(SATELLITES_PLUGIN_IRIDIUM == 1)
 	conf->setValue("flares_prediction_depth", iridiumFlaresPredictionDepth);
 #endif
 
 	// Get a font for labels
-	conf->setValue("hint_font_size", labelFont.pixelSize());
+	conf->setValue("hint_font_size", labelFontSize);
 
 	// orbit drawing params
 	conf->setValue("orbit_line_flag", Satellite::orbitLinesFlag);
 	conf->setValue("orbit_line_segments", Satellite::orbitLineSegments);
 	conf->setValue("orbit_fade_segments", Satellite::orbitLineFadeSegments);
 	conf->setValue("orbit_segment_duration", Satellite::orbitLineSegmentDuration);
+	conf->setValue("orbit_line_thickness", Satellite::orbitLineThickness);
+
+	conf->setValue("valid_epoch_age", Satellite::tleEpochAge);
+
+	// umbra/penumbra
+	conf->setValue("umbra_flag", getFlagUmbraVisible());
+	conf->setValue("umbra_fixed_altitude_flag", getFlagUmbraAtFixedAltitude());
+	conf->setValue("umbra_color", getUmbraColor().toStr());
+	conf->setValue("umbra_fixed_altitude", getUmbraAltitude());
+	conf->setValue("penumbra_flag", getFlagPenumbraVisible());
+	conf->setValue("penumbra_color", getPenumbraColor().toStr());
 
 	// iconic mode
 	conf->setValue("iconic_mode_enabled", getFlagIconicMode());
 	conf->setValue("hide_invisible_satellites", getFlagHideInvisible());
+	conf->setValue("colored_invisible_satellites", getFlagColoredInvisible());
+
+	// custom filter
+	conf->setValue("cf_magnitude_flag", getFlagCFKnownStdMagnitude());
+	conf->setValue("cf_apogee_flag", getFlagCFApogee());
+	conf->setValue("cf_apogee_min", getMinCFApogee());
+	conf->setValue("cf_apogee_max", getMaxCFApogee());
+	conf->setValue("cf_perigee_flag", getFlagCFPerigee());
+	conf->setValue("cf_perigee_min", getMinCFPerigee());
+	conf->setValue("cf_perigee_max", getMaxCFPerigee());
+	conf->setValue("cf_eccentricity_flag", getFlagCFEccentricity());
+	conf->setValue("cf_eccentricity_min", getMinCFEccentricity());
+	conf->setValue("cf_eccentricity_max", getMaxCFEccentricity());
+	conf->setValue("cf_period_flag", getFlagCFPeriod());
+	conf->setValue("cf_period_min", getMinCFPeriod());
+	conf->setValue("cf_period_max", getMaxCFPeriod());
+	conf->setValue("cf_inclination_flag", getFlagCFInclination());
+	conf->setValue("cf_inclination_min", getMinCFInclination());
+	conf->setValue("cf_inclination_max", getMaxCFInclination());
+	conf->setValue("cf_rcs_flag", getFlagCFRCS());
+	conf->setValue("cf_rcs_min", getMinCFRCS());
+	conf->setValue("cf_rcs_max", getMaxCFRCS());
+
+	// visual filter
+	conf->setValue("vf_altitude_flag", getFlagVFAltitude());
+	conf->setValue("vf_altitude_min", getMinVFAltitude());
+	conf->setValue("vf_altitude_max", getMaxVFAltitude());
+	conf->setValue("vf_magnitude_flag", getFlagVFMagnitude());
+	conf->setValue("vf_magnitude_min", getMinVFMagnitude());
+	conf->setValue("vf_magnitude_max", getMaxVFMagnitude());
+
+	// custom filter
+	conf->setValue("cf_magnitude_flag", getFlagCFKnownStdMagnitude());
+	conf->setValue("cf_apogee_flag", getFlagCFApogee());
+	conf->setValue("cf_apogee_min", getMinCFApogee());
+	conf->setValue("cf_apogee_max", getMaxCFApogee());
+	conf->setValue("cf_perigee_flag", getFlagCFPerigee());
+	conf->setValue("cf_perigee_min", getMinCFPerigee());
+	conf->setValue("cf_perigee_max", getMaxCFPerigee());
+	conf->setValue("cf_eccentricity_flag", getFlagCFEccentricity());
+	conf->setValue("cf_eccentricity_min", getMinCFEccentricity());
+	conf->setValue("cf_eccentricity_max", getMaxCFEccentricity());
+	conf->setValue("cf_period_flag", getFlagCFPeriod());
+	conf->setValue("cf_period_min", getMinCFPeriod());
+	conf->setValue("cf_period_max", getMaxCFPeriod());
+	conf->setValue("cf_inclination_flag", getFlagCFInclination());
+	conf->setValue("cf_inclination_min", getMinCFInclination());
+	conf->setValue("cf_inclination_max", getMaxCFInclination());
+	conf->setValue("cf_rcs_flag", getFlagCFRCS());
+	conf->setValue("cf_rcs_min", getMinCFRCS());
+	conf->setValue("cf_rcs_max", getMaxCFRCS());
 
 	conf->endGroup();
 	
@@ -778,7 +1351,7 @@ void Satellites::saveSettingsToConfig()
 	saveTleSources(updateUrls);
 }
 
-Vec3f Satellites::getInvisibleSatelliteColor() const
+Vec3f Satellites::getInvisibleSatelliteColor()
 {
 	return Satellite::invisibleSatelliteColor;
 }
@@ -789,7 +1362,7 @@ void Satellites::setInvisibleSatelliteColor(const Vec3f &c)
 	emit invisibleSatelliteColorChanged(c);
 }
 
-Vec3f Satellites::getTransitSatelliteColor() const
+Vec3f Satellites::getTransitSatelliteColor()
 {
 	return Satellite::transitSatelliteColor;
 }
@@ -830,16 +1403,18 @@ const QString Satellites::readCatalogVersion()
 	if (map.contains("version"))
 	{
 		QString version = map.value("version").toString();
-		QRegExp vRx("(\\d+\\.\\d+\\.\\d+)");
-		if (vRx.exactMatch(version))
-			jsonVersion = vRx.cap(1);
+		static const QRegularExpression vRx("(\\d+\\.\\d+\\.\\d+)");
+		QRegularExpressionMatch match=vRx.match(version);
+		if (match.hasMatch())
+			jsonVersion = match.captured(1);
 	}
 	else if (map.contains("creator"))
 	{
 		QString creator = map.value("creator").toString();
-		QRegExp vRx(".*(\\d+\\.\\d+\\.\\d+).*");
-		if (vRx.exactMatch(creator))
-			jsonVersion = vRx.cap(1);
+		static const QRegularExpression vRx(".*(\\d+\\.\\d+\\.\\d+).*");
+		QRegularExpressionMatch match=vRx.match(creator);
+		if (match.hasMatch())
+			jsonVersion = match.captured(1);
 	}
 
 	//qDebug() << "[Satellites] catalogue version from file:" << jsonVersion;
@@ -912,9 +1487,10 @@ void Satellites::setDataMap(const QVariantMap& map)
 	satellites.clear();
 	groups.clear();
 	QVariantMap satMap = map.value("satellites").toMap();
-	for (const auto& satId : satMap.keys())
+	QMap<QString, QVariant>::const_iterator smit=satMap.constBegin();
+	while (smit != satMap.constEnd())
 	{
-		QVariantMap satData = satMap.value(satId).toMap();
+		QVariantMap satData = smit.value().toMap();
 
 		if (!satData.contains("hintColor"))
 			satData["hintColor"] = defaultHintColorMap;
@@ -925,19 +1501,31 @@ void Satellites::setDataMap(const QVariantMap& map)
 		if (!satData.contains("infoColor"))
 			satData["infoColor"] = satData["hintColor"];
 
-		int sid = satId.toInt();
+		QString satID = smit.key();
+		int sid = satID.toInt();
+		if (sid==0) // the ID contains Alpha-5 propagator
+		{
+			// Decoding Alpha-5 propagator
+			sid = decodeSatIDFromAlpha5(satID).toInt();
+			satID = QString("%1").arg(sid);
+			// Let's use hook for TLE data with Alpha-5 propagator as for CSV data
+			satData["tle1"] = satData["tle1"].toString().replace(2, 5, "00000");
+			satData["tle2"] = satData["tle2"].toString().replace(2, 5, "00000");
+		}
+
 		if (!satData.contains("stdMag") && qsMagList.contains(sid))
 			satData["stdMag"] = qsMagList[sid];
 
 		if (!satData.contains("rcs") && rcsList.contains(sid))
 			satData["rcs"] = rcsList[sid];
 
-		SatelliteP sat(new Satellite(satId, satData));
+		SatelliteP sat(new Satellite(satID, satData));
 		if (sat->initialized)
 		{
 			satellites.append(sat);
 			groups.unite(sat->groups);			
 		}
+		smit++;
 	}
 	std::sort(satellites.begin(), satellites.end());
 	
@@ -953,15 +1541,12 @@ QVariantMap Satellites::createDataMap(void)
 		   << Satellite::roundToDp(defaultHintColor[1],3)
 		   << Satellite::roundToDp(defaultHintColor[2],3);
 
-	// TODO: Since v0.21 uncomment this line:
-	// map["creator"] = QString("Satellites plugin version %1").arg(SATELLITES_PLUGIN_VERSION);
-	// and remove this line:
-	map["creator"] = QString("Satellites plugin version %1").arg(SatellitesCatalogVersion);
+	map["creator"] = QString("Satellites plugin version %1").arg(SATELLITES_PLUGIN_VERSION);
 	map["version"] = QString("%1").arg(SatellitesCatalogVersion);
 	map["hintColor"] = defHintCol;
 	map["shortName"] = "satellite orbital data";
 	QVariantMap sats;
-	for (const auto& sat : qAsConst(satellites))
+	for (const auto& sat : std::as_const(satellites))
 	{
 		QVariantMap satMap = sat->getMap();
 
@@ -991,9 +1576,9 @@ QVariantMap Satellites::createDataMap(void)
 
 void Satellites::markLastUpdate()
 {
-	lastUpdate = QDateTime::currentDateTime();
+	setLastUpdate(QDateTime::currentDateTime());
 	QSettings* conf = StelApp::getInstance().getSettings();
-	conf->setValue("Satellites/last_update", lastUpdate.toString(Qt::ISODate));
+	conf->setValue("Satellites/last_update", lastUpdate.first.toString(Qt::ISODate));
 }
 
 QSet<QString> Satellites::getGroups() const
@@ -1072,7 +1657,7 @@ bool Satellites::add(const TleData& tleData)
 		return false;
 
 	// Duplicates check
-	if (searchByID(getSatIdFromLine2(tleData.second.trimmed()))!=Q_NULLPTR)
+	if (searchByID(tleData.id)!=nullptr)
 		return false;
 
 	QVariantList hintColor;
@@ -1083,118 +1668,54 @@ bool Satellites::add(const TleData& tleData)
 	satProperties.insert("tle1", tleData.first);
 	satProperties.insert("tle2", tleData.second);
 	satProperties.insert("hintColor", hintColor);	
-	//TODO: Decide if newly added satellites are visible by default --BM
-	satProperties.insert("visible", true);
+	satProperties.insert("visible", autoDisplayEnabled);
 	satProperties.insert("orbitVisible", false);
-	int sid = tleData.id.toInt();
-	if (qsMagList.contains(sid))
-		satProperties.insert("stdMag", qsMagList[sid]);
-	if (rcsList.contains(sid))
-		satProperties.insert("rcs", rcsList[sid]);
-	// special case: starlink satellites; details: http://satobs.org/seesat/Apr-2020/0174.html
-	if (!rcsList.contains(sid) && tleData.name.startsWith("STARLINK"))
-		satProperties.insert("rcs", 22.68); // Starlink's solar array is 8.1 x 2.8 metres.
+
+	QPair<double, double> stdMagRCS = getStdMagRCS(tleData);
+	if (stdMagRCS.first < 99.)
+		satProperties.insert("stdMag", stdMagRCS.first);
+	if (stdMagRCS.second > 0.)
+		satProperties.insert("rcs", stdMagRCS.second);
+
 	if (tleData.status != Satellite::StatusUnknown)
 		satProperties.insert("status", tleData.status);
-	// Guess the group
+
+	// Add the description for newly added satellites	
+	QString description = getSatelliteDescription(tleData.id.toInt());
+	if (!satProperties.contains("description") && !description.isEmpty())
+		satProperties.insert("description", description);
+
 	QVariantList groupList =  satProperties.value("groups", QVariantList()).toList();
-	QStringList satGroups;
 	if (groupList.isEmpty())
 	{
-		if (tleData.name.startsWith("STARLINK"))
+		// Guessing the groups for newly added satellites only
+		QStringList satGroups = guessGroups(tleData);
+		if (!satGroups.isEmpty())
 		{
-			 satGroups.append("starlink");
-			 satGroups.append("communications");
-		}
-		if (tleData.name.startsWith("IRIDIUM"))
-		{
-			QStringList d = tleData.name.split(" ");
-			if (d.at(1).toInt()>=100)
-				satGroups.append("iridium next");
-			else
-				satGroups.append("iridium");
-			satGroups.append("communications");
-		}
-		if (tleData.name.startsWith("FLOCK") || tleData.name.startsWith("SKYSAT"))
-			satGroups.append("earth resources");
-		if (tleData.name.startsWith("ONEWEB"))
-		{
-			satGroups.append("oneweb");
-			satGroups.append("communications");
-		}
-		if (tleData.name.startsWith("LEMUR"))
-		{
-			satGroups.append("spire");
-			satGroups.append("earth resources");
-		}
-		if (tleData.name.startsWith("GPS"))
-		{
-			satGroups.append("gps");
-			satGroups.append("navigation");
-		}
-		if (tleData.name.startsWith("IRNSS"))
-		{
-			satGroups.append("irnss");
-			satGroups.append("navigation");
-		}
-		if (tleData.name.startsWith("QZS"))
-		{
-			satGroups.append("qzss");
-		}
-		if (tleData.name.startsWith("TDRS"))
-		{
-			satGroups.append("tdrss");
-			satGroups.append("communications");
-			satGroups.append("geostationary");
-		}
-		if (tleData.name.startsWith("BEIDOU"))
-		{
-			satGroups.append("beidou");
-			satGroups.append("navigation");
-		}
-		if (tleData.name.startsWith("COSMOS"))
-		{
-			satGroups.append("cosmos");
-			if (tleData.name.contains("("))
+			satProperties.insert("groups", satGroups);
+			for (const auto& str : std::as_const(satGroups))
 			{
-				satGroups.append("glonass");
-				satGroups.append("navigation");
+				if (!getGroupIdList().contains(str))
+					addGroup(str);
 			}
 		}
-		if (tleData.name.startsWith("GSAT") && tleData.name.contains("PRN"))
-		{
-			satGroups.append("galileo");
-			satGroups.append("navigation");
-		}
-		if (tleData.name.startsWith("INTELSAT") || tleData.name.startsWith("GLOBALSTAR") || tleData.name.startsWith("ORBCOMM") || tleData.name.startsWith("GORIZONT") || tleData.name.startsWith("RADUGA") || tleData.name.startsWith("MOLNIYA") || tleData.name.startsWith("DIRECTV") || tleData.name.startsWith("CHINASAT") || tleData.name.startsWith("YAMAL"))
-		{
-			QString satName = tleData.name.split(" ").at(0).toLower();
-			if (satName.contains("-"))
-				satName = satName.split("-").at(0);
-			satGroups.append(satName);
-			satGroups.append("communications");
-			if (satName.startsWith("INTELSAT") || satName.startsWith("RADUGA") || satName.startsWith("GORIZONT") || satName.startsWith("DIRECTV") || satName.startsWith("CHINASAT") || satName.startsWith("YAMAL"))
-				satGroups.append("geostationary");
-			if (satName.startsWith("INTELSAT") || satName.startsWith("DIRECTV") || satName.startsWith("YAMAL"))
-				satGroups.append("tv");
-		}
-		if (tleData.name.contains(" DEB"))
-			satGroups.append("debris");
-		if (tleData.name.startsWith("SOYUZ-MS"))
-			satGroups.append("crewed");
-		if (tleData.name.startsWith("PROGRESS-MS") || tleData.name.startsWith("CYGNUS NG"))
-			satGroups.append("resupply");
-		if (tleData.status==Satellite::StatusNonoperational)
-			satGroups.append("non-operational");
 	}
-	if (!satGroups.isEmpty())
+
+	const QList<CommLink> comms = getCommunicationData(tleData);
+	if (!comms.isEmpty())
 	{
-		satProperties.insert("groups", satGroups);
-		for (const auto& str : qAsConst(satGroups))
+		QVariantList communications;
+		for (const auto& comm : comms)
 		{
-			if (!getGroupIdList().contains(str))
-				addGroup(str);
+			QVariantMap commData;
+			commData.insert("frequency", comm.frequency);
+			commData.insert("description", comm.description);
+			if (!comm.modulation.isEmpty()) // can be empty
+				commData.insert("modulation", comm.modulation);
+
+			communications.append(commData);
 		}
+		satProperties.insert("comms", communications);
 	}
 	
 	SatelliteP sat(new Satellite(tleData.id, satProperties));
@@ -1206,6 +1727,357 @@ bool Satellites::add(const TleData& tleData)
 		return true;
 	}
 	return false;
+}
+
+QString Satellites::getSatelliteDescription(int satID)
+{
+	// Format: NORAD (SATCAT) ID, description
+	const QMap<int, QString> descriptions = {
+		// TRANSLATORS: Satellite description. "Hubble" is a person's name.
+		{ 20580, N_("The Hubble Space Telescope") },
+		// TRANSLATORS: Satellite description.
+		{ 25544, N_("The International Space Station") },
+		// TRANSLATORS: Satellite description.
+		{ 25867, N_("The Chandra X-ray Observatory") },
+		// TRANSLATORS: Satellite description.
+		{ 25989, N_("X-ray Multi-Mirror Mission") },
+		// TRANSLATORS: Satellite description.
+		{ 27370, N_("Reuven Ramaty High Energy Solar Spectroscopic Imager") },
+		// TRANSLATORS: Satellite description.
+		{ 27540, N_("International Gamma-Ray Astrophysics Laboratory") },
+		// TRANSLATORS: Satellite description.
+		{ 27843, N_("The Microvariability and Oscillations of Stars telescope") },
+		// TRANSLATORS: Satellite description.
+		{ 28485, N_("Neil Gehrels Swift Observatory (Swift Gamma-Ray Burst Explorer)") },
+		// TRANSLATORS: Satellite description.
+		{ 31135, N_("Astro‐Rivelatore Gamma a Immagini Leggero") },
+		// TRANSLATORS: Satellite description.
+		{ 33053, N_("Fermi Gamma-ray Space Telescope") },
+		// TRANSLATORS: Satellite description.
+		{ 36119, N_("Wide-field Infrared Survey Explorer") },
+		// TRANSLATORS: Satellite description.
+		{ 36577, N_("Interplanetary Kite-craft Accelerated by Radiation Of the Sun") },
+		// TRANSLATORS: Satellite description.
+		{ 37755, N_("The russian space radio telescope RadioAstron") },
+		// TRANSLATORS: Satellite description.
+		{ 38358, N_("Nuclear Spectroscopic Telescope Array") },
+		// TRANSLATORS: Satellite description.
+		{ 39089, N_("Near Earth Object Surveillance Satellite") },
+		// TRANSLATORS: Satellite description.
+		{ 39197, N_("The Interface Region Imaging Spectrograph") },
+		// TRANSLATORS: Satellite description.
+		{ 39253, N_("The Spectroscopic Planet Observatory for Recognition of Interaction of Atmosphere") },
+		// TRANSLATORS: Satellite description.
+		{ 41173, N_("The Dark Matter Particle Explorer") },
+		// TRANSLATORS: Satellite description.
+		{ 42758, N_("Hard X-ray Modulation Telescope") },
+		// TRANSLATORS: Satellite description.
+		{ 43020, N_("Arcsecond Space Telescope Enabling Research in Astrophysics") },
+		// TRANSLATORS: Satellite description.
+		{ 43435, N_("Transiting Exoplanet Survey Satellite") },
+		// TRANSLATORS: Satellite description.
+		{ 44432, N_("Spectrum-X-Gamma") },
+		// TRANSLATORS: Satellite description.
+		{ 44874, N_("Characterising Exoplanets Satellite") },
+		// TRANSLATORS: Satellite description.
+		{ 48274, N_("Tiangong space station (Chinese large modular space station)") },
+		// TRANSLATORS: Satellite description.
+		{ 49954, N_("Imaging X-ray Polarimetry Explorer") },
+		// TRANSLATORS: Satellite description. "James Webb" is a person's name.
+		{ 50463, N_("James Webb Space Telescope") }
+	};
+	return descriptions.value(satID, QString());
+}
+
+QPair<double, double> Satellites::getStdMagRCS(const TleData& tleData)
+{
+	QPair<double, double> result;
+	double stdMag = 99., RCS = -1.;
+	int sid = tleData.id.toInt();
+	if (qsMagList.contains(sid))
+		stdMag = qsMagList[sid];
+	if (rcsList.contains(sid))
+		RCS = rcsList[sid];
+
+	// special case: chinese space station / CSS (TIANHE1)
+	if (sid==48274 && stdMag > 90.)
+		stdMag = 0.87; // see details: http://www.satobs.org/seesat/Aug-2022/0030.html
+
+	// special case: starlink satellites; details: http://satobs.org/seesat/Apr-2020/0174.html
+	if (!qsMagList.contains(sid) && !rcsList.contains(sid) && tleData.name.startsWith("STARLINK"))
+	{
+		RCS = 22.68; // Starlink's solar array is 8.1 x 2.8 metres.
+		// Source: Anthony Mallama. Starlink Satellite Brightness -- Characterized From 100,000 Visible Light Magnitudes; https://arxiv.org/abs/2111.09735
+		if (tleData.name.contains("VISORSAT", Qt::CaseInsensitive))
+			stdMag = 7.21; // stdMag=6.84 previously: https://arxiv.org/abs/2109.07345
+		else
+			stdMag = 5.89;
+	}
+
+	// special case: oneweb satellites
+	// Source: Anthony Mallama. OneWeb Satellite Brightness -- Characterized From 80,000 Visible Light Magnitudes; https://arxiv.org/pdf/2203.05513.pdf
+	if (!qsMagList.contains(sid) && tleData.name.startsWith("ONEWEB"))
+		stdMag = 7.05;
+
+	result.first	= stdMag;
+	result.second	= RCS;
+	return result;
+}
+
+QList<CommLink> Satellites::getCommunicationData(const QString &id)
+{
+	for (const auto& sat : std::as_const(satellites))
+	{
+		if (sat->initialized && sat->getID() == id)
+			return sat->comms;
+	}
+	return QList<CommLink>();
+}
+
+QList<CommLink> Satellites::getCommunicationData(const TleData& tleData)
+{
+	QList<CommLink> comms;
+
+	// Communication data for individual satellites
+	QVariantMap communications = satComms.value(tleData.id.toInt(), QVariantMap());
+	if (!communications.isEmpty())
+	{
+		for (const auto& comm : communications.value("comms").toList())
+		{
+			CommLink c;
+			QVariantMap commMap = comm.toMap();
+			c.frequency = commMap.value("frequency").toDouble();
+			c.description = commMap.value("description").toString();
+			if (commMap.contains("modulation")) // can be empty
+				c.modulation = commMap.value("modulation").toString();
+			comms.append(c);
+		}
+	}
+
+	// Communication data for groups of satellites
+	const QMap<QString, QString> startsWith = {
+		{ "GPS",		"gps" },
+		{ "BEIDOU",	"beidou" },
+		{ "IRNSS",	"irnss" },
+		{ "ORBCOMM",	"orbcomm" },
+		{ "TEVEL",	"tevel" },
+		{ "QZS",		"qzss" },
+		{ "FORMOSAT",	"formosat" },
+		{ "FOSSASAT",	"fossasat"},
+		{ "NETSAT",	"netsat" },
+		{ "GONETS-M",	"gonets" },
+		{ "SOYUZ-MS",	"soyuz-ms" },
+		{ "PROGRESS-MS","progress-ms" },
+		{ "IRIDIUM",	"iridium" },
+		{ "STARLINK",	"starlink" },
+		{ "NOAA",	"noaa" },
+		{ "METEOR 1",	"meteor-1" },
+		{ "METEOR 3",	"meteor-2" },
+		{ "METEOR 2",	"meteor-3" },
+		{ "METEOR M",	"meteor-m" },
+		{ "METEOR-M",	"meteor-m" },
+		{ "METOP",	"metop" },
+		{ "BEESAT",	"beesat" },
+		{ "UMBRA",	"umbra" },
+		{ "BLACKJACK",	"blackjack" },
+		{ "S-NET",	"s-net" },
+		{ "ION SCV",	"ion-scv" },
+		{ "ASTROCAST-",	"astrocast" },
+		{ "VR3X",	"vr3x" },
+		{ "RASSVET",	"rassvet" },
+		{ "PICO-1A",	"pico-1a" },
+		{ "GLOBALSTAR",	"globalstar" },
+		{ "STRATOSAT",	"stratosat" },
+		{ "COSMO-SKYMED", "cosmo-skymed" },
+		{ "QIANFAN",	"qianfan" },
+		{ "HULIANWANG",	"hulianwang" },
+		{ "KUIPER",	"kuiper" },
+		{ "YAMAL",	"yamal" }
+	};
+
+	QStringList groups;
+	for (auto& satgr: startsWith.keys())
+	{
+		if (tleData.name.startsWith(satgr))
+			groups << startsWith.value(satgr);
+	}
+
+	if (tleData.name.startsWith("COSMOS") && tleData.name.contains("("))
+		groups << "glonass";
+
+	if (tleData.name.startsWith("GSAT") && (tleData.name.contains("PRN") || tleData.name.contains("GALILEO")))
+		groups << "galileo";
+
+	for (const auto& name : std::as_const(groups))
+	{
+		communications.clear();
+		communications = groupComms.value(name, QVariantMap());
+		if (!communications.isEmpty())
+		{
+			for (const auto& comm : communications.value("comms").toList())
+			{
+				CommLink c;
+				QVariantMap commMap = comm.toMap();
+				c.frequency = commMap.value("frequency").toDouble();
+				c.description = commMap.value("description").toString();
+				if (commMap.contains("modulation")) // can be empty
+					c.modulation = commMap.value("modulation").toString();
+				comms.append(c);
+			}
+		}
+	}
+
+	return comms;
+}
+
+QStringList Satellites::guessGroups(const TleData& tleData)
+{
+	QStringList satGroups;
+	// Special case: ISS
+	if (tleData.id == "25544" || tleData.id == "49044")
+	{
+		satGroups.append("stations");
+		satGroups.append("scientific");
+		satGroups.append("amateur");
+		satGroups.append("visual");
+		satGroups.append("tdrss");
+	}
+
+	// Guessing the groups from the names of satellites
+	if (tleData.name.startsWith("STARLINK"))
+	{
+		satGroups.append("starlink");
+		satGroups.append("communications");
+	}
+	if (tleData.name.startsWith("IRIDIUM"))
+	{
+		QStringList d = tleData.name.split(" ");
+		if (d.at(1).toInt()>=100)
+			satGroups.append("iridium-NEXT");
+		else
+			satGroups.append("iridium");
+		satGroups.append("communications");
+	}
+	if (tleData.name.startsWith("FLOCK") || tleData.name.startsWith("SKYSAT"))
+		satGroups.append("earth resources");
+	if (tleData.name.startsWith("ONEWEB"))
+	{
+		satGroups.append("oneweb");
+		satGroups.append("communications");
+	}
+	if (tleData.name.startsWith("LEMUR"))
+	{
+		satGroups.append("spire");
+		satGroups.append("earth resources");
+	}
+	if (tleData.name.startsWith("GPS"))
+	{
+		satGroups.append("gps");
+		satGroups.append("gnss");
+		satGroups.append("navigation");
+	}
+	if (tleData.name.startsWith("IRNSS"))
+	{
+		satGroups.append("irnss");
+		satGroups.append("navigation");
+	}
+	if (tleData.name.startsWith("QZS"))
+	{
+		satGroups.append("qzss");
+	}
+	if (tleData.name.startsWith("TDRS"))
+	{
+		satGroups.append("tdrss");
+		satGroups.append("communications");
+		satGroups.append("geostationary");
+	}
+	if (tleData.name.startsWith("BEIDOU"))
+	{
+		satGroups.append("beidou");
+		satGroups.append("gnss");
+		satGroups.append("navigation");
+	}
+	if (tleData.name.startsWith("COSMOS"))
+	{
+		satGroups.append("cosmos");
+		if (tleData.name.contains("("))
+		{
+			satGroups.append("glonass");
+			satGroups.append("gnss");
+			satGroups.append("navigation");
+		}
+	}
+	if (tleData.name.startsWith("GSAT") && (tleData.name.contains("PRN") || tleData.name.contains("GALILEO")))
+	{
+		satGroups.append("galileo");
+		satGroups.append("gnss");
+		satGroups.append("navigation");
+	}
+	if (tleData.name.startsWith("GONETS-M") || tleData.name.startsWith("INTELSAT") || tleData.name.startsWith("GLOBALSTAR") || tleData.name.startsWith("ORBCOMM") || tleData.name.startsWith("GORIZONT") || tleData.name.startsWith("RADUGA") || tleData.name.startsWith("MOLNIYA") || tleData.name.startsWith("DIRECTV") || tleData.name.startsWith("CHINASAT") || tleData.name.startsWith("YAMAL"))
+	{
+		QString satName = tleData.name.split(" ").at(0).toLower();
+		if (satName.contains("-"))
+			satName = satName.split("-").at(0);
+		satGroups.append(satName);
+		satGroups.append("communications");
+		if (satName.startsWith("INTELSAT") || satName.startsWith("RADUGA") || satName.startsWith("GORIZONT") || satName.startsWith("DIRECTV") || satName.startsWith("CHINASAT") || satName.startsWith("YAMAL"))
+			satGroups.append("geostationary");
+		if (satName.startsWith("INTELSAT") || satName.startsWith("DIRECTV") || satName.startsWith("YAMAL"))
+			satGroups.append("tv");
+	}
+	if (tleData.name.contains(" DEB"))
+		satGroups.append("debris");
+	if (tleData.name.startsWith("SOYUZ-MS"))
+		satGroups.append("crewed");
+	if (tleData.name.startsWith("PROGRESS-MS") || tleData.name.startsWith("CYGNUS NG"))
+		satGroups.append("resupply");
+	if (tleData.name.startsWith("QIANFAN"))
+	{
+		satGroups.append("qianfan");
+		satGroups.append("communications");
+		satGroups.append("scientific");
+	}
+	if (tleData.name.startsWith("HULIANWANG"))
+	{
+		satGroups.append("hulianwang");
+		satGroups.append("communications");
+	}
+	if (tleData.name.startsWith("KUIPER"))
+	{
+		satGroups.append("kuiper");
+		satGroups.append("communications");
+	}
+
+	// Guessing the groups from CelesTrak's groups (a "supergroups")
+	if (tleData.sourceURL.contains("celestrak.org", Qt::CaseInsensitive))
+	{
+		// add groups, based on CelesTrak's groups
+		QString groupName;
+		if (tleData.sourceURL.contains(".txt", Qt::CaseInsensitive))
+			groupName = QUrl(tleData.sourceURL).fileName().toLower().replace(".txt", "");
+		else
+		{
+			// New format of source: https://celestrak.org/NORAD/documentation/gp-data-formats.php
+			groupName = QUrl(tleData.sourceURL).query().toLower().split("&").filter("group=").join("").replace("group=", "");
+		}
+		groupName.remove("gp.php");
+		if (!satGroups.contains(groupName) && !groupName.isEmpty())
+			satGroups.append(groupName);
+
+		// add "supergroups", based on CelesTrak's groups
+		QStringList superGroup = satSuperGroupsMap.values(groupName);
+		if (!superGroup.isEmpty())
+		{
+			for (int i=0; i<superGroup.size(); i++)
+			{
+				QString groupId = superGroup.at(i).toLocal8Bit().constData();
+				if (!satGroups.contains(groupId))
+					satGroups.append(groupId);
+			}
+		}
+	}
+
+	return satGroups;
 }
 
 void Satellites::add(const TleDataList& newSatellites)
@@ -1238,6 +2110,14 @@ void Satellites::remove(const QStringList& idList)
 	if (satelliteListModel)
 		satelliteListModel->beginSatellitesChange();
 	
+	removeWithoutModelReset(idList);
+
+	if (satelliteListModel)
+		satelliteListModel->endSatellitesChange();
+}
+
+void Satellites::removeWithoutModelReset(const QStringList& idList)
+{
 	StelObjectMgr* objMgr = GETSTELMODULE(StelObjectMgr);
 	int numRemoved = 0;
 	for (int i = 0; i < satellites.size(); i++)
@@ -1256,9 +2136,6 @@ void Satellites::remove(const QStringList& idList)
 		}
 	}
 	// As the satellite list is kept sorted, no need for re-sorting.
-	
-	if (satelliteListModel)
-		satelliteListModel->endSatellitesChange();
 
 	qDebug() << "[Satellites] "
 		 << idList.count() << "satellites proposed for removal, "
@@ -1268,11 +2145,11 @@ void Satellites::remove(const QStringList& idList)
 
 int Satellites::getSecondsToUpdate(void)
 {
-	QDateTime nextUpdate = lastUpdate.addSecs(updateFrequencyHours * 3600);
+	QDateTime nextUpdate = lastUpdate.first.addSecs(updateFrequencyHours * 3600);
 	return QDateTime::currentDateTime().secsTo(nextUpdate);
 }
 
-void Satellites::setTleSources(QStringList tleSources)
+void Satellites::setTleSources(const QStringList &tleSources)
 {
 	updateUrls = tleSources;
 	saveTleSources(updateUrls);
@@ -1305,7 +2182,7 @@ void Satellites::saveTleSources(const QStringList& urls)
 	conf->endGroup();
 }
 
-bool Satellites::getFlagLabelsVisible() const
+bool Satellites::getFlagLabelsVisible()
 {
 	return Satellite::showLabels;
 }
@@ -1340,14 +2217,19 @@ void Satellites::setAutoRemoveEnabled(bool enabled)
 	}
 }
 
-bool Satellites::getFlagIconicMode() const
+void Satellites::setAutoDisplayEnabled(bool enabled)
 {
-	return Satellite::iconicModeFlag;
+	if (autoDisplayEnabled != enabled)
+	{
+		autoDisplayEnabled = enabled;
+		emit autoDisplayEnabledChanged(enabled);
+		emit settingsChanged();
+	}
 }
 
-bool Satellites::getFlagHideInvisible() const
+bool Satellites::getFlagIconicMode()
 {
-	return Satellite::hideInvisibleSatellitesFlag;
+	return Satellite::iconicModeFlag;
 }
 
 void Satellites::setFlagIconicMode(bool b)
@@ -1360,6 +2242,11 @@ void Satellites::setFlagIconicMode(bool b)
 	}
 }
 
+bool Satellites::getFlagHideInvisible()
+{
+	return Satellite::hideInvisibleSatellitesFlag;
+}
+
 void Satellites::setFlagHideInvisible(bool b)
 {
 	if (Satellite::hideInvisibleSatellitesFlag != b)
@@ -1367,6 +2254,21 @@ void Satellites::setFlagHideInvisible(bool b)
 		Satellite::hideInvisibleSatellitesFlag = b;
 		emit settingsChanged();
 		emit flagHideInvisibleChanged(b);
+	}
+}
+
+bool Satellites::getFlagColoredInvisible()
+{
+	return Satellite::coloredInvisibleSatellitesFlag;
+}
+
+void Satellites::setFlagColoredInvisible(bool b)
+{
+	if (Satellite::coloredInvisibleSatellitesFlag != b)
+	{
+		Satellite::coloredInvisibleSatellitesFlag = b;
+		emit settingsChanged();
+		emit flagColoredInvisibleChanged(b);
 	}
 }
 
@@ -1391,11 +2293,255 @@ void Satellites::setFlagLabelsVisible(bool b)
 	}
 }
 
+void Satellites::setFlagUmbraVisible(bool b)
+{
+	if (flagUmbraVisible != b)
+	{
+		flagUmbraVisible = b;
+		emit settingsChanged(); // GZ IS THIS REQUIRED/USEFUL??
+		emit flagUmbraVisibleChanged(b);
+	}
+}
+
+void Satellites::setFlagUmbraAtFixedAltitude(bool b)
+{
+	if (flagUmbraAtFixedAltitude != b)
+	{
+		flagUmbraAtFixedAltitude = b;
+		emit settingsChanged(); // GZ IS THIS REQUIRED/USEFUL??
+		emit flagUmbraAtFixedAltitudeChanged(b);
+	}
+}
+
+void Satellites::setUmbraColor(const Vec3f &c)
+{
+	umbraColor = c;
+	emit umbraColorChanged(c);
+}
+
+void Satellites::setUmbraAltitude(double d)
+{
+	fixedUmbraAltitude = d;
+	emit umbraAltitudeChanged(d);
+}
+
+void Satellites::setFlagPenumbraVisible(bool b)
+{
+	if (flagPenumbraVisible != b)
+	{
+		flagPenumbraVisible = b;
+		emit settingsChanged(); // GZ IS THIS REQUIRED/USEFUL??
+		emit flagPenumbraVisibleChanged(b);
+	}
+}
+
+void Satellites::setPenumbraColor(const Vec3f &c)
+{
+	penumbraColor = c;
+	emit penumbraColorChanged(c);
+}
+
+void Satellites::setFlagCFKnownStdMagnitude(bool b)
+{
+	if (Satellite::flagCFKnownStdMagnitude != b)
+	{
+		Satellite::flagCFKnownStdMagnitude = b;
+		emit customFilterChanged();
+		emit flagCFKnownStdMagnitudeChanged(b);
+	}
+}
+
+void Satellites::setFlagCFApogee(bool b)
+{
+	if (Satellite::flagCFApogee != b)
+	{
+		Satellite::flagCFApogee = b;
+		emit customFilterChanged();
+		emit flagCFApogeeChanged(b);
+	}
+}
+
+void Satellites::setMinCFApogee(double v)
+{
+	Satellite::minCFApogee = v;
+	emit customFilterChanged();
+	emit minCFApogeeChanged(v);
+}
+
+void Satellites::setMaxCFApogee(double v)
+{
+	Satellite::maxCFApogee = v;
+	emit customFilterChanged();
+	emit maxCFApogeeChanged(v);
+}
+
+void Satellites::setFlagCFPerigee(bool b)
+{
+	if (Satellite::flagCFPerigee != b)
+	{
+		Satellite::flagCFPerigee = b;
+		emit customFilterChanged();
+		emit flagCFPerigeeChanged(b);
+	}
+}
+
+void Satellites::setMinCFPerigee(double v)
+{
+	Satellite::minCFPerigee = v;
+	emit customFilterChanged();
+	emit minCFPerigeeChanged(v);
+}
+
+void Satellites::setMaxCFPerigee(double v)
+{
+	Satellite::maxCFPerigee = v;
+	emit customFilterChanged();
+	emit maxCFPerigeeChanged(v);
+}
+
+void Satellites::setFlagVFAltitude(bool b)
+{
+	if (Satellite::flagVFAltitude != b)
+	{
+		Satellite::flagVFAltitude = b;
+		emit flagVFAltitudeChanged(b);
+	}
+}
+
+void Satellites::setMinVFAltitude(double v)
+{
+	Satellite::minVFAltitude = v;
+	emit minVFAltitudeChanged(v);
+}
+
+void Satellites::setMaxVFAltitude(double v)
+{
+	Satellite::maxVFAltitude = v;
+	emit maxVFAltitudeChanged(v);
+}
+
+void Satellites::setFlagVFMagnitude(bool b)
+{
+	if (Satellite::flagVFMagnitude != b)
+	{
+		Satellite::flagVFMagnitude = b;
+		emit flagVFMagnitudeChanged(b);
+	}
+}
+
+void Satellites::setMinVFMagnitude(double v)
+{
+	Satellite::minVFMagnitude = v;
+	emit minVFMagnitudeChanged(v);
+}
+
+void Satellites::setMaxVFMagnitude(double v)
+{
+	Satellite::maxVFMagnitude = v;
+	emit maxVFMagnitudeChanged(v);
+}
+
+void Satellites::setFlagCFEccentricity(bool b)
+{
+	if (Satellite::flagCFEccentricity != b)
+	{
+		Satellite::flagCFEccentricity = b;
+		emit customFilterChanged();
+		emit flagCFEccentricityChanged(b);
+	}
+}
+
+void Satellites::setMinCFEccentricity(double v)
+{
+	Satellite::minCFEccentricity = v;
+	emit customFilterChanged();
+	emit minCFEccentricityChanged(v);
+}
+
+void Satellites::setMaxCFEccentricity(double v)
+{
+	Satellite::maxCFEccentricity = v;
+	emit customFilterChanged();
+	emit maxCFEccentricityChanged(v);
+}
+
+void Satellites::setFlagCFPeriod(bool b)
+{
+	if (Satellite::flagCFPeriod != b)
+	{
+		Satellite::flagCFPeriod = b;
+		emit customFilterChanged();
+		emit flagCFPeriodChanged(b);
+	}
+}
+
+void Satellites::setMinCFPeriod(double v)
+{
+	Satellite::minCFPeriod = v;
+	emit customFilterChanged();
+	emit minCFPeriodChanged(v);
+}
+
+void Satellites::setMaxCFPeriod(double v)
+{
+	Satellite::maxCFPeriod = v;
+	emit customFilterChanged();
+	emit maxCFPeriodChanged(v);
+}
+
+void Satellites::setFlagCFInclination(bool b)
+{
+	if (Satellite::flagCFInclination != b)
+	{
+		Satellite::flagCFInclination = b;
+		emit customFilterChanged();
+		emit flagCFInclinationChanged(b);
+	}
+}
+
+void Satellites::setMinCFInclination(double v)
+{
+	Satellite::minCFInclination = v;
+	emit customFilterChanged();
+	emit minCFInclinationChanged(v);
+}
+
+void Satellites::setMaxCFInclination(double v)
+{
+	Satellite::maxCFInclination = v;
+	emit customFilterChanged();
+	emit maxCFInclinationChanged(v);
+}
+
+void Satellites::setFlagCFRCS(bool b)
+{
+	if (Satellite::flagCFRCS != b)
+	{
+		Satellite::flagCFRCS = b;
+		emit customFilterChanged();
+		emit flagCFRCSChanged(b);
+	}
+}
+
+void Satellites::setMinCFRCS(double v)
+{
+	Satellite::minCFRCS = v;
+	emit customFilterChanged();
+	emit minCFRCSChanged(v);
+}
+
+void Satellites::setMaxCFRCS(double v)
+{
+	Satellite::maxCFRCS = v;
+	emit customFilterChanged();
+	emit maxCFRCSChanged(v);
+}
+
 void Satellites::setLabelFontSize(int size)
 {
-	if (labelFont.pixelSize() != size)
+	if (labelFontSize != size)
 	{
-		labelFont.setPixelSize(size);
+		labelFontSize = size;
 		emit labelFontSizeChanged(size);
 		emit settingsChanged();
 	}
@@ -1421,6 +2567,16 @@ void Satellites::setOrbitLineFadeSegments(int s)
 	}
 }
 
+void Satellites::setOrbitLineThickness(int s)
+{
+	if (s != Satellite::orbitLineThickness)
+	{
+		Satellite::orbitLineThickness=s;
+		emit orbitLineThicknessChanged(s);
+		recalculateOrbitLines();
+	}
+}
+
 void Satellites::setOrbitLineSegmentDuration(int s)
 {
 	if (s != Satellite::orbitLineSegmentDuration)
@@ -1428,6 +2584,15 @@ void Satellites::setOrbitLineSegmentDuration(int s)
 		Satellite::orbitLineSegmentDuration=s;
 		emit orbitLineSegmentDurationChanged(s);
 		recalculateOrbitLines();
+	}
+}
+
+void Satellites::setTleEpochAgeDays(int age)
+{
+	if (age != Satellite::tleEpochAge)
+	{
+		Satellite::tleEpochAge=age;
+		emit tleEpochAgeDaysChanged(age);
 	}
 }
 
@@ -1444,7 +2609,7 @@ void Satellites::setUpdateFrequencyHours(int hours)
 void Satellites::checkForUpdate(void)
 {
 	if (updatesEnabled && (updateState != Updating)
-	    && (lastUpdate.addSecs(updateFrequencyHours * 3600) <= QDateTime::currentDateTime()))
+	    && (lastUpdate.first.addSecs(updateFrequencyHours * 3600) <= QDateTime::currentDateTime()))
 	{
 		updateFromOnlineSources();
 	}
@@ -1484,21 +2649,28 @@ void Satellites::updateFromOnlineSources()
 	}
 
 	updateState = Satellites::Updating;
-	emit(updateStateChanged(updateState));
+	emit updateStateChanged(updateState);
 	updateSources.clear();
 	numberDownloadsComplete = 0;
 
-	if (progressBar==Q_NULLPTR)
+	if (progressBar==nullptr)
 		progressBar = StelApp::getInstance().addProgressBar();
 
 	progressBar->setValue(0);
 	progressBar->setRange(0, updateUrls.size());
-	progressBar->setFormat("TLE download %v/%m");
+	// TRANSLATORS: The full phrase is 'Loading TLE %VALUE%/%MAX%' in progress bar
+	progressBar->setFormat(QString("%1 %v/%m").arg(q_("Loading TLE")));
 
-	for (auto url : qAsConst(updateUrls))
+	QNetworkRequest request;
+	request.setRawHeader("User-Agent", StelUtils::getUserAgentString().toUtf8());
+	#if (QT_VERSION<QT_VERSION_CHECK(6,0,0))
+	request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, true);
+	#endif
+
+	for (auto url : std::as_const(updateUrls))
 	{
 		TleSource source;
-		source.file = Q_NULLPTR;
+		source.file = nullptr;
 		source.addNew = false;
 		if (url.startsWith("1,"))
 		{
@@ -1514,7 +2686,8 @@ void Satellites::updateFromOnlineSources()
 		if (source.url.isValid())
 		{
 			updateSources.append(source);
-			downloadMgr->get(QNetworkRequest(source.url));
+			request.setUrl(source.url);
+			downloadMgr->get(request);
 		}
 	}
 }
@@ -1537,37 +2710,7 @@ void Satellites::saveDownloadedUpdate(QNetworkReply* reply)
 			QByteArray fd = reply->readAll();
 			// qWarning() << "[Satellites] Processing an URL:" << reply->url().toString();
 			if (reply->url().toString().contains(".zip", Qt::CaseInsensitive))
-			{
-				QTemporaryFile zip;
-				if (zip.open())
-				{
-					// qWarning() << "[Satellites] Processing a ZIP archive...";
-					zip.write(fd);
-					zip.close();
-					QString archive = zip.fileName();
-					QByteArray data;
-
-					Stel::QZipReader reader(archive);
-					if (reader.status() != Stel::QZipReader::NoError)
-						qWarning() << "[Satellites] Unable to open as a ZIP archive";
-					else
-					{
-						QList<Stel::QZipReader::FileInfo> infoList = reader.fileInfoList();
-						for (const auto& info : qAsConst(infoList))
-						{
-							// qWarning() << "[Satellites] Processing:" << info.filePath;
-							if (info.isFile)
-								data.append(reader.fileData(info.filePath));
-						}
-						// qWarning() << "[Satellites] Extracted data:" << data;
-						fd = data;
-					}
-					reader.close();
-					zip.remove();
-				}
-				else
-					qWarning() << "[Satellites] Unable to open a temporary file";
-			}
+				fd = unzipData(fd);
 			tmpFile->write(fd);
 			tmpFile->close();
 			
@@ -1578,7 +2721,7 @@ void Satellites::saveDownloadedUpdate(QNetworkReply* reply)
 				if (updateSources[i].url == url)
 				{
 					updateSources[i].file = tmpFile;
-					tmpFile = Q_NULLPTR;
+					tmpFile = nullptr;
 					break;
 				}
 			}
@@ -1593,23 +2736,26 @@ void Satellites::saveDownloadedUpdate(QNetworkReply* reply)
 		}
 	}
 	else
-		qWarning() << "[Satellites] FAILED to download" << reply->url().toString(QUrl::RemoveUserInfo) << "Error:" << reply->errorString();
+	{
+		qWarning().nospace() << "[Satellites] FAILED to download " << reply->url().toString(QUrl::RemoveUserInfo) << ". Error " << reply->error() << ": " << reply->errorString();
+		emit updateStateChanged(DownloadError);
+	}
 
 	numberDownloadsComplete++;
 	if (progressBar)
 		progressBar->setValue(numberDownloadsComplete);
 
 	// Check if all files have been downloaded.
-	// TODO: It's better to keep track of the network requests themselves. --BM 
+	// TODO: It's better to keep track of the network requests themselves. --BM
 	if (numberDownloadsComplete < updateSources.size())
 		return;
-	
+
 	if (progressBar)
 	{
 		StelApp::getInstance().removeProgressBar(progressBar);
-		progressBar = Q_NULLPTR;
+		progressBar = nullptr;
 	}
-	
+
 	// All files have been downloaded, finish the update
 	TleDataHash newData;
 	for (int i = 0; i < updateSources.count(); i++)
@@ -1618,16 +2764,17 @@ void Satellites::saveDownloadedUpdate(QNetworkReply* reply)
 			continue;
 		if (updateSources[i].file->open(QFile::ReadOnly|QFile::Text))
 		{
-			parseTleFile(*updateSources[i].file,
-			             newData,
-			             updateSources[i].addNew);
+			parseDataFile(*updateSources[i].file, newData, updateSources[i].addNew, updateSources[i].url.toString(QUrl::None));
 			updateSources[i].file->close();
 			delete updateSources[i].file;
-			updateSources[i].file = Q_NULLPTR;
+			updateSources[i].file = nullptr;
 		}
 	}
-	updateSources.clear();		
-	updateSatellites(newData);
+	updateSources.clear();
+	if (!newData.isEmpty())
+		updateSatellites(newData);
+	else
+		emit updateStateChanged(OtherError);
 }
 
 void Satellites::updateObserverLocation(const StelLocation &loc)
@@ -1641,32 +2788,32 @@ void Satellites::setFlagOrbitLines(bool b)
 	Satellite::orbitLinesFlag = b;
 }
 
-bool Satellites::getFlagOrbitLines() const
+bool Satellites::getFlagOrbitLines()
 {
 	return Satellite::orbitLinesFlag;
 }
 
 void Satellites::recalculateOrbitLines(void)
 {
-	for (const auto& sat : qAsConst(satellites))
+	for (const auto& sat : std::as_const(satellites))
 	{
 		if (sat->initialized && sat->displayed && sat->orbitDisplayed)
 			sat->recalculateOrbitLines();
 	}
 }
 
-void Satellites::displayMessage(const QString& message, const QString hexColor)
+void Satellites::displayMessage(const QString& message, const QString &hexColor)
 {
 	messageIDs << GETSTELMODULE(LabelMgr)->labelScreen(message, 30, 30 + (20*messageIDs.count()), true, 16, hexColor, false, 9000);
 }
 
 
-void Satellites::saveCatalog(QString path)
+void Satellites::saveCatalog(const QString &path)
 {
 	saveDataMap(createDataMap(), path);
 }
 
-void Satellites::updateFromFiles(QStringList paths, bool deleteFiles)
+void Satellites::updateFromFiles(const QStringList &paths, bool deleteFiles)
 {
 	// Container for the new data.
 	TleDataHash newTleSets;
@@ -1675,7 +2822,7 @@ void Satellites::updateFromFiles(QStringList paths, bool deleteFiles)
 		QFile tleFile(tleFilePath);
 		if (tleFile.open(QIODevice::ReadOnly|QIODevice::Text))
 		{
-			parseTleFile(tleFile, newTleSets, autoAddEnabled);
+			parseDataFile(tleFile, newTleSets, autoAddEnabled);
 			tleFile.close();
 
 			if (deleteFiles)
@@ -1695,7 +2842,7 @@ void Satellites::updateSatellites(TleDataHash& newTleSets)
 	{
 		qWarning() << "[Satellites] update files contain no TLE sets!";
 		updateState = OtherError;
-		emit(updateStateChanged(updateState));
+		emit updateStateChanged(updateState);
 		return;
 	}
 	
@@ -1710,7 +2857,7 @@ void Satellites::updateSatellites(TleDataHash& newTleSets)
 	int addedCount = 0;
 	int missingCount = 0; // Also the number of removed sats, if any.
 	QStringList toBeRemoved;
-	for (const auto& sat : qAsConst(satellites))
+	for (const auto& sat : std::as_const(satellites))
 	{
 		totalCount++;
 		
@@ -1741,17 +2888,20 @@ void Satellites::updateSatellites(TleDataHash& newTleSets)
 				sat->status = newTle.status;
 
 				// we reset this to "now" when we started the update.
-				sat->lastUpdated = lastUpdate;
+				sat->lastUpdated = lastUpdate.first;
+
+				QPair<double, double> stdMagRCS = getStdMagRCS(newTle);
+				if (stdMagRCS.first < 99.)
+					sat->stdMag = stdMagRCS.first;
+				if (stdMagRCS.second > 0.)
+					sat->RCS = stdMagRCS.second;
+
+				QList<CommLink> comms = getCommunicationData(newTle);
+				if (!comms.isEmpty())
+					sat->comms = comms;
+
 				updatedCount++;
 			}
-			int sid = id.toInt();
-			if (qsMagList.contains(sid))
-				sat->stdMag = qsMagList[sid];
-			if (rcsList.contains(sid))
-				sat->RCS = rcsList[sid];
-			// special case: starlink satellites; details: http://satobs.org/seesat/Apr-2020/0174.html
-			if (!rcsList.contains(sid) && sat->name.startsWith("STARLINK"))
-				sat->RCS = 22.68; // Starlink's solar array is 8.1 x 2.8 metres.
 
 			if (sat->status==Satellite::StatusNonoperational && !sat->groups.contains("non-operational"))
 				sat->groups.insert("non-operational");
@@ -1794,7 +2944,7 @@ void Satellites::updateSatellites(TleDataHash& newTleSets)
 	if (autoRemoveEnabled && !toBeRemoved.isEmpty())
 	{
 		qWarning() << "[Satellites] purging objects that were not updated...";
-		remove(toBeRemoved);
+		removeWithoutModelReset(toBeRemoved);
 	}
 	
 	if (updatedCount > 0 ||
@@ -1815,13 +2965,35 @@ void Satellites::updateSatellites(TleDataHash& newTleSets)
 	         << missingCount << "missing or removed."
 	         << sourceCount << "source entries parsed.";
 
-	emit(updateStateChanged(updateState));
-	emit(tleUpdateComplete(updatedCount, totalCount, addedCount, missingCount));
+	emit updateStateChanged(updateState);
+	emit tleUpdateComplete(updatedCount, totalCount, addedCount, missingCount);
 }
 
-void Satellites::parseTleFile(QFile& openFile,
-                              TleDataHash& tleList,
-                              bool addFlagValue)
+
+void Satellites::parseDataFile(QFile& openFile, TleDataHash& tleList, bool addFlagValue, const QString &tleURL)
+{
+	const QString line = openFile.readLine();
+	if (line.contains("invalid query", Qt::CaseInsensitive) || line.contains("error", Qt::CaseInsensitive))
+		qWarning() << "[Satellites] Skipping parsing file" << openFile.fileName() << "due error:" << line;
+	else
+	{
+		const auto firstLineEntries = line.trimmed().split(QLatin1Char(','));
+		if (firstLineEntries.contains(L1S("ARG_OF_PERICENTER")) &&
+		    firstLineEntries.contains(L1S("MEAN_MOTION_DDOT")))
+		{
+			// Two rather long names from the CSV header are present,
+			// we must be handling a CSV file rather than TLE.
+			parseCsvFile(openFile, firstLineEntries, tleList, addFlagValue, tleURL);
+		}
+		else
+		{
+			openFile.seek(0);
+			parseTleFile(openFile, tleList, addFlagValue, tleURL);
+		}	
+	}	
+}
+
+void Satellites::parseTleFile(QFile& openFile, TleDataHash& tleList, bool addFlagValue, const QString &tleURL)
 {
 	if (!openFile.isOpen() || !openFile.isReadable())
 		return;
@@ -1829,7 +3001,6 @@ void Satellites::parseTleFile(QFile& openFile,
 	// Code mostly re-used from updateFromFiles()
 	int lineNumber = 0;
 	TleData lastData;
-	lastData.addThis = addFlagValue;
 
 	// Celestrak's "status code" list
 	const QMap<QString, Satellite::OptStatus> satOpStatusMap = {
@@ -1851,25 +3022,31 @@ void Satellites::parseTleFile(QFile& openFile,
 			// New entry in the list, so reset all fields
 			lastData = TleData();
 			lastData.addThis = addFlagValue;
+			lastData.sourceURL = tleURL;
 			
 			// The thing in square brackets after the name is actually
 			// Celestrak's "status code". Parse it!
-			QRegExp statusRx("\\s*\\[(\\D{1})\\]\\s*$");
-			statusRx.setMinimal(true);
-			if (statusRx.indexIn(line)>-1)
-				lastData.status = satOpStatusMap.value(statusRx.cap(1).toUpper(), Satellite::StatusUnknown);
+			static const QRegularExpression statusRx("\\s*\\[(\\D{1})\\]\\s*$", QRegularExpression::InvertedGreedinessOption );
+			QRegularExpressionMatch match;
+			if (line.indexOf(statusRx, 0, &match)>-1)
+				lastData.status = satOpStatusMap.value(match.captured(1).toUpper(), Satellite::StatusUnknown);
 
 			//TODO: We need to think of some kind of escaping these
 			//characters in the JSON parser. --BM
-			line.replace(QRegExp("\\s*\\[([^\\]])*\\]\\s*$"),"");  // remove "status code" from name
-			lastData.name = line;
+			static const QRegularExpression statusCodeRx("\\s*\\[([^\\]])*\\]\\s*$");
+			line.replace(statusCodeRx,"");  // remove "status code" from name
+			static const QRegularExpression reL0("^[0] ");
+			line.replace(reL0,"");  // remove "leading zero" from name (example: TLE from )
+			lastData.name = line.trimmed(); // remove "extra spaces" from name
 		}
 		else
 		{
 			// TODO: Yet another place suitable for a standard TLE regex. --BM
-			if (QRegExp("^1 .*").exactMatch(line))
+			static const QRegularExpression reL1("^1 .*");
+			static const QRegularExpression reL2("^2 .*");
+			if (reL1.match(line).hasMatch())
 				lastData.first = line;
-			else if (QRegExp("^2 .*").exactMatch(line))
+			else if (reL2.match(line).hasMatch())
 			{
 				lastData.second = line;
 				// The Satellite Catalogue Number is the second number
@@ -1881,6 +3058,13 @@ void Satellites::parseTleFile(QFile& openFile,
 					continue;
 				}
 				lastData.id = id;
+				
+				if (id.toInt()>=100000)
+				{
+					// Let's use hook for TLE data with Alpha-5 propagator as for CSV data
+					lastData.first.replace(2, 5, "00000");
+					lastData.second.replace(2, 5, "00000");
+				}
 				
 				// This is the second line and there will be no more,
 				// so if everything is OK, save the elements.
@@ -1898,59 +3082,248 @@ void Satellites::parseTleFile(QFile& openFile,
 				//TODO: Error warnings? --BM
 			}
 			else
-				qDebug() << "[Satellites] unprocessed line " << lineNumber <<  " in file " << QDir::toNativeSeparators(openFile.fileName());
+				qWarning().nospace() << "[Satellites] unprocessed line " << lineNumber << " in file "
+					<< QDir::toNativeSeparators(openFile.fileName()) << ": " << line;
 		}
 	}
 }
 
+void Satellites::parseCsvFile(QFile& openFile, const QStringList& headerEntries, TleDataHash& tleList,
+                              bool addFlagValue, const QString &tleURL)
+{
+	if (!openFile.isOpen() || !openFile.isReadable())
+		return;
+
+	int OBJECT_NAME = -1;
+	int OBJECT_ID = -1;
+	int EPOCH = -1;
+	int MEAN_MOTION = -1;
+	int ECCENTRICITY = -1;
+	int INCLINATION = -1;
+	int RA_OF_ASC_NODE = -1;
+	int ARG_OF_PERICENTER = -1;
+	int MEAN_ANOMALY = -1;
+	int EPHEMERIS_TYPE = -1;
+	int CLASSIFICATION_TYPE = -1;
+	int NORAD_CAT_ID = -1;
+	int ELEMENT_SET_NO = -1;
+	int REV_AT_EPOCH = -1;
+	int BSTAR = -1;
+	int MEAN_MOTION_DOT = -1;
+	int MEAN_MOTION_DDOT = -1;
+	const auto warn = [&tleURL,&headerEntries](const QString& what, const QString& why, const QStringList& lineEntries)
+	{
+		qWarning().noquote().nospace() << what << " in " << tleURL << ": " << why;
+		qWarning() << "Header entries:" << headerEntries;
+		if (!lineEntries.isEmpty())
+			qWarning() << "Line entries:" << lineEntries;
+	};
+	for (int idx = 0; idx < headerEntries.size(); ++idx)
+	{
+		const auto& name = headerEntries[idx];
+		if (name == L1S("OBJECT_NAME")) OBJECT_NAME = idx;
+		if (name == L1S("OBJECT_ID")) OBJECT_ID = idx;
+		if (name == L1S("EPOCH")) EPOCH = idx;
+		if (name == L1S("MEAN_MOTION")) MEAN_MOTION = idx;
+		if (name == L1S("ECCENTRICITY")) ECCENTRICITY = idx;
+		if (name == L1S("INCLINATION")) INCLINATION = idx;
+		if (name == L1S("RA_OF_ASC_NODE")) RA_OF_ASC_NODE = idx;
+		if (name == L1S("ARG_OF_PERICENTER")) ARG_OF_PERICENTER = idx;
+		if (name == L1S("MEAN_ANOMALY")) MEAN_ANOMALY = idx;
+		if (name == L1S("EPHEMERIS_TYPE")) EPHEMERIS_TYPE = idx;
+		if (name == L1S("CLASSIFICATION_TYPE")) CLASSIFICATION_TYPE = idx;
+		if (name == L1S("NORAD_CAT_ID")) NORAD_CAT_ID = idx;
+		if (name == L1S("ELEMENT_SET_NO")) ELEMENT_SET_NO = idx;
+		if (name == L1S("REV_AT_EPOCH")) REV_AT_EPOCH = idx;
+		if (name == L1S("BSTAR")) BSTAR = idx;
+		if (name == L1S("MEAN_MOTION_DOT")) MEAN_MOTION_DOT = idx;
+		if (name == L1S("MEAN_MOTION_DDOT")) MEAN_MOTION_DDOT = idx;
+	}
+	if (OBJECT_NAME < 0 || OBJECT_ID < 0 || EPOCH < 0 ||
+	    MEAN_MOTION < 0 || ECCENTRICITY < 0 || INCLINATION < 0 ||
+	    RA_OF_ASC_NODE < 0 || ARG_OF_PERICENTER < 0 || MEAN_ANOMALY < 0 ||
+	    EPHEMERIS_TYPE < 0 || CLASSIFICATION_TYPE < 0 || NORAD_CAT_ID < 0 ||
+	    ELEMENT_SET_NO < 0 || REV_AT_EPOCH < 0 || BSTAR < 0 ||
+	    MEAN_MOTION_DOT < 0 || MEAN_MOTION_DDOT < 0)
+	{
+		warn("Bad satellite CSV header", "not all required fields are present", {});
+		return;
+	}
+
+	while (!openFile.atEnd())
+	{
+		const auto lineEntries = QString(openFile.readLine()).trimmed().split(QLatin1Char(','));
+		const auto warnAboutLine = [&warn, &lineEntries](const QString& what, const QString& why)
+		{
+			warn(what, why, lineEntries);
+		};
+		if (lineEntries.size() != headerEntries.size())
+		{
+			warnAboutLine("Bad CSV line",
+			              QString("number of entries %1  doesn't match number of header entries %2")
+			                      .arg(lineEntries.size()).arg(headerEntries.size()));
+			continue;
+		}
+		TleData data{};
+		data.addThis = addFlagValue;
+		data.sourceURL = tleURL;
+		data.name = lineEntries[OBJECT_NAME];
+		bool ok = false;
+		data.id = lineEntries[NORAD_CAT_ID];
+		data.id.toUInt(&ok);
+		if (!ok)
+		{
+			warnAboutLine("Bad CSV line", "failed to parse NORAD id of the object");
+			continue;
+		}
+
+		// Now generate a TLE from the CSV fields, except the NORAD id
+		// will be zeroed out, because it may be longer than 5 digits.
+		SatCsvEntry entry;
+		bool mmOK = false, eccOK = false, incOK = false, raaOK = false, aopOK = false, maOK = false;
+		bool etOK = false, esnOK = false, raeOK = false, bsOK = false, mmdOK = false, mmddOK = false;
+		entry.object_id           = lineEntries[OBJECT_ID].trimmed();
+		entry.epoch               = lineEntries[EPOCH].trimmed();
+		entry.mean_motion         = lineEntries[MEAN_MOTION].trimmed().toDouble(&mmOK);
+		entry.eccentricity        = lineEntries[ECCENTRICITY].trimmed().toDouble(&eccOK);
+		entry.inclination         = lineEntries[INCLINATION].trimmed().toDouble(&incOK);
+		entry.ra_of_asc_node      = lineEntries[RA_OF_ASC_NODE].trimmed().toDouble(&raaOK);
+		entry.arg_of_pericenter   = lineEntries[ARG_OF_PERICENTER].trimmed().toDouble(&aopOK);
+		entry.mean_anomaly        = lineEntries[MEAN_ANOMALY].trimmed().toDouble(&maOK);
+		entry.ephemeris_type      = lineEntries[EPHEMERIS_TYPE].trimmed().toUInt(&etOK);
+		entry.classification_type = lineEntries[CLASSIFICATION_TYPE].trimmed();
+		entry.element_set_no      = lineEntries[ELEMENT_SET_NO].trimmed().toUInt(&esnOK);
+		entry.rev_at_epoch        = lineEntries[REV_AT_EPOCH].trimmed().toUInt(&raeOK);
+		entry.bstar               = lineEntries[BSTAR].trimmed().toDouble(&bsOK);
+		entry.mean_motion_dot     = lineEntries[MEAN_MOTION_DOT].trimmed().toDouble(&mmdOK);
+		entry.mean_motion_ddot    = lineEntries[MEAN_MOTION_DDOT].trimmed().toDouble(&mmddOK);
+		if (!(mmOK && eccOK && incOK && raaOK && aopOK && maOK && etOK && esnOK && raeOK && bsOK && mmdOK && mmddOK))
+		{
+			warnAboutLine("Bad CSV line", "not all numbers are parsable");
+			continue;
+		}
+
+		data.first = generateTleLine1(entry, warnAboutLine);
+		if (data.first.isEmpty()) continue;
+
+		data.second = generateTleLine2(entry, warnAboutLine);
+		if (data.second.isEmpty()) continue;
+
+		// Some satellites can be listed in multiple files,
+		// and only some of those files may be marked for adding,
+		// so try to preserve the flag - if it's set,
+		// feel free to overwrite the existing value.
+		// If not, overwrite only if it's not in the list already.
+		// NOTE: Second case overwrite may need to check which TLE set is newer. 
+		if (data.addThis || !tleList.contains(data.id))
+			tleList.insert(data.id, data); // Overwrite if necessary
+	}
+}
+
+QString Satellites::decodeSatIDFromAlpha5(QString& satId)
+{
+	const QMap<QString, QString> alpha5 = {
+	        { "A", "10" }, { "B", "11" }, { "C", "12" }, { "D", "13" }, { "E", "14" }, { "F", "15" }, { "G", "16" }, { "H", "17" },
+	        { "J", "18" }, { "K", "19" }, { "L", "20" }, { "M", "21" }, { "N", "22" }, { "P", "23" }, { "Q", "24" }, { "R", "25" },
+	        { "S", "26" }, { "T", "27" }, { "U", "28" }, { "V", "29" }, { "W", "30" }, { "X", "31" }, { "Y", "32" }, { "Z", "33" }
+	};
+
+	// Decoding Alpha-5 Propagator (compatible with CSV)
+	static const QRegularExpression a5Rx("^[A-Z]\\B");
+	QRegularExpressionMatch alpha5Match=a5Rx.match(satId);
+	if (alpha5Match.hasMatch())
+	{
+		QString chr = alpha5Match.captured(0);
+		satId.replace(chr, alpha5.value(chr));
+	}
+	
+	return satId;
+}
+
 QString Satellites::getSatIdFromLine2(const QString& line)
 {
-	#if (QT_VERSION>=QT_VERSION_CHECK(5, 14, 0))
-	QString id = line.split(' ',  Qt::SkipEmptyParts).at(1).trimmed();
-	#else
-	QString id = line.split(' ',  QString::SkipEmptyParts).at(1).trimmed();
-	#endif
-	if (!id.isEmpty())
-	{
-		// Strip any leading zeros as they should be unique ints as strings.
-		id.remove(QRegExp("^[0]*"));
-	}
+	if (line.isEmpty() || line.size()<10)
+		return QString();
+	
+	QString id = line.mid(2, 5).trimmed();
+
+	// Strip any leading zeros as they should be unique ints as strings.
+	static const QRegularExpression re("^[0]*\\B");
+	id.remove(re);
+
+	// Check wrong chars of Alpha-5 Propagator
+	static const QRegularExpression rx("^[OI]\\B");
+	QRegularExpressionMatch wrongMatch = rx.match(id);
+	if (wrongMatch.hasMatch())
+		return QString();
+
+	// Decoding Alpha-5 Propagator (compatible with CSV)
+	id = decodeSatIDFromAlpha5(id);
+	
 	return id;
 }
 
 void Satellites::loadExtraData()
 {
-	// Description of file and some additional information you can find here:
-	// 1) http://www.prismnet.com/~mmccants/tles/mccdesc.html
-	// 2) http://www.prismnet.com/~mmccants/tles/intrmagdef.html
-	QFile qsmFile(":/satellites/qs.mag");	
-	qsMagList.clear();	
-	if (qsmFile.open(QFile::ReadOnly))
+	// regular expression to find the comments and empty lines
+	static const QRegularExpression commentRx("^(\\s*#.*|\\s*)$");
+
+	// Details: https://github.com/Stellarium/stellarium-data/tree/master/satellites
+	QFile satFile(":/satellites/satellites.dat");
+	qsMagList.clear();
+	rcsList.clear();
+
+	if (satFile.open(QIODevice::ReadOnly))
 	{
-		while (!qsmFile.atEnd())
+		QByteArray data = StelUtils::uncompress(satFile);
+		satFile.close();
+
+		QBuffer buf(&data);
+		buf.open(QIODevice::ReadOnly);
+		while (!buf.atEnd())
 		{
-			QString line = QString(qsmFile.readLine());
-			int id   = line.mid(0,5).trimmed().toInt();
-			QString smag = line.mid(33,4).trimmed();
+			QString line = QString::fromUtf8(buf.readLine());
+
+			// Skip comments
+			if (commentRx.match(line).hasMatch())
+				continue;
+
+			QStringList list = line.split("\t");
+			int noradID = list.at(0).trimmed().toInt();
+			QString smag = list.at(1).trimmed();
 			if (!smag.isEmpty())
-				qsMagList.insert(id, smag.toDouble());
+				qsMagList.insert(noradID, smag.toDouble());
+
+			QString srcs = list.at(2).trimmed();
+			if (!srcs.isEmpty())
+				rcsList.insert(noradID, srcs.toDouble());
 		}
-		qsmFile.close();
 	}
 
-	QFile rcsFile(":/satellites/rcs");
-	rcsList.clear();
-	if (rcsFile.open(QFile::ReadOnly))
+	QFile commFile(":/satellites/communications.json");
+	if (commFile.open(QFile::ReadOnly))
 	{
-		while (!rcsFile.atEnd())
+		satComms.clear();
+		groupComms.clear();
+		QVariantMap commMap = StelJsonParser::parse(&commFile).toMap();
+		commFile.close();
+
+		// Communications data for individual satellites
+		QVariantMap satellitesCommLink = commMap.value("satellites").toMap();
+		QMap<QString, QVariant>::const_iterator cit=satellitesCommLink.constBegin();
+		while (cit != satellitesCommLink.constEnd())
 		{
-			QString line = QString(rcsFile.readLine());
-			int id   = line.mid(0,5).trimmed().toInt();
-			QString srcs = line.mid(5,5).trimmed();
-			if (!srcs.isEmpty())
-				rcsList.insert(id, srcs.toDouble());
+			satComms.insert(cit.key().toInt(), cit.value().toMap());
+			cit++;
 		}
-		rcsFile.close();
+		// Communications data for groups of satellites
+		QVariantMap groupsCommLink = commMap.value("groups").toMap();
+		QMap<QString, QVariant>::const_iterator grit=groupsCommLink.constBegin();
+		while (grit != groupsCommLink.constEnd())
+		{
+			groupComms.insert(grit.key(), grit.value().toMap());
+			grit++;
+		}
 	}
 }
 
@@ -1960,21 +3333,43 @@ void Satellites::update(double deltaTime)
 	if (!hintFader && hintFader.getInterstate() <= 0.f)
 		return;
 
-	StelCore *core = StelApp::getInstance().getCore();
+	static const StelCore *core = StelApp::getInstance().getCore();
 
 	if (qAbs(core->getTimeRate())>=Satellite::timeRateLimit) // Do not show satellites when time rate is over limit
 		return;
 
-	if (core->getCurrentPlanet() != earth || !isValidRangeDates(core))
+	if (core->getCurrentPlanet()!=earth || !isValidRangeDates(core))
 		return;
 
 	hintFader.update(static_cast<int>(deltaTime*1000));
-
-	for (const auto& sat : qAsConst(satellites))
+	const double JD=core->getJD();
+#if (QT_VERSION<QT_VERSION_CHECK(6,0,0))
+	for (const auto& sat : std::as_const(satellites))
 	{
 		if (sat->initialized && sat->displayed)
-			sat->update(deltaTime);
+			sat->update(core, JD);
 	}
+#else
+	// TODO: sat->update is an obvious candidate for parallelisation and without orbits, it indeed helps a lot.
+	// Unfortunately, the call to Satellite::computeOrbitPoints(); uses static variables, which messes up the orbit lines.
+	// We can compute satellites in parallel, but only if orbits are suppressed, until this is fixed.
+	if (getFlagOrbitLines())
+	{
+		for (const auto& sat : std::as_const(satellites))
+		{
+			if (sat->initialized && sat->displayed)
+				sat->update(core, JD);
+		}
+	}
+	else
+	{
+		const auto updateSat = [JD](QSharedPointer<Satellite>& sat){
+			if (sat->initialized && sat->displayed)
+				sat->update(core, JD);
+		};
+		QtConcurrent::blockingMap(QThreadPool::globalInstance(), satellites, updateSat);
+	}
+#endif
 }
 
 void Satellites::draw(StelCore* core)
@@ -1991,20 +3386,29 @@ void Satellites::draw(StelCore* core)
 
 	StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
 	StelPainter painter(prj);
-	painter.setFont(labelFont);
+	QFont font=QGuiApplication::font();
+	font.setPixelSize(labelFontSize);
+	painter.setFont(font);
 	Satellite::hintBrightness = hintFader.getInterstate();
 
 	painter.setBlending(true);
 	Satellite::hintTexture->bind();
 	Satellite::viewportHalfspace = painter.getProjector()->getBoundingCap();
-	for (const auto& sat : qAsConst(satellites))
+	for (const auto& sat : std::as_const(satellites))
 	{
 		if (sat && sat->initialized && sat->displayed)
 			sat->draw(core, painter);
 	}
 
+	// In screen accumulation mode (star trails), circles or pointer should be suppressed.
+	if (!core->getFlagClearSky())
+		return;
+
 	if (GETSTELMODULE(StelObjectMgr)->getFlagSelectedObjectPointer())
 		drawPointer(core, painter);
+
+	if (getFlagUmbraVisible())
+		drawCircles(core, painter);
 }
 
 void Satellites::drawPointer(StelCore* core, StelPainter& painter)
@@ -2027,14 +3431,89 @@ void Satellites::drawPointer(StelCore* core, StelPainter& painter)
 		painter.setBlending(true);
 
 		// Size on screen
-		double size = obj->getAngularSize(core)*M_PI/180.*static_cast<double>(prj->getPixelPerRadAtCenter());
-		size += 12. + 3.*std::sin(2. * StelApp::getInstance().getTotalRunTime());
-		// size+=20.f + 10.f*std::sin(2.f * StelApp::getInstance().getTotalRunTime());
-		painter.drawSprite2dMode(static_cast<float>(screenpos[0]-size/2), static_cast<float>(screenpos[1]-size/2), 20, 90);
-		painter.drawSprite2dMode(static_cast<float>(screenpos[0]-size/2), static_cast<float>(screenpos[1]+size/2), 20, 0);
-		painter.drawSprite2dMode(static_cast<float>(screenpos[0]+size/2), static_cast<float>(screenpos[1]+size/2), 20, -90);
-		painter.drawSprite2dMode(static_cast<float>(screenpos[0]+size/2), static_cast<float>(screenpos[1]-size/2), 20, -180);
+		float size = obj->getAngularRadius(core)*(2.*M_PI_180)*static_cast<double>(prj->getPixelPerRadAtCenter());
+		const float scale = StelApp::getInstance().getScreenScale();
+		size += (12. + 3.*std::sin(2. * StelApp::getInstance().getTotalRunTime())) * scale;
+		const float radius = 20 * scale;
+		const float x = screenpos[0], y = screenpos[1];
+		painter.drawSprite2dModeNoDeviceScale(x-size/2, y-size/2, radius, 90);
+		painter.drawSprite2dModeNoDeviceScale(x-size/2, y+size/2, radius, 0);
+		painter.drawSprite2dModeNoDeviceScale(x+size/2, y+size/2, radius, -90);
+		painter.drawSprite2dModeNoDeviceScale(x+size/2, y-size/2, radius, -180);
 	}
+}
+
+void Satellites::drawCircles(StelCore* core, StelPainter &painter)
+{
+	StelProjectorP saveProj = painter.getProjector();
+	painter.setProjector(core->getProjection(StelCore::FrameHeliocentricEclipticJ2000, StelCore::RefractionAuto));
+	painter.setLineSmooth(true);
+	QFont font=QGuiApplication::font();
+	font.setPixelSize(labelFontSize);
+	painter.setFont(font);
+
+	double lambda, beta;
+	const Vec3d pos = earth->getEclipticPos();
+	const Vec3d dir = - sun->getAberrationPush() + pos;
+	StelUtils::rectToSphe(&lambda, &beta, dir);
+	const Mat4d rot=Mat4d::zrotation(lambda)*Mat4d::yrotation(-beta);
+
+	SatelliteP sat = nullptr;
+	const QList<StelObjectP> newSelected = GETSTELMODULE(StelObjectMgr)->getSelectedObject("Satellite");
+	if (!newSelected.empty())
+		sat = getById(newSelected[0].staticCast<Satellite>()->getCatalogNumberString());
+
+	Vec4d umbraData;
+	if (flagUmbraAtFixedAltitude)
+	{
+		umbraData=Satellite::getUmbraData(earth->getEquatorialRadius()*AU+fixedUmbraAltitude)/AU;
+	}
+	else if (!sat.isNull())
+	{
+		umbraData=sat->getUmbraData()/AU;
+	}
+	else
+		return;
+
+	const double umbraDistance_AU    = umbraData[0];
+	const double umbraRadius_AU      = umbraData[1];
+	const double penumbraDistance_AU = umbraData[2];
+	const double penumbraRadius_AU   = umbraData[3];
+	StelVertexArray umbra(StelVertexArray::LineLoop);
+	for (int i=0; i<4*360; ++i)
+	{
+		Vec3d point(umbraDistance_AU, cos(i*M_PI_180*0.25)*umbraRadius_AU, sin(i*M_PI_180*0.25)*umbraRadius_AU);
+		rot.transfo(point);
+		umbra.vertex.append(pos+point);
+	}
+	painter.setColor(getUmbraColor(), hintFader.getInterstate());
+	painter.drawStelVertexArray(umbra, true);
+
+	// plot a center cross mark
+	texCross->bind();
+	Vec3d point(umbraDistance_AU, 0.0, 0.0);
+	rot.transfo(point);
+	Vec3d coord = pos+point;
+	painter.drawSprite2dMode(coord, 5.f);
+	QString number = QString::number( (getFlagUmbraAtFixedAltitude() ? getUmbraAltitude() : sat->latLongSubPointPosition[2] ), 'f', 1);
+	QString cuLabel = QString("%1 (h=%2 %3)").arg(q_("C.U."), number, qc_("km","distance"));
+	const float shift = 8.f;
+	painter.drawText(coord, cuLabel, 0, shift, shift, false);
+
+	if (getFlagPenumbraVisible())
+	{
+		StelVertexArray penumbra(StelVertexArray::LineLoop);
+		for (int i=0; i<4*360; ++i)
+		{
+			Vec3d point(penumbraDistance_AU, cos(i*M_PI_180*0.25)*penumbraRadius_AU, sin(i*M_PI_180*0.25)*penumbraRadius_AU);
+			rot.transfo(point);
+			penumbra.vertex.append(pos+point);
+		}
+
+		painter.setColor(getPenumbraColor(), hintFader.getInterstate());
+		painter.drawStelVertexArray(penumbra, true);
+	}
+	painter.setProjector(saveProj);
 }
 
 bool Satellites::checkJsonFileFormat()
@@ -2063,17 +3542,12 @@ bool Satellites::checkJsonFileFormat()
 
 bool Satellites::isValidRangeDates(const StelCore *core) const
 {
-	bool ok;
 	double tJD = core->getJD();
-	double uJD = StelUtils::getJulianDayFromISO8601String(lastUpdate.toString(Qt::ISODate), &ok);
-	if (lastUpdate.isNull()) // No updates yet?
-		uJD = tJD;
+	double uJD = lastUpdate.first.isNull() ?  // No updates yet?
+			tJD : lastUpdate.second;
 	// do not draw anything before Oct 4, 1957, 19:28:34GMT ;-)
 	// upper limit for drawing is +5 years after latest update of TLE
-	if ((tJD<2436116.3115) || (tJD>(uJD+1825)))
-		return false;
-	else
-		return true;
+	return ((tJD>=2436116.3115) && (tJD<=(uJD+5*365)));
 }
 
 #if(SATELLITES_PLUGIN_IRIDIUM == 1)
@@ -2213,7 +3687,7 @@ IridiumFlaresPredictionList Satellites::getIridiumFlaresPrediction()
 		nextJD = predictionJD + 1./24;
 		pcore->setJD(predictionJD);
 
-		ssystem->getEarth()->computePosition(predictionJD);
+		ssystem->getEarth()->computePosition(predictionJD, Vec3d(0.));
 		pcore->update(0);
 
 		for (auto i = iridiums.begin(); i != iridiums.end(); ++i)
@@ -2226,7 +3700,7 @@ IridiumFlaresPredictionList Satellites::getIridiumFlaresPrediction()
 				bool flareFound = false;
 				if (v > i.value().v)
 				{
-					if (i.value().v < 1. // brighness limit
+					if (i.value().v < 1. // brightness limit
 					 && i.value().angleToSun>0.
 					 && i.value().angleToSun<2.)
 					{
@@ -2290,70 +3764,89 @@ IridiumFlaresPredictionList Satellites::getIridiumFlaresPrediction()
 // close SATELLITES_PLUGIN_IRIDIUM
 #endif
 
+void Satellites::createSuperGroupsList()
+{
+	QString communications = "communications", navigation = "navigation", scientific = "scientific",
+		earthresources = "earth resources", gps = "gps", glonass = "glonass", geostationary = "geostationary";
+	satSuperGroupsMap = {
+	        { "geo", communications },
+	        { "geo", geostationary },
+	        { "intelsat", communications },
+	        { "eutelsat", communications },
+	        { "telesat", communications },	        
+	        { "ses", communications },
+	        { "iridium", communications },
+	        { "iridium-NEXT", communications },
+	        { "starlink", communications },
+	        { "qianfan", communications },
+	        { "hulianwang", communications },
+	        { "kuiper", communications },
+	        { "yamal", communications },
+	        { "oneweb", communications },
+	        { "orbcomm", communications },
+	        { "globalstar", communications },
+	        { "swarm", communications },
+	        { "amateur", communications },
+	        { "x-comm", communications },
+	        { "other-comm", communications },
+	        { "satnogs", communications },
+	        { "gorizont", communications },
+	        { "raduga", communications },
+	        { "raduga", geostationary },
+	        { "molniya", communications },
+	        { "gnss", navigation },
+	        { "gps", navigation },
+	        { "gps-ops", navigation },
+	        { "gps-ops", gps },
+	        { "glonass", navigation },
+	        { "glo-ops", navigation },
+	        { "glo-ops", glonass },
+	        { "galileo", navigation },
+	        { "beidou", navigation },
+	        { "sbas", navigation },
+	        { "nnss", navigation },
+	        { "musson", navigation },
+	        { "science", scientific },
+	        { "geodetic", scientific },
+	        { "engineering", scientific },
+	        { "education", scientific },
+	        { "goes", scientific },
+	        { "goes", earthresources },
+	        { "resource", earthresources },
+	        { "sarsat", earthresources },
+	        { "dmc", earthresources },
+	        { "tdrss", earthresources },
+	        { "argos", earthresources },
+	        { "planet", earthresources },
+	        { "spire", earthresources }
+	};
+}
+
 void Satellites::translations()
 {
 #if 0
 	// Satellite groups
-	// TRANSLATORS: Satellite group: Bright/naked-eye-visible satellites
-	N_("visual");
-	// TRANSLATORS: Satellite group: Scientific satellites
-	N_("scientific");
+	//
+	// *** Generic groups (not related to CelesTrak groups)
+	//
 	// TRANSLATORS: Satellite group: Communication satellites
 	N_("communications");
 	// TRANSLATORS: Satellite group: Navigation satellites
 	N_("navigation");
-	// TRANSLATORS: Satellite group: Amateur radio (ham) satellites
-	N_("amateur");
-	// TRANSLATORS: Satellite group: Weather (meteorological) satellites
-	N_("weather");
+	// TRANSLATORS: Satellite group: Scientific satellites
+	N_("scientific");
 	// TRANSLATORS: Satellite group: Earth Resources satellites
 	N_("earth resources");
 	// TRANSLATORS: Satellite group: Satellites in geostationary orbit
 	N_("geostationary");
 	// TRANSLATORS: Satellite group: Satellites that are no longer functioning
 	N_("non-operational");
-	// TRANSLATORS: Satellite group: Satellites belonging to the GPS constellation (the Global Positioning System)
-	N_("gps");
+	// TRANSLATORS: Satellite group: Satellites belonging to the space observatories
+	N_("observatory");	
 	// TRANSLATORS: Satellite group: The Indian Regional Navigation Satellite System (IRNSS) is an autonomous regional satellite navigation system being developed by the Indian Space Research Organisation (ISRO) which would be under complete control of the Indian government.
 	N_("irnss");
 	// TRANSLATORS: Satellite group: The Quasi-Zenith Satellite System (QZSS), is a proposed three-satellite regional time transfer system and Satellite Based Augmentation System for the Global Positioning System, that would be receivable within Japan.
 	N_("qzss");
-	// TRANSLATORS: Satellite group: The Tracking and Data Relay Satellite System (TDRSS) is a network of communications satellites and ground stations used by NASA for space communications.
-	N_("tdrss");
-	// TRANSLATORS: Satellite group: Satellites belonging to the GLONASS constellation (GLObal NAvigation Satellite System)
-	N_("glonass");
-	// TRANSLATORS: Satellite group: Satellites belonging to the BeiDou constellation (BeiDou Navigation Satellite System)
-	N_("beidou");
-	// TRANSLATORS: Satellite group: Satellites belonging to the Galileo constellation (global navigation satellite system by the European Union)
-	N_("galileo");
-	// TRANSLATORS: Satellite group: Satellites belonging to the Iridium constellation (Iridium is a proper name)
-	N_("iridium");
-	// TRANSLATORS: Satellite group: Satellites belonging to the Iridium NEXT constellation (Iridium is a proper name)
-	N_("iridium next");
-	// TRANSLATORS: Satellite group: Satellites belonging to the Starlink constellation (Starlink is a proper name)
-	N_("starlink");	
-	// TRANSLATORS: Satellite group: Satellites belonging to the Spire constellation (LEMUR satellites)
-	N_("spire");
-	// TRANSLATORS: Satellite group: Satellites belonging to the OneWeb constellation (OneWeb is a proper name)
-	N_("oneweb");
-	// TRANSLATORS: Satellite group: Space stations
-	N_("stations");
-	// TRANSLATORS: Satellite group: Education satellites
-	N_("education");
-	// TRANSLATORS: Satellite group: Satellites belonging to the space observatories
-	N_("observatory");
-	// TRANSLATORS: Satellite group: Satellites belonging to the INTELSAT satellites
-	N_("intelsat");
-	// TRANSLATORS: Satellite group: Satellites belonging to the GLOBALSTAR satellites
-	N_("globalstar");
-	// TRANSLATORS: Satellite group: Satellites belonging to the ORBCOMM satellites
-	N_("orbcomm");
-	// TRANSLATORS: Satellite group: Satellites belonging to the GORIZONT satellites
-	N_("gorizont");
-	// TRANSLATORS: Satellite group: Satellites belonging to the RADUGA satellites
-	N_("raduga");
-	// TRANSLATORS: Satellite group: Satellites belonging to the MOLNIYA satellites
-	N_("molniya");
 	// TRANSLATORS: Satellite group: Satellites belonging to the COSMOS satellites
 	N_("cosmos");
 	// TRANSLATORS: Satellite group: Debris of satellites
@@ -2364,53 +3857,196 @@ void Satellites::translations()
 	N_("resupply");
 	// TRANSLATORS: Satellite group: are known to broadcast TV signals
 	N_("tv");
-	// TRANSLATORS: Satellite group: military satellites
-	N_("military");
-	// TRANSLATORS: Satellite group: geodetic satellites
+	// TRANSLATORS: Satellite group: Satellites belonging to the GONETS satellites
+	N_("gonets");
+	//
+	// *** Special-Interest Satellites [CelesTrak groups]
+	//
+	// TRANSLATORS: Satellite group: Last 30 Days' Launches
+	// TRANSLATORS: CelesTrak source [Last 30 Days' Launches]: https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=csv
+	N_("last-30-days");
+	// TRANSLATORS: Satellite group: Space stations	
+	// TRANSLATORS: CelesTrak source [Space Stations]: https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=csv
+	N_("stations");
+	// TRANSLATORS: Satellite group: Bright/naked-eye-visible satellites
+	// TRANSLATORS: CelesTrak source [100 (or so) Brightest]: https://celestrak.org/NORAD/elements/gp.php?GROUP=visual&FORMAT=csv
+	N_("visual");
+	// TRANSLATORS: Satellite group: Active Satellites
+	// TRANSLATORS: CelesTrak source [Active Satellites]: https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=csv
+	N_("active");
+	// TRANSLATORS: Satellite group: Analyst Satellites
+	// TRANSLATORS: CelesTrak source [Analyst Satellites]: https://celestrak.org/NORAD/elements/gp.php?GROUP=analyst&FORMAT=csv
+	N_("analyst");
+	//
+	// *** Weather & Earth Resources Satellites [CelesTrak groups]
+	//
+	// TRANSLATORS: Satellite group: Weather (meteorological) satellites
+	// TRANSLATORS: CelesTrak source [Weather]: https://celestrak.org/NORAD/elements/gp.php?GROUP=weather&FORMAT=csv
+	N_("weather");
+	// TRANSLATORS: Satellite group: Earth Resources satellites
+	// TRANSLATORS: CelesTrak source [Earth Resources]: https://celestrak.org/NORAD/elements/gp.php?GROUP=resource&FORMAT=csv
+	N_("resource");
+	// TRANSLATORS: Satellite group: Search & Rescue (SARSAT) satellites
+	// TRANSLATORS: CelesTrak source [Search & Rescue (SARSAT)]: https://celestrak.org/NORAD/elements/gp.php?GROUP=sarsat&FORMAT=csv
+	N_("sarsat");
+	// TRANSLATORS: Satellite group: Disaster Monitoring satellites
+	// TRANSLATORS: CelesTrak source [Disaster Monitoring]: https://celestrak.org/NORAD/elements/gp.php?GROUP=dmc&FORMAT=csv
+	N_("dmc");
+	// TRANSLATORS: Satellite group: The Tracking and Data Relay Satellite System (TDRSS) is a network of communications satellites and ground stations used by NASA for space communications.
+	// TRANSLATORS: CelesTrak source [Tracking and Data Relay Satellite System (TDRSS)]: https://celestrak.org/NORAD/elements/gp.php?GROUP=tdrss&FORMAT=csv
+	N_("tdrss");
+	// TRANSLATORS: Satellite group: ARGOS Data Collection System satellites
+	// TRANSLATORS: CelesTrak source [ARGOS Data Collection System]: https://celestrak.org/NORAD/elements/gp.php?GROUP=argos&FORMAT=csv
+	N_("argos");
+	// TRANSLATORS: Satellite group: Satellites belonging to the Planet satellites
+	// TRANSLATORS: CelesTrak source [Planet]: https://celestrak.org/NORAD/elements/gp.php?GROUP=planet&FORMAT=csv
+	N_("planet");
+	// TRANSLATORS: Satellite group: Satellites belonging to the Spire constellation (LEMUR satellites)
+	// TRANSLATORS: CelesTrak source [Spire]: https://celestrak.org/NORAD/elements/gp.php?GROUP=spire&FORMAT=csv
+	N_("spire");	
+	//
+	// *** Communications Satellites [CelesTrak groups]
+	//
+	// TRANSLATORS: Satellite group: Active Geosynchronous Satellites
+	// TRANSLATORS: CelesTrak source [Active Geosynchronous]: https://celestrak.org/NORAD/elements/gp.php?GROUP=geo&FORMAT=csv
+	N_("geo");
+	// TRANSLATORS: Satellite group: Satellites belonging to the INTELSAT satellites
+	// TRANSLATORS: CelesTrak source [Intelsat]: https://celestrak.org/NORAD/elements/gp.php?GROUP=intelsat&FORMAT=csv
+	N_("intelsat");
+	// TRANSLATORS: Satellite group: Satellites belonging to the EUTELSAT satellites
+	// TRANSLATORS: CelesTrak source [Intelsat]: https://celestrak.org/NORAD/elements/gp.php?GROUP=eutelsat&FORMAT=csv
+	N_("eutelsat");
+	// TRANSLATORS: Satellite group: Satellites belonging to the SES satellites
+	// TRANSLATORS: CelesTrak source [SES]: https://celestrak.org/NORAD/elements/gp.php?GROUP=ses&FORMAT=csv
+	N_("ses");
+	// TRANSLATORS: Satellite group: Satellites belonging to the Iridium NEXT constellation (Iridium is a proper name)
+	// TRANSLATORS: CelesTrak source [Iridium NEXT]: https://celestrak.org/NORAD/elements/gp.php?GROUP=iridium-NEXT&FORMAT=csv
+	N_("iridium-NEXT");
+	// TRANSLATORS: Satellite group: Satellites belonging to the Starlink constellation (Starlink is a proper name)
+	// TRANSLATORS: CelesTrak source [Starlink]: https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=csv
+	N_("starlink");
+	// TRANSLATORS: Satellite group: Satellites belonging to the OneWeb constellation (OneWeb is a proper name)
+	// TRANSLATORS: CelesTrak source [OneWeb]: https://celestrak.org/NORAD/elements/gp.php?GROUP=oneweb&FORMAT=csv
+	N_("oneweb");
+	// TRANSLATORS: Satellite group: Satellites belonging to the ORBCOMM satellites
+	// TRANSLATORS: CelesTrak source [Orbcomm]: https://celestrak.org/NORAD/elements/gp.php?GROUP=orbcomm&FORMAT=csv
+	N_("orbcomm");
+	// TRANSLATORS: Satellite group: Satellites belonging to the GLOBALSTAR satellites
+	// TRANSLATORS: CelesTrak source [Globalstar]: https://celestrak.org/NORAD/elements/gp.php?GROUP=globalstar&FORMAT=csv
+	N_("globalstar");
+	// TRANSLATORS: Satellite group: Amateur radio (ham) satellites
+	// TRANSLATORS: CelesTrak source [Amateur Radio]: https://celestrak.org/NORAD/elements/gp.php?GROUP=amateur&FORMAT=csv
+	N_("amateur");
+	// TRANSLATORS: Satellite group: Experimental communication satellites
+	// TRANSLATORS: CelesTrak source [Experimental]: https://celestrak.org/NORAD/elements/gp.php?GROUP=x-comm&FORMAT=csv
+	N_("x-comm");
+	// TRANSLATORS: Satellite group: Other communication satellites
+	// TRANSLATORS: CelesTrak source [Other Comm]: https://celestrak.org/NORAD/elements/gp.php?GROUP=other-comm&FORMAT=csv
+	N_("other-comm");
+	// TRANSLATORS: Satellite group: Satellites belonging to the SatNOGS satellites
+	// TRANSLATORS: CelesTrak source [SatNOGS]: https://celestrak.org/NORAD/elements/gp.php?GROUP=satnogs&FORMAT=csv
+	N_("satnogs");
+	// TRANSLATORS: Satellite group: Satellites belonging to the Qianfan constellation (Qianfan is a proper name)
+	// TRANSLATORS: CelesTrak source [Qianfan]: https://celestrak.org/NORAD/elements/gp.php?GROUP=qianfan&FORMAT=csv
+	N_("qianfan");
+	// TRANSLATORS: Satellite group: Satellites belonging to the Hulianwang constellation (Hulianwang is a proper name)
+	// TRANSLATORS: CelesTrak source [Hulianwang Digui]: https://celestrak.org/NORAD/elements/gp.php?GROUP=hulianwang&FORMAT=csv
+	N_("hulianwang");
+	// TRANSLATORS: CelesTrak source [Kuiper]: https://celestrak.org/NORAD/elements/gp.php?GROUP=kuiper&FORMAT=csv
+	N_("kuiper");
+	// TRANSLATORS: Satellite group: Satellites belonging to the Yamal satellites
+	N_("yamal");
+	// TRANSLATORS: Satellite group: Satellites belonging to the Gorizont satellites
+	N_("gorizont");
+	// TRANSLATORS: Satellite group: Satellites belonging to the Raduga satellites
+	N_("raduga");
+	// TRANSLATORS: Satellite group: Satellites belonging to the Molniya satellites
+	N_("molniya");
+	//
+	// *** Navigation Satellites [CelesTrak groups]
+	//
+	// TRANSLATORS: Satellite group: Satellites belonging to the GNSS satellites
+	// TRANSLATORS: CelesTrak source [GNSS]: https://celestrak.org/NORAD/elements/gnss.txt
+	// TRANSLATORS: CelesTrak source [GNSS]: https://celestrak.org/NORAD/elements/gp.php?GROUP=gnss&FORMAT=csv
+	N_("gnss");
+	// TRANSLATORS: Satellite group: Satellites belonging to the GPS constellation (the Global Positioning System)
+	N_("gps");
+	// TRANSLATORS: Satellite group: Satellites belonging to the GPS constellation (the Global Positioning System)
+	// TRANSLATORS: CelesTrak source [GPS Operational]: https://celestrak.org/NORAD/elements/gp.php?GROUP=gps-ops&FORMAT=csv
+	N_("gps-ops");
+	// TRANSLATORS: Satellite group: Satellites belonging to the GLONASS constellation (GLObal NAvigation Satellite System)
+	N_("glonass");
+	// TRANSLATORS: Satellite group: Satellites belonging to the GLONASS constellation (GLObal NAvigation Satellite System)
+	// TRANSLATORS: CelesTrak supplemental source [GLONASS Operational]: https://celestrak.org/NORAD/elements/gp.php?GROUP=glo-ops&FORMAT=csv
+	N_("glo-ops");
+	// TRANSLATORS: Satellite group: Satellites belonging to the Galileo constellation (global navigation satellite system by the European Union)
+	// TRANSLATORS: CelesTrak source [Galileo]: https://celestrak.org/NORAD/elements/gp.php?GROUP=galileo&FORMAT=csv
+	N_("galileo");
+	// TRANSLATORS: Satellite group: Satellites belonging to the BeiDou constellation (BeiDou Navigation Satellite System)
+	// TRANSLATORS: CelesTrak source [Beidou]: https://celestrak.org/NORAD/elements/gp.php?GROUP=beidou&FORMAT=csv
+	N_("beidou");
+	// TRANSLATORS: Satellite group: Satellite-Based Augmentation System (WAAS/EGNOS/MSAS)
+	// TRANSLATORS: CelesTrak source [Satellite-Based Augmentation System (WAAS/EGNOS/MSAS)]: https://celestrak.org/NORAD/elements/gp.php?GROUP=sbas&FORMAT=csv
+	N_("sbas");
+	// TRANSLATORS: Satellite group: Navy Navigation Satellite System (NNSS)
+	N_("nnss");
+	// TRANSLATORS: Satellite group: Russian LEO Navigation Satellites
+	N_("musson");
+	//
+	// *** Scientific Satellites [CelesTrak groups]
+	//
+	// TRANSLATORS: Satellite group: Space & Earth Science satellites
+	// TRANSLATORS: CelesTrak source [Space & Earth Science]: https://celestrak.org/NORAD/elements/gp.php?GROUP=science&FORMAT=csv
+	N_("science");
+	// TRANSLATORS: Satellite group: Geodetic satellites
 	N_("geodetic");
-
-	// Satellite descriptions - bright and/or famous objects
-	// Just A FEW objects please! (I'm looking at you, Alex!)
-	// TRANSLATORS: Satellite description. "Hubble" is a person's name.
-	N_("The Hubble Space Telescope");
-	// TRANSLATORS: Satellite description.
-	N_("The International Space Station");
-	// TRANSLATORS: Satellite description.
-	N_("China's first space station");
-	// TRANSLATORS: Satellite description.
-	N_("Tiangong space station (Chinese large modular space station)");
-	// TRANSLATORS: Satellite description.
-	N_("The russian space radio telescope RadioAstron");
-	// TRANSLATORS: Satellite description.
-	N_("International Gamma-Ray Astrophysics Laboratory");
-	// TRANSLATORS: Satellite description.
-	N_("The Gamma-Ray Observatory");
-	// TRANSLATORS: Satellite description.
-	N_("The Microvariability and Oscillations of Stars telescope");
-	// TRANSLATORS: Satellite description.
-	N_("The Interface Region Imaging Spectrograph");
-	// TRANSLATORS: Satellite description.
-	N_("The Spectroscopic Planet Observatory for Recognition of Interaction of Atmosphere");
-	// TRANSLATORS: Satellite description.
-	M_("Nuclear Spectroscopic Telescope Array");
-	// TRANSLATORS: Satellite description.
-	N_("The Dark Matter Particle Explorer");
-	// TRANSLATORS: Satellite description.
-	N_("Arcsecond Space Telescope Enabling Research in Astrophysics");
-	// TRANSLATORS: Satellite description.
-	N_("Reuven Ramaty High Energy Solar Spectroscopic Imager");
-	// TRANSLATORS: Satellite description.
-	N_("The Chandra X-ray Observatory");
+	// TRANSLATORS: Satellite group: Engineering satellites
+	// TRANSLATORS: CelesTrak source [Engineering]: https://celestrak.org/NORAD/elements/gp.php?GROUP=engineering&FORMAT=csv
+	N_("engineering");
+	// TRANSLATORS: Satellite group: Education satellites
+	// TRANSLATORS: CelesTrak source [Education]: https://celestrak.org/NORAD/elements/gp.php?GROUP=education&FORMAT=csv
+	N_("education");
+	//
+	// *** Miscellaneous Satellites [CelesTrak groups]
+	//
+	// TRANSLATORS: Satellite group: Military satellites
+	// TRANSLATORS: CelesTrak source [Miscellaneous Military]: https://celestrak.org/NORAD/elements/gp.php?GROUP=military&FORMAT=csv
+	N_("military");
+	// TRANSLATORS: Satellite group: Radar Calibration satellites
+	// TRANSLATORS: CelesTrak source [Radar Calibration]: https://celestrak.org/NORAD/elements/gp.php?GROUP=radar&FORMAT=csv
+	N_("radar");
+	// TRANSLATORS: Satellite group: CubeSats (Cube Satellites)
+	// TRANSLATORS: CelesTrak source [CubeSats]: https://celestrak.org/NORAD/elements/gp.php?GROUP=cubesat&FORMAT=csv
+	N_("cubesat");
+	// TRANSLATORS: Satellite group: Other satellites
+	N_("other");
+	//
+	// *** Supplemental Two-Line Element Sets [CelesTrak groups]
+	//
+	// Probably the meteorological satellites
+	// TRANSLATORS: Satellite group: Meteosat
+	N_("meteosat");
+	// Probably the communications satellites
+	// TRANSLATORS: Satellite group: Telesat
+	N_("telesat");
+	// TRANSLATORS: Satellite group: ISS Segments
+	N_("iss");
+	// TRANSLATORS: Satellite group: CPF
+	N_("cpf");
 
 	// Satellite names - a few famous objects only
 	// TRANSLATORS: Satellite name: International Space Station
 	N_("ISS (ZARYA)");
+	// TRANSLATORS: Satellite name: International Space Station
+	N_("ISS (NAUKA)");
 	// TRANSLATORS: Satellite name: International Space Station
 	N_("ISS");
 	// TRANSLATORS: Satellite name: Hubble Space Telescope
 	N_("HST");
 	// TRANSLATORS: Satellite name: Spektr-R Space Observatory (or RadioAstron)
 	N_("SPEKTR-R");
+	// TRANSLATORS: Satellite name: Spektr-RG Space Observatory
+	N_("SPEKTR-RG");
 	// TRANSLATORS: Satellite name: International Gamma-Ray Astrophysics Laboratory (INTEGRAL)
 	N_("INTEGRAL");
 	// TRANSLATORS: Satellite name: China's first space station name
@@ -2420,11 +4056,40 @@ void Satellites::translations()
 	// TRANSLATORS: Satellite name: China's space station name (with name of base module)
 	N_("TIANGONG (TIANHE)");
 
-	// Satellites visibility
-	N_("The satellite and the observer are in sunlight");
-	N_("The satellite is visible");
-	N_("The satellite is eclipsed");
-	N_("The satellite is not visible");
+	// Special terms for communications
+	// NOTE: Please remember to update Satellite::getCommLinkInfo() method after updating the list of terms
+	// TRANSLATORS: An uplink (UL or U/L) is the link from a ground station to a satellite
+	NC_("uplink", "comms");
+	// TRANSLATORS: A downlink (DL) is the link from a satellite to a ground station
+	NC_("downlink", "comms");
+	// TRANSLATORS: The beacon (or radio beacon) is a device in the satellite, which emit one or more signals (normally on a fixed frequency) whose purpose is twofold: station-keeping information (telemetry) and locates the satellite (determines its azimuth and elevation) in the sky
+	NC_("beacon", "comms");
+	// TRANSLATORS: Telemetry is the collection of measurements or other data at satellites and their automatic transmission to receiving equipment (telecommunication) for monitoring
+	NC_("telemetry", "comms");
+	// TRANSLATORS: The channel for transmission of video data
+	NC_("video", "comms");
+	// TRANSLATORS: The broadband is wide bandwidth data transmission which transports multiple signals at a wide range of frequencies
+	NC_("broadband", "comms");
+	// TRANSLATORS: The channel for transmission of commands
+	NC_("command", "comms");
+	// TRANSLATORS: Meteorological is a service on the satellite for transmitting meteorological data to a ground station
+	NC_("meteorological", "comms");
+	// TRANSLATORS: Maritime is a service on the satellite
+	NC_("maritime", "comms");
+	// TRANSLATORS: Mobile is a service on the satellite
+	NC_("mobile", "comms");
+	// TRANSLATORS: Mobile telephony is a service on the satellite
+	NC_("mobile telephony", "comms");
+	// TRANSLATORS: A repeater is an electronic device that receives a signal and retransmits it.
+	NC_("repeater", "comms");
+	// TRANSLATORS: The digital repeater (or digipiter) is used in channels that transmit data by binary digital signals
+	NC_("digipeater", "comms");
+	// TRANSLATORS: A radio band is a small frequency band (a contiguous section of the range of the radio spectrum) in which channels are usually used or set aside for the same purpose. S-band for example.
+	NC_("-band", "comms");
+	NC_("crew voice", "comms");
+	NC_("imaging", "comms");
+	// TRANSLATORS: Some mode of communication via radio channel
+	NC_("mode", "comms");
 
 #endif
 }

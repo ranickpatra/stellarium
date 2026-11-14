@@ -20,11 +20,9 @@
 
 #include "Dialog.hpp"
 #include "StelApp.hpp"
-#include "StelCore.hpp"
 #include "StelModuleMgr.hpp"
-#include "StelFileMgr.hpp"
-#include "StelLocaleMgr.hpp"
 #include "StelStyle.hpp"
+#include "StelMainView.hpp"
 #include "StelTranslator.hpp"
 #include "TelescopeControl.hpp"
 #include "TelescopeConfigurationDialog.hpp"
@@ -40,32 +38,37 @@
 #include <QHeaderView>
 #include <QSettings>
 #include <QStandardItem>
+#include <QRegularExpression>
+#if defined(Q_OS_WIN)
+	#include "../common/ASCOMSupport.hpp"
+	#include <QMessageBox>
+#endif
 
-using namespace TelescopeControlGlobals;
 
-
-TelescopeDialog::TelescopeDialog()
-	: StelDialog("TelescopeControl")
+TelescopeDialog::TelescopeDialog(const QString &dialogName, QObject *parent)
+	: StelDialog(dialogName, parent)
 	, telescopeCount(0)
 	, configuredSlot(0)
 	, configuredTelescopeIsNew(false)
 {
-	telescopeStatus[0] = StatusNA;
-	telescopeType[0] = ConnectionNA;
+	telescopeStatus[0] = TelescopeControl::StatusNA;
+	connectionTypes[0] = TelescopeControl::ConnectionNA;
 
 	ui = new Ui_telescopeDialogForm;
 
 	//TODO: Fix this - it's in the same plugin
 	telescopeManager = GETSTELMODULE(TelescopeControl);
+
 	telescopeListModel = new QStandardItemModel(0, ColumnCount);
 
-	//TODO: This shouldn't be a hash...
-	statusString[StatusNA] = QString(N_("N/A"));
-	statusString[StatusStarting] = QString(N_("Starting"));
-	statusString[StatusConnecting] = QString(N_("Connecting"));
-	statusString[StatusConnected] = QString(N_("Connected"));
-	statusString[StatusDisconnected] = QString(N_("Disconnected"));
-	statusString[StatusStopped] = QString(N_("Stopped"));
+	//TODO: (FC 2010) This shouldn't be a hash...--> GZ (2022): OK, it's map now.
+	statusString = {
+		{TelescopeControl::StatusNA,           N_("N/A")},
+		{TelescopeControl::StatusStarting,     N_("Starting")},
+		{TelescopeControl::StatusConnecting,   N_("Connecting")},
+		{TelescopeControl::StatusConnected,    N_("Connected")},
+		{TelescopeControl::StatusDisconnected, N_("Disconnected")},
+		{TelescopeControl::StatusStopped,      N_("Stopped")}};
 }
 
 TelescopeDialog::~TelescopeDialog()
@@ -106,44 +109,52 @@ void TelescopeDialog::createDialogContent()
 	if (gui)
 	{
 		enableKineticScrolling(gui->getFlagUseKineticScrolling());
-		connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+		connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &TelescopeDialog::enableKineticScrolling);
 	}
 
+#ifdef Q_OS_WIN
+	if ((ASCOMSupport::getASCOMMajorVersion() > 0) && (ASCOMSupport::getASCOMMajorVersion() < 7))
+		QMessageBox::warning(nullptr, q_("Outdated ASCOM!"), q_("Your ASCOM is below version 7. Upgrade to avoid problems!") );
+#endif
+
 	//Inherited connect
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &TelescopeDialog::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
 	//Connect: sender, signal, receiver, method
 	//Page: Telescopes
-	connect(ui->pushButtonChangeStatus, SIGNAL(clicked()), this, SLOT(buttonChangeStatusPressed()));
-	connect(ui->pushButtonConfigure, SIGNAL(clicked()), this, SLOT(buttonConfigurePressed()));
-	connect(ui->pushButtonAdd, SIGNAL(clicked()), this, SLOT(buttonAddPressed()));
-	connect(ui->pushButtonRemove, SIGNAL(clicked()), this, SLOT(buttonRemovePressed()));
+	connect(ui->pushButtonChangeStatus, &QPushButton::clicked, this, &TelescopeDialog::buttonChangeStatusPressed);
+	connect(ui->pushButtonConfigure, &QPushButton::clicked, this, &TelescopeDialog::buttonConfigurePressed);
+	connect(ui->pushButtonAdd, &QPushButton::clicked, this, &TelescopeDialog::buttonAddPressed);
+	connect(ui->pushButtonRemove, &QPushButton::clicked, this, &TelescopeDialog::buttonRemovePressed);
 	
-	connect(ui->telescopeTreeView, SIGNAL(clicked (const QModelIndex &)), this, SLOT(selectTelecope(const QModelIndex &)));
-	//connect(ui->telescopeTreeView, SIGNAL(activated (const QModelIndex &)), this, SLOT(configureTelescope(const QModelIndex &)));
+	connect(ui->telescopeTreeView, &QTreeView::clicked, this, &TelescopeDialog::selectTelescope);
+	//connect(ui->telescopeTreeView, &QTreeView::activated, this, &TelescopeDialog::configureTelescope);
 	
 	//Page: Options:
-	connect(ui->checkBoxReticles, SIGNAL(clicked(bool)),
-	        telescopeManager, SLOT(setFlagTelescopeReticles(bool)));
-	connect(ui->checkBoxLabels, SIGNAL(clicked(bool)),
-	        telescopeManager, SLOT(setFlagTelescopeLabels(bool)));
-	connect(ui->checkBoxCircles, SIGNAL(clicked(bool)),
-	        telescopeManager, SLOT(setFlagTelescopeCircles(bool)));
-	
-	connect(ui->checkBoxEnableLogs, SIGNAL(toggled(bool)), telescopeManager, SLOT(setFlagUseTelescopeServerLogs(bool)));
-	
-	connect(ui->checkBoxUseExecutables, SIGNAL(toggled(bool)), ui->labelExecutablesDirectory, SLOT(setEnabled(bool)));
-	connect(ui->checkBoxUseExecutables, SIGNAL(toggled(bool)), ui->lineEditExecutablesDirectory, SLOT(setEnabled(bool)));
-	connect(ui->checkBoxUseExecutables, SIGNAL(toggled(bool)), ui->pushButtonPickExecutablesDirectory, SLOT(setEnabled(bool)));
-	connect(ui->checkBoxUseExecutables, SIGNAL(toggled(bool)), this, SLOT(checkBoxUseExecutablesToggled(bool)));
-	
-	connect(ui->pushButtonPickExecutablesDirectory, SIGNAL(clicked()), this, SLOT(buttonBrowseServerDirectoryPressed()));
-	
+	connectBoolProperty(ui->checkBoxReticles,   "TelescopeControl.flagTelescopeReticles");
+	connectBoolProperty(ui->checkBoxLabels,     "TelescopeControl.flagTelescopeLabels");
+	connectBoolProperty(ui->checkBoxCircles,    "TelescopeControl.flagTelescopeCircles");
+	ui->reticleColorButton->setup("TelescopeControl.reticleColor", "TelescopeControl/color_telescope_reticles");
+	ui->labelColorButton  ->setup("TelescopeControl.labelColor",   "TelescopeControl/color_telescope_labels");
+	ui->circleColorButton ->setup("TelescopeControl.circleColor",  "TelescopeControl/color_telescope_circles");
+	connectBoolProperty(ui->checkBoxEnableLogs, "TelescopeControl.useTelescopeServerLogs");
+
+	connect(ui->checkBoxUseExecutables, &QCheckBox::toggled, ui->labelExecutablesDirectory, &QLabel::setEnabled);
+	connect(ui->checkBoxUseExecutables, &QCheckBox::toggled, ui->lineEditExecutablesDirectory, &QLineEdit::setEnabled);
+	connect(ui->checkBoxUseExecutables, &QCheckBox::toggled, ui->pushButtonPickExecutablesDirectory, &QPushButton::setEnabled);
+
+	connect(ui->pushButtonPickExecutablesDirectory, &QPushButton::clicked, this, &TelescopeDialog::buttonBrowseServerDirectoryPressed);
+	//Telescope server directory
+	connectBoolProperty(ui->checkBoxUseExecutables, "TelescopeControl.useTelescopeServerExecutables");
+	ui->lineEditExecutablesDirectory->setText(telescopeManager->getServerExecutablesDirectoryPath());
+
+	connectStringProperty(ui->lineEditExecutablesDirectory, "TelescopeControl.serverExecutablesDirectoryPath");
+
 	//In other dialogs:
-	connect(&configurationDialog, SIGNAL(changesDiscarded()), this, SLOT(discardChanges()));
-	connect(&configurationDialog, SIGNAL(changesSaved(QString, ConnectionType)), this, SLOT(saveChanges(QString, ConnectionType)));
+	connect(&configurationDialog, &TelescopeConfigurationDialog::changesDiscarded, this, &TelescopeDialog::discardChanges);
+	connect(&configurationDialog, &TelescopeConfigurationDialog::changesSaved, this, &TelescopeDialog::saveChanges);
 	
 	//Initialize the style
 	updateStyle();
@@ -159,17 +170,17 @@ void TelescopeDialog::createDialogContent()
 	
 	//Populating the list
 	//Cycle the slots
-	for (int slotNumber = MIN_SLOT_NUMBER; slotNumber < SLOT_NUMBER_LIMIT; slotNumber++)
+	for (int slotNumber = TelescopeControl::MIN_SLOT_NUMBER; slotNumber < TelescopeControl::SLOT_NUMBER_LIMIT; slotNumber++)
 	{
 		//Slot #
 		//int slotNumber = (i+1)%SLOT_COUNT;//Making sure slot 0 is last
 		
 		//Make sure that this is initialized for all slots
-		telescopeStatus[slotNumber] = StatusNA;
+		telescopeStatus[slotNumber] = TelescopeControl::StatusNA;
 		
 		//Read the telescope properties
 		QString name;
-		ConnectionType connectionType;
+		TelescopeControl::ConnectionType connectionType;
 		QString equinox;
 		QString host;
 		int portTCP;
@@ -189,18 +200,18 @@ void TelescopeDialog::createDialogContent()
 			continue;
 		
 		//Determine the server type
-		telescopeType[slotNumber] = connectionType;
+		connectionTypes[slotNumber] = connectionType;
 		
 		//Determine the telescope's status
 		if (telescopeManager->isConnectedClientAtSlot(slotNumber))
 		{
-			telescopeStatus[slotNumber] = StatusConnected;
+			telescopeStatus[slotNumber] = TelescopeControl::StatusConnected;
 		}
 		else
 		{
 			//TODO: Fix this!
 			//At startup everything exists and attempts to connect
-			telescopeStatus[slotNumber] = StatusConnecting;
+			telescopeStatus[slotNumber] = TelescopeControl::StatusConnecting;
 		}
 		
 		addModelRow(slotNumber, connectionType, telescopeStatus[slotNumber], name);
@@ -230,37 +241,36 @@ void TelescopeDialog::createDialogContent()
 	}
 	updateWarningTexts();
 	
-	if(telescopeCount >= SLOT_COUNT)
+	if(telescopeCount >= TelescopeControl::SLOT_COUNT)
 		ui->pushButtonAdd->setEnabled(false);
 	
-	//Checkboxes
-	ui->checkBoxReticles->setChecked(telescopeManager->getFlagTelescopeReticles());
-	ui->checkBoxLabels->setChecked(telescopeManager->getFlagTelescopeLabels());
-	ui->checkBoxCircles->setChecked(telescopeManager->getFlagTelescopeCircles());
-	ui->checkBoxEnableLogs->setChecked(telescopeManager->getFlagUseTelescopeServerLogs());
-	
-	//Telescope server directory
-	ui->checkBoxUseExecutables->setChecked(telescopeManager->getFlagUseServerExecutables());
-	ui->lineEditExecutablesDirectory->setText(telescopeManager->getServerExecutablesDirectoryPath());
-	
+
 	//About page
 	setAboutText();
 	
 	//Everything must be initialized by now, start the updateTimer
 	//TODO: Find if it's possible to run it only when the dialog is visible
 	QTimer* updateTimer = new QTimer(this);
-	connect(updateTimer, SIGNAL(timeout()), this, SLOT(updateTelescopeStates()));
+	connect(updateTimer, &QTimer::timeout, this, &TelescopeDialog::updateTelescopeStates);
 	updateTimer->start(200);
 }
 
 void TelescopeDialog::setAboutText()
 {
 	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
+	static const QRegularExpression a_rx("[{]([^{]*)[}]");
+
+#ifdef Q_OS_MACOS
+	QString modifierNameCtrl = "⌘"; // Command key
+	QString modifierNameAlt = "⌥"; // Option key
+#else
+	QString modifierNameCtrl = "Ctrl";
+	QString modifierNameAlt = "Alt";
+#endif
 
 	//TODO: Expand
 	QString aboutPage = "<html><head></head><body>";
-	aboutPage += "<h2>" + q_("Telescope Control plug-in") + "</h2><table width=\"90%\">";
+	aboutPage += "<h2>" + q_("Telescope Control plug-in") + "</h2><table class='layout' width=\"90%\">";
 	aboutPage += "<tr width=\"30%\"><td><strong>" + q_("Version") + ":</strong></td><td>" + TELESCOPE_CONTROL_PLUGIN_VERSION + "</td></tr>";
 	aboutPage += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + TELESCOPE_CONTROL_PLUGIN_LICENSE + "</td></tr>";
 	aboutPage += "<tr><td rowspan=5><strong>" + q_("Authors") + "</strong></td><td>Johannes Gajdosik</td></td>";
@@ -268,9 +278,10 @@ void TelescopeDialog::setAboutText()
 	aboutPage += "<tr><td>Gion Kunz &lt;gion.kunz@gmail.com&gt; (" + q_("ASCOM Telescope Client") + ")</td></tr>";
 	aboutPage += "<tr><td>Petr Kubánek (" + q_("RTS2 support") + ")</td></tr>";
 	aboutPage += "<tr><td>Alessandro Siniscalchi &lt;asiniscalchi@gmail.com&gt; (" + q_("INDI Telescope Client") + ")</td></tr>";
-	aboutPage += "<tr><td rowspan=3><strong>" + q_("Contributors") + ":</strong></td><td>Alexander Wolf &lt;alex.v.wolf@gmail.com&gt;</td></tr>";
+	aboutPage += "<tr><td rowspan=4><strong>" + q_("Contributors") + ":</strong></td><td>Alexander Wolf</td></tr>";
 	aboutPage += "<tr><td>Michael Heinz</td></tr>";
 	aboutPage += "<tr><td>Alexandros Kosiaris</td></tr>";
+	aboutPage += "<tr><td>Rumen Bogdanovski &lt;rumenastro@gmail.com&gt; (" + q_("LX200 telescope control over TCP/IP") + ")</td></tr>";
 	aboutPage += "</table>";
 
 	aboutPage += "<p>" + q_("This plug-in is based on and reuses a lot of code under the GNU General Public License:") + "</p><ul>";
@@ -286,7 +297,7 @@ void TelescopeDialog::setAboutText()
 	
 	QString helpPage = "<html><head></head><body>";
 	// TRANSLATORS: The text between braces is the text of an HTML link.
-	helpPage += "<p>" + q_("A more complete and up-to-date documentation for this plug-in can be found on the {Telescope Control} page in the Stellarium Wiki.").replace(a_rx, "<a href=\"http://stellarium.sourceforge.net/wiki/index.php/Telescope_Control_plug-in\">\\1</a>") + "</p>";
+	helpPage += "<p>" + q_("A more complete and up-to-date documentation for this plug-in can be found in the Stellarium User Guide.") + "</p>";
 	helpPage += "<h3><a name=\"top\" />" + q_("Contents") + "</h3><ul>";
 	helpPage += "<li><a href=\"#Abilities_and_limitations\">" + q_("Abilities and limitations") + "</a></li>";
 	helpPage += "<li><a href=\"#originalfeature\">" + q_("The original telescope control feature") + "</a></li>";
@@ -325,9 +336,9 @@ void TelescopeDialog::setAboutText()
 	helpPage += "<li><b>" + q_("INDIRECT CONNECTION") + "</b>: <ul>";
 	helpPage += "<li>";
 	// TRANSLATORS: The text between braces is the text of an HTML link.
-	helpPage += q_("A device is connected to the same computer but it is driven by a {stand-alone telescope server program}").replace(a_rx, "<a href=\"http://stellarium.sourceforge.net/wiki/index.php/Telescope_Control_%28client-server%29\">\\1</a>") + " ";
+	helpPage += q_("A device is connected to the same computer but it is driven by a stand-alone telescope server program") + " ";
 	// TRANSLATORS: The text between braces is the text of an HTML link.
-	helpPage += q_("or a {third-party application} <b>that can 'talk' to Stellarium</b>;").replace(a_rx, "<a href=\"http://stellarium.sourceforge.net/wiki/index.php/Telescope_Control#Third_party_applications\">\\1</a>");
+	helpPage += q_("or a third-party application <b>that can 'talk' to Stellarium</b>;");
 	helpPage += "</li>";
 	helpPage += "<li>" + q_("A device is connected to a remote computer and the software that drives it can 'talk' to Stellarium <i>over the network</i>; this software can be either one of Stellarium's stand-alone telescope servers, or a third party application.") + "</li></ul></li></ul>";
 	helpPage += "<p>";
@@ -344,10 +355,10 @@ void TelescopeDialog::setAboutText()
 	helpPage += "<li>" + q_("By pressing the 'configure' button for the plug-in in the 'Plugins' tab of Stellarium's Configuration window (opened by pressing <b>F2</b> or the respective button in the left toolbar).") + "</li>";
 	helpPage += "<li>";
 	// TRANSLATORS: The text between braces is the text of an HTML link.
-	helpPage += q_("By pressing the 'Configure telescopes...' button in the {'Slew to' window} (opened by pressing <b>Ctrl+0</b> or the respective button on the bottom toolbar).").replace(a_rx, "<a href=\"#slew_to\">\\1</a>");
+	helpPage += (q_("By pressing the 'Configure telescopes...' button in the {'Slew to' window} (opened by pressing <b>%1+0</b> or the respective button on the bottom toolbar).").arg(modifierNameCtrl)).replace(a_rx, "<a href=\"#slew_to\">\\1</a>");
 	helpPage += "</li></ul>";
 	helpPage += "<p>" + q_("The <b>Telescopes</b> tab displays a list of the telescope connections that have been set up:") + "</p><ul>";
-	helpPage += "<li>" + q_("The number (<b>#</b>) column shows the number used to control this telescope. For example, for telescope #2, the shortcut is Ctrl+2.") + "</li>";
+	helpPage += "<li>" + q_("The number (<b>#</b>) column shows the number used to control this telescope. For example, for telescope #2, the shortcut is %1+2.").arg(modifierNameCtrl) + "</li>";
 	helpPage += "<li>" + q_("The <b>Status</b> column indicates if this connection is currently active or not. Unfortunately, there are some cases in which 'Connected' is displayed when no working connection exists.") + "</li>";
 	helpPage += "<li>" + q_("The <b>Type</b> field indicates what kind of connection is this:") + "</li><ul>";
 	helpPage += "<li>";
@@ -356,7 +367,7 @@ void TelescopeDialog::setAboutText()
 	helpPage += "</li>";
 	helpPage += "<li>";
 	// TRANSLATORS: The text between braces is the text of an HTML link.
-	helpPage += q_("<b>local, Stellarium</b> means a DIRECT connection to the telescope (see {above});").replace(a_rx, "<a href=\"#usingthisplugin\">\\1</a>");
+	helpPage += q_("<b>direct, Stellarium</b> means a DIRECT connection to the telescope (see {above});").replace(a_rx, "<a href=\"#usingthisplugin\">\\1</a>");
 	helpPage += "</li>";
 	helpPage += "<li>" + q_("<b>local, external</b> means an INDIRECT connection to a program running on the same computer;") + "</li>";
 	helpPage += "<li>" + q_("<b>remote, unknown</b> means an INDIRECT connection over a network to a remote machine.") + "</li></ul></li></ul>";
@@ -371,7 +382,7 @@ void TelescopeDialog::setAboutText()
 	helpPage += q_("The topmost field represents the choice between the two types of connections (see {above}):").replace(a_rx, "<a href=\"#usingthisplugin\">\\1</a>");
 	helpPage += "</p>";
 	helpPage += "<p><b>" + q_("Telescope controlled by:") + "</b></p><ul>";
-	helpPage += "<li>" + q_("<b>Stellarium, directly through a serial port</b> is the DIRECT case") + "</li>";
+	helpPage += "<li>" + q_("<b>Stellarium, directly (serial port or network)</b> is the DIRECT case. LX200-compatible and NexStar-compatible mounts can be connected either through a serial port or over a TCP/IP network (see {Device settings}).").replace(a_rx, "<a href=\"#device_settings\">\\1</a>") + "</li>";
 	helpPage += "<li>" + q_("<b>External software or a remote computer</b> is the INDIRECT case") + "</li>";
 	helpPage += "<li>";
 	// TRANSLATORS: The text between braces is the text of an HTML link.
@@ -392,6 +403,10 @@ void TelescopeDialog::setAboutText()
 	// TRANSLATORS: The text between braces is the text of an HTML link.
 	helpPage += q_("This section is active only for DIRECT connections (see {above}).").replace(a_rx, "<a href=\"#usingthisplugin\">\\1</a>");
 	helpPage += "</p>";
+	helpPage += "<p>";
+	// TRANSLATORS: The text between braces is the text of an HTML link.
+	helpPage += q_("<b>Connection</b> selects how Stellarium reaches the telescope. Choose <b>Serial port</b> for a device attached through a serial or USB cable. For LX200-compatible and NexStar-compatible mounts you can instead choose <b>Network (TCP)</b> to talk to the telescope over TCP/IP - for example a Wi-Fi/Ethernet adapter or a software bridge that exposes the Meade LX200 or Celestron NexStar protocol on a network port.");
+	helpPage += "</p>";
 	helpPage += "<p>" + q_("<b>Serial port</b> sets the serial port used by the telescope.") + "</p>";
 	helpPage += "<p>" + q_("There is a pop-up box that suggests some default values:") + "</p><ul>";
 	helpPage += "<li>" + q_("On Windows, serial ports COM1 to COM10;") + "</li>";
@@ -404,6 +419,7 @@ void TelescopeDialog::setAboutText()
 	// TRANSLATORS: The text between braces is the text of an HTML link.
 	helpPage += q_("<b>Device model</b>: see {Supported devices} below.").replace(a_rx, "<a href=\"#devices\">\\1</a>");
 	helpPage += "</p>";
+	helpPage += "<p>" + q_("When <b>Network (TCP)</b> is selected, the <b>Serial port</b> field is replaced by <b>Host</b> and <b>Port</b> fields: enter the host name or IP address of the telescope (or of the computer running the network bridge) and the TCP port it is listening on. The <b>Network (TCP)</b> option is available for LX200-compatible and NexStar-compatible device models.") + "</p>";
 	helpPage += "<p><a href=\"#top\"><small>[" + q_("Back to top") + "]</small></a></p>";
 
 	helpPage += "<h4><a name=\"connection_settings\" />" + q_("Connection settings") + "</h4>";
@@ -435,7 +451,7 @@ void TelescopeDialog::setAboutText()
 	helpPage += "<p><a href=\"#top\"><small>[" + q_("Back to top") + "]</small></a></p>";
 
 	helpPage += "<h3><a name=\"slew_to\" />" + q_("'Slew telescope to' window") + "</h3>";
-	helpPage += "<p>" + q_("The 'Slew telescope to' window can be opened by pressing <b>Ctrl+0</b> or the respective button in the bottom toolbar.") + "</p>";
+	helpPage += "<p>" + q_("The 'Slew telescope to' window can be opened by pressing <b>%1+0</b> or the respective button in the bottom toolbar.").arg(modifierNameCtrl) + "</p>";
 	helpPage += "<p>" + q_("It contains two fields for entering celestial coordinates, selectors for the preferred format (Hours-Minutes-Seconds, Degrees-Minutes-Seconds, or Decimal degrees), a drop-down list and two buttons.") + "</p>";
 	helpPage += "<p>" + q_("The drop-down list contains the names of the currently connected devices.") + " ";
 	helpPage += q_("If no devices are connected, it will remain empty, and the 'Slew' button will be disabled.") + "</p>";
@@ -447,23 +463,21 @@ void TelescopeDialog::setAboutText()
 	// TRANSLATORS: The text between braces is the text of an HTML link.
 	helpPage += q_("Pressing the <b>Configure telescopes...</b> button opens the {main window} of the plug-in.").replace(a_rx, "<a href=\"#mainwindow\">\\1</a>");
 	helpPage += "</p>";
-	helpPage += "<p>" + q_("<b>TIP:</b> Inside the 'Slew' window, underlined letters indicate that pressing 'Alt + underlined letter' can be used instead of clicking.") + " ";
-	helpPage +=  q_("For example, pressing <b>Alt+S</b> is equivalent to clicking the 'Slew' button, pressing <b>Alt+E</b> switches to decimal degree format, etc.") + "</p>";
 	helpPage += "<p><a href=\"#top\"><small>[" + q_("Back to top") + "]</small></a></p>";
 
 	helpPage += "<h3><a name=\"commands\" />" + q_("Sending commands") + "</h3>";
 	helpPage += "<p>" + q_("Once a telescope is successfully started/connected, Stellarium displays a telescope reticle labelled with the telescope's name on its current position in the sky.")
 		 + " " + q_("The reticle is an object like every other in Stellarium - it can be selected with the mouse, it can be tracked and it appears as an object in the 'Search' window.") + "</p>";
-	helpPage += "<p>" + q_("<b>To point a device to an object:</b> Select an object (e.g. a star) and press the number of the device while holding down the <b>Ctrl</b> key.")
-		 + " (" + q_("For example, Ctrl+1 for telescope #1.") + ") "
+	helpPage += "<p>" + q_("<b>To point a device to an object:</b> Select an object (e.g. a star) and press the number of the device while holding down the <b>%1</b> key.").arg(modifierNameCtrl)
+		 + " (" + q_("For example, %1+1 for telescope #1.").arg(modifierNameCtrl) + ") "
 		 + q_("This will move the telescope to the selected object.") + "</p>";
-	helpPage += "<p>" + q_("<b>To point a device to the center of the view:</b> Press the number of the device while holding down the <b>Alt</b> key.")
-		 + " (" + q_("For example, Alt+1 for telescope #1.") + ") "
+	helpPage += "<p>" + q_("<b>To point a device to the center of the view:</b> Press the number of the device while holding down the <b>%1</b> key.").arg(modifierNameAlt)
+		 + " (" + q_("For example, %1+1 for telescope #1.").arg(modifierNameAlt) + ") "
 		 + q_("This will slew the device to the point in the center of the current view.")
 		 + " (" + q_("If you move the view after issuing the command, the target won't change unless you issue another command.") + ")</p>";
 	helpPage += "<p>";
 	// TRANSLATORS: The text between braces is the text of an HTML link.
-	helpPage += q_("<b>To point a device to a given set of coordinates:</b> Use the {'Slew to' window} (press <b>Ctrl+0</b>).").replace(a_rx, "<a href=\"#slew_to\">\\1</a>");
+	helpPage += q_("<b>To point a device to a given set of coordinates:</b> Use the {'Slew to' window} (press <b>%1+0</b>).").arg(modifierNameCtrl).replace(a_rx, "<a href=\"#slew_to\">\\1</a>");
 	helpPage += "</p>";
 	helpPage += "<p><a href=\"#top\"><small>[" + q_("Back to top") + "]</small></a></p>";
 
@@ -472,6 +486,7 @@ void TelescopeDialog::setAboutText()
 	// TRANSLATORS: The text between braces is the text of an HTML link.
 	helpPage += q_("All devices listed in the {'Device model' list} are convenience definitions using one of the two built-in interfaces: the Meade LX200 (the Meade Autostar controller) interface and the Celestron NexStar interface.").replace(a_rx, "<a href=\"#device_settings\">\\1</a>");
 	helpPage += "</p>";
+	helpPage += "<p>" + q_("Devices using the Meade LX200 or Celestron NexStar interface can be connected either through a serial/USB port or over a TCP/IP network.") + "</p>";
 	helpPage += "<p>" + q_("The device list contains the following:") + "</p><dl>";
 	helpPage += "<dt><b>Celestron NexStar (compatible)</b></dt><dd>" + q_("Any device using the NexStar interface.") + "</dd>";
 	helpPage += "<dt><b>Losmandy G-11</b></dt><dd>" + q_("A computerized telescope mount made by Losmandy (Meade LX-200/Autostar interface).") + "</dd>";
@@ -497,7 +512,7 @@ void TelescopeDialog::setAboutText()
 	helpPage += "</p>";
 	helpPage += "<p>";
 	// TRANSLATORS: The text between braces is the text of an HTML link.
-	helpPage += q_("This feature is equivalent to the 'Dummy' type of telescope supported by {Stellarium's original telescope control feature}.").replace(a_rx, "<a href=\"http://stellarium.sourceforge.net/wiki/index.php/Telescope_Control_%28client-server%29\">\\1</a>");
+	helpPage += q_("This feature is equivalent to the 'Dummy' type of telescope supported by Stellarium's original telescope control feature (~2006).");
 	helpPage += "</p>";
 	helpPage += "<p><a href=\"#top\"><small>[" + q_("Back to top") + "]</small></a></p>";
 
@@ -515,13 +530,13 @@ void TelescopeDialog::setAboutText()
 
 void TelescopeDialog::setHeaderNames()
 {
-	QStringList headerStrings;
-	// TRANSLATORS: Symbol for "number"
-	headerStrings << q_("#");
-	//headerStrings << "Start";
-	headerStrings << q_("Status");
-	headerStrings << q_("Type");
-	headerStrings << q_("Name");
+	const QStringList headerStrings = {
+		// TRANSLATORS: Symbol for "number"
+		qc_("#", "numero sign"),
+		//"Start";
+		q_("Status"),
+		q_("Type"),
+		q_("Name")};
 	telescopeListModel->setHorizontalHeaderLabels(headerStrings);
 }
 
@@ -530,13 +545,15 @@ void TelescopeDialog::updateWarningTexts()
 	QString text;
 	if (telescopeCount > 0)
 	{
-#ifdef Q_OS_MAC
-		QString modifierName = "Command";
+#ifdef Q_OS_MACOS
+		QString modifierNameCtrl = "⌘"; // Command key
+		QString modifierNameAlt = "⌥"; // Option key
 #else
-		QString modifierName = "Ctrl";
+		QString modifierNameCtrl = "Ctrl";
+		QString modifierNameAlt = "Alt";
 #endif
 		
-		text = QString(q_("To slew a connected telescope to an object (for example, a star), select that object, then hold down the %1 key and press the key with that telescope's number. To slew it to the center of the current view, hold down the Alt key and press the key with that telescope's number.")).arg(modifierName);
+		text = QString(q_("To slew a connected telescope to an object (for example, a star), select that object, then hold down the %1 key and press the key with that telescope's number. To slew it to the center of the current view, hold down the %2 key and press the key with that telescope's number.")).arg(modifierNameCtrl, modifierNameAlt);
 	}
 	else
 	{
@@ -555,53 +572,34 @@ void TelescopeDialog::updateWarningTexts()
 	ui->labelWarning->setText(text);
 }
 
-QString TelescopeDialog::getTypeLabel(ConnectionType type)
+QString TelescopeDialog::getTypeLabel(TelescopeControl::ConnectionType type)
 {
-	QString typeLabel;
-	switch (type)
-	{
-		case ConnectionInternal:
-			// TRANSLATORS: Telescope connection type
-			typeLabel = N_("local, Stellarium");
-			break;
-		case ConnectionLocal:
-			// TRANSLATORS: Telescope connection type
-			typeLabel = N_("local, external");
-			break;
-		case ConnectionRemote:
-			// TRANSLATORS: Telescope connection type
-			typeLabel = N_("remote, unknown");
-			break;
-		case ConnectionVirtual:
-			// TRANSLATORS: Telescope connection type
-			typeLabel = N_("virtual");
-			break;
-		case ConnectionRTS2:
-			// TRANSLATORS: Telescope connection type
-			typeLabel = N_("remote, RTS2");
-			break;
-		case ConnectionINDI:
-			// TRANSLATORS: Telescope connection type
-			typeLabel = N_("remote, INDI/INDIGO");
-			break;
-		case ConnectionASCOM:
-			// TRANSLATORS: Telescope connection type
-			typeLabel = N_("local, ASCOM");
-			break;
-		default:
-			;
-	}
-	return typeLabel;
+	static const QMap<TelescopeControl::ConnectionType, QString>map={
+		// TRANSLATORS: Telescope connection type
+		{ TelescopeControl::ConnectionInternal, N_("direct, Stellarium")},
+		// TRANSLATORS: Telescope connection type
+		{ TelescopeControl::ConnectionLocal, N_("local, external")},
+		// TRANSLATORS: Telescope connection type
+		{ TelescopeControl::ConnectionRemote, N_("remote, unknown")},
+		// TRANSLATORS: Telescope connection type
+		{TelescopeControl::ConnectionVirtual, N_("virtual")},
+		// TRANSLATORS: Telescope connection type
+		{TelescopeControl::ConnectionRTS2, N_("remote, RTS2")},
+		// TRANSLATORS: Telescope connection type
+		{TelescopeControl::ConnectionINDI, N_("remote, INDI/INDIGO")},
+		// TRANSLATORS: Telescope connection type
+		{TelescopeControl::ConnectionASCOM, N_("local, ASCOM")}};
+	return map.value(type, "");
 }
 
 void TelescopeDialog::addModelRow(int number,
-                                  ConnectionType type,
-                                  TelescopeStatus status,
-                                  const QString& name)
+				  TelescopeControl::ConnectionType type,
+				  TelescopeControl::TelescopeStatus status,
+				  const QString& name)
 {
 	Q_ASSERT(telescopeListModel);
 	
-	QStandardItem* tempItem = Q_NULLPTR;
+	QStandardItem* tempItem = nullptr;
 	int lastRow = telescopeListModel->rowCount();
 	// Number
 	tempItem = new QStandardItem(QString::number(number));
@@ -618,7 +616,7 @@ void TelescopeDialog::addModelRow(int number,
 	//telescopeListModel->setItem(lastRow, ColumnStartup, tempItem);//Start-up checkbox
 	
 	//Status
-	tempItem = new QStandardItem(q_(statusString[status]));
+	tempItem = new QStandardItem(q_(statusString.value((status))));
 	tempItem->setEditable(false);
 	telescopeListModel->setItem(lastRow, ColumnStatus, tempItem);
 	
@@ -636,9 +634,9 @@ void TelescopeDialog::addModelRow(int number,
 }
 
 void TelescopeDialog::updateModelRow(int rowNumber,
-                                     ConnectionType type,
-                                     TelescopeStatus status,
-                                     const QString& name)
+				     TelescopeControl::ConnectionType type,
+				     TelescopeControl::TelescopeStatus status,
+				     const QString& name)
 {
 	Q_ASSERT(telescopeListModel);
 	if (rowNumber > telescopeListModel->rowCount())
@@ -662,7 +660,7 @@ void TelescopeDialog::updateModelRow(int rowNumber,
 }
 
 
-void TelescopeDialog::selectTelecope(const QModelIndex & index)
+void TelescopeDialog::selectTelescope(const QModelIndex & index)
 {
 	//Extract selected item index
 	int selectedSlot = telescopeListModel->data( telescopeListModel->index(index.row(),0) ).toInt();
@@ -678,22 +676,22 @@ void TelescopeDialog::configureTelescope(const QModelIndex & currentIndex)
 	configuredSlot = telescopeListModel->data( telescopeListModel->index(currentIndex.row(), ColumnSlot) ).toInt();
 	
 	//Stop the telescope first if necessary
-	if(telescopeType[configuredSlot] != ConnectionInternal && telescopeStatus[configuredSlot] != StatusDisconnected)
+	if(connectionTypes[configuredSlot] != TelescopeControl::ConnectionInternal && telescopeStatus[configuredSlot] != TelescopeControl::StatusDisconnected)
 	{
 		if(telescopeManager->stopTelescopeAtSlot(configuredSlot)) //Act as "Disconnect"
-				telescopeStatus[configuredSlot] = StatusDisconnected;
+			telescopeStatus[configuredSlot] = TelescopeControl::StatusDisconnected;
 		else
 			return;
 	}
-	else if(telescopeStatus[configuredSlot] != StatusStopped)
+	else if(telescopeStatus[configuredSlot] != TelescopeControl::StatusStopped)
 	{
 		if(telescopeManager->stopTelescopeAtSlot(configuredSlot)) //Act as "Stop"
-					telescopeStatus[configuredSlot] = StatusStopped;
+			telescopeStatus[configuredSlot] = TelescopeControl::StatusStopped;
 	}
 	//Update the status in the list
 	int curRow = ui->telescopeTreeView->currentIndex().row();
 	QModelIndex curIndex = telescopeListModel->index(curRow, ColumnStatus);
-	QString string = q_(statusString[telescopeStatus[configuredSlot]]);
+	QString string = q_(statusString.value(telescopeStatus[configuredSlot]));
 	telescopeListModel->setData(curIndex, string, Qt::DisplayRole);
 	
 	setVisible(false);
@@ -712,37 +710,37 @@ void TelescopeDialog::buttonChangeStatusPressed()
 	
 	//TODO: As most of these are asynchronous actions, it looks like that there should be a queue...
 	
-	if(telescopeType[selectedSlot] != ConnectionInternal) 
+	if(connectionTypes[selectedSlot] != TelescopeControl::ConnectionInternal)
 	{
 		//Can't be launched by Stellarium -> can't be stopped by Stellarium
 		//Can be only connected/disconnected
-		if(telescopeStatus[selectedSlot] == StatusDisconnected)
+		if(telescopeStatus[selectedSlot] == TelescopeControl::StatusDisconnected)
 		{
 			if(telescopeManager->startTelescopeAtSlot(selectedSlot)) //Act as "Connect"
-				telescopeStatus[selectedSlot] = StatusConnecting;
+				telescopeStatus[selectedSlot] = TelescopeControl::StatusConnecting;
 		}
 		else
 		{
 			if(telescopeManager->stopTelescopeAtSlot(selectedSlot)) //Act as "Disconnect"
-				telescopeStatus[selectedSlot] = StatusDisconnected;
+				telescopeStatus[selectedSlot] = TelescopeControl::StatusDisconnected;
 		}
 	}
 	else
 	{
 		switch(telescopeStatus[selectedSlot]) //Why the switch?
 		{
-			case StatusNA:
-			case StatusStopped:
+			case TelescopeControl::StatusNA:
+			case TelescopeControl::StatusStopped:
 			{
 				if(telescopeManager->startTelescopeAtSlot(selectedSlot)) //Act as "Start"
-					telescopeStatus[selectedSlot] = StatusConnecting;
+					telescopeStatus[selectedSlot] = TelescopeControl::StatusConnecting;
 			}
 			break;
-			case StatusConnecting:
-			case StatusConnected:
+			case TelescopeControl::StatusConnecting:
+			case TelescopeControl::StatusConnected:
 			{
 				if(telescopeManager->stopTelescopeAtSlot(selectedSlot)) //Act as "Stop"
-					telescopeStatus[selectedSlot] = StatusStopped;
+					telescopeStatus[selectedSlot] = TelescopeControl::StatusStopped;
 			}
 			break;
 			default:
@@ -753,7 +751,7 @@ void TelescopeDialog::buttonChangeStatusPressed()
 	//Update the status in the list
 	int curRow = ui->telescopeTreeView->currentIndex().row();
 	QModelIndex curIndex = telescopeListModel->index(curRow, ColumnStatus);
-	QString string = q_(statusString[telescopeStatus[selectedSlot]]);
+	QString string = q_(statusString.value(telescopeStatus[selectedSlot]));
 	telescopeListModel->setData(curIndex, string, Qt::DisplayRole);
 }
 
@@ -765,16 +763,16 @@ void TelescopeDialog::buttonConfigurePressed()
 
 void TelescopeDialog::buttonAddPressed()
 {
-	if(telescopeCount >= SLOT_COUNT)
+	if(telescopeCount >= TelescopeControl::SLOT_COUNT)
 		return;
 	
 	configuredTelescopeIsNew = true;
 	
 	//Find the first unoccupied slot (there is at least one)
-	for (configuredSlot = MIN_SLOT_NUMBER; configuredSlot < SLOT_NUMBER_LIMIT; configuredSlot++)
+	for (configuredSlot = TelescopeControl::MIN_SLOT_NUMBER; configuredSlot < TelescopeControl::SLOT_NUMBER_LIMIT; configuredSlot++)
 	{
 		//configuredSlot = (i+1)%SLOT_COUNT;
-		if(telescopeStatus[configuredSlot] == StatusNA)
+		if(telescopeStatus[configuredSlot] == TelescopeControl::StatusNA)
 			break;
 	}
 	
@@ -798,19 +796,21 @@ void TelescopeDialog::buttonRemovePressed()
 		if(!telescopeManager->removeTelescopeAtSlot(selectedSlot))
 		{
 			//TODO: Add debug
+			qCWarning(Telescopes) << "Cannot remove telescope at slot" << selectedSlot;
 			return;
 		}
 	}
 	else
 	{
 		//TODO: Add debug
+		qCWarning(Telescopes) << "Cannot stop telescope at slot" << selectedSlot << ". Rejecting removal.";
 		return;
 	}
 	
 	//Save the changes to file
 	telescopeManager->saveTelescopes();
 	
-	telescopeStatus[selectedSlot] = StatusNA;
+	telescopeStatus[selectedSlot] = TelescopeControl::StatusNA;
 	telescopeCount -= 1;
 	
 //Update the interface to reflect the changes:
@@ -823,7 +823,7 @@ void TelescopeDialog::buttonRemovePressed()
 	telescopeListModel->removeRow(ui->telescopeTreeView->currentIndex().row());
 	
 	//If there are less than the maximal number of telescopes now, new ones can be added
-	if(telescopeCount < SLOT_COUNT)
+	if(telescopeCount < TelescopeControl::SLOT_COUNT)
 		ui->pushButtonAdd->setEnabled(true);
 	
 	//If there are no telescopes left, disable some buttons
@@ -843,35 +843,35 @@ void TelescopeDialog::buttonRemovePressed()
 	updateWarningTexts();
 }
 
-void TelescopeDialog::saveChanges(QString name, ConnectionType type)
+void TelescopeDialog::saveChanges(QString name, TelescopeControl::ConnectionType type)
 {
 	//Save the changes to file
 	telescopeManager->saveTelescopes();
 	
 	//Type and server properties
-	telescopeType[configuredSlot] = type;
+	connectionTypes[configuredSlot] = type;
 	switch (type)
 	{
-		case ConnectionVirtual:
-			telescopeStatus[configuredSlot] = StatusStopped;
+		case TelescopeControl::ConnectionVirtual:
+			telescopeStatus[configuredSlot] = TelescopeControl::StatusStopped;
 			break;
 
-		case ConnectionInternal:
+		case TelescopeControl::ConnectionInternal:
 			if(configuredTelescopeIsNew)
-				telescopeStatus[configuredSlot] = StatusStopped;//TODO: Is there a point? Isn't it better to force the status update method?
+				telescopeStatus[configuredSlot] = TelescopeControl::StatusStopped;//TODO: Is there a point? Isn't it better to force the status update method?
 			break;
 
-		case ConnectionLocal:
-			telescopeStatus[configuredSlot] = StatusDisconnected;
+		case TelescopeControl::ConnectionLocal:
+			telescopeStatus[configuredSlot] = TelescopeControl::StatusDisconnected;
 			break;
 
-		case ConnectionRemote:
+		case TelescopeControl::ConnectionRemote:
 		default:
-			telescopeStatus[configuredSlot] = StatusDisconnected;
+			telescopeStatus[configuredSlot] = TelescopeControl::StatusDisconnected;
 	}
 	
 	//Update the model/list
-	TelescopeStatus status = telescopeStatus[configuredSlot];
+	TelescopeControl::TelescopeStatus status = telescopeStatus[configuredSlot];
 	if(configuredTelescopeIsNew)
 	{
 		addModelRow(configuredSlot, type, status, name);
@@ -886,7 +886,7 @@ void TelescopeDialog::saveChanges(QString name, ConnectionType type)
 	ui->telescopeTreeView->sortByColumn(ColumnSlot, Qt::AscendingOrder);
 	
 	//Can't add more telescopes if they have reached the maximum number
-	if (telescopeCount >= SLOT_COUNT)
+	if (telescopeCount >= TelescopeControl::SLOT_COUNT)
 		ui->pushButtonAdd->setEnabled(false);
 	
 	//
@@ -917,7 +917,7 @@ void TelescopeDialog::discardChanges()
 	configurationDialog.setVisible(false);
 	setVisible(true);//Brings the current window to the foreground
 	
-	if (telescopeCount >= SLOT_COUNT)
+	if (telescopeCount >= TelescopeControl::SLOT_COUNT)
 		ui->pushButtonAdd->setEnabled(false);
 	if (telescopeCount == 0)
 		ui->pushButtonRemove->setEnabled(false);
@@ -934,26 +934,26 @@ void TelescopeDialog::updateTelescopeStates()
 	for (int i=0; i<(telescopeListModel->rowCount()); i++)
 	{
 		slotNumber = telescopeListModel->data( telescopeListModel->index(i, ColumnSlot) ).toInt();
-		//TODO: Check if these cover all possibilites
+		//TODO: Check if these cover all possibilities
 		if (telescopeManager->isConnectedClientAtSlot(slotNumber))
 		{
-			telescopeStatus[slotNumber] = StatusConnected;
+			telescopeStatus[slotNumber] = TelescopeControl::StatusConnected;
 		}
 		else if(telescopeManager->isExistingClientAtSlot(slotNumber))
 		{
-			telescopeStatus[slotNumber] = StatusConnecting;
+			telescopeStatus[slotNumber] = TelescopeControl::StatusConnecting;
 		}
 		else
 		{
-			if(telescopeType[slotNumber] == ConnectionInternal)
-				telescopeStatus[slotNumber] = StatusStopped;
+			if(connectionTypes[slotNumber] == TelescopeControl::ConnectionInternal)
+				telescopeStatus[slotNumber] = TelescopeControl::StatusStopped;
 			else
-				telescopeStatus[slotNumber] = StatusDisconnected;
+				telescopeStatus[slotNumber] = TelescopeControl::StatusDisconnected;
 		}
 		
 		//Update the status in the list
 		QModelIndex index = telescopeListModel->index(i, ColumnStatus);
-		QString statusStr = q_(statusString[telescopeStatus[slotNumber]]);
+		QString statusStr = q_(statusString.value(telescopeStatus[slotNumber]));
 		telescopeListModel->setData(index, statusStr, Qt::DisplayRole);
 	}
 	
@@ -967,11 +967,11 @@ void TelescopeDialog::updateTelescopeStates()
 
 void TelescopeDialog::updateStatusButtonForSlot(int selectedSlot)
 {
-	if(telescopeType[selectedSlot] != ConnectionInternal)
+	if(connectionTypes[selectedSlot] != TelescopeControl::ConnectionInternal)
 	{
 		//Can't be launched by Stellarium => can't be stopped by Stellarium
 		//Can be only connected/disconnected
-		if(telescopeStatus[selectedSlot] == StatusDisconnected)
+		if(telescopeStatus[selectedSlot] == TelescopeControl::StatusDisconnected)
 		{
 			setStatusButtonToConnect();
 			ui->pushButtonChangeStatus->setEnabled(true);
@@ -986,13 +986,13 @@ void TelescopeDialog::updateStatusButtonForSlot(int selectedSlot)
 	{
 		switch(telescopeStatus[selectedSlot])
 		{
-			case StatusNA:
-			case StatusStopped:
+			case TelescopeControl::StatusNA:
+			case TelescopeControl::StatusStopped:
 				setStatusButtonToStart();
 				ui->pushButtonChangeStatus->setEnabled(true);
 				break;
-			case StatusConnected:
-			case StatusConnecting:
+			case TelescopeControl::StatusConnected:
+			case TelescopeControl::StatusConnecting:
 				setStatusButtonToStop();
 				ui->pushButtonChangeStatus->setEnabled(true);
 				break;
@@ -1044,14 +1044,9 @@ void TelescopeDialog::updateStyle()
 	}
 }
 
-void TelescopeDialog::checkBoxUseExecutablesToggled(bool useExecutables)
-{
-	telescopeManager->setFlagUseServerExecutables(useExecutables);
-}
-
 void TelescopeDialog::buttonBrowseServerDirectoryPressed()
 {
-	QString newPath = QFileDialog::getExistingDirectory (Q_NULLPTR, QString(q_("Select a directory")), telescopeManager->getServerExecutablesDirectoryPath());
+	QString newPath = QFileDialog::getExistingDirectory (&StelMainView::getInstance(), QString(q_("Select a directory")), telescopeManager->getServerExecutablesDirectoryPath());
 	//TODO: Validation? Directory exists and contains servers?
 	if(!newPath.isEmpty())
 	{

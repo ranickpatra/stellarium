@@ -87,11 +87,11 @@ QStringList AztecTonalpohualliCalendar::getDateStrings() const
 // set date from a vector of calendar date elements sorted from the largest to the smallest.
 // month-day
 // We face a problem as the year is not unique. We can only find the date before current JD which matches the parts.
-void AztecTonalpohualliCalendar::setDate(QVector<int> parts)
+void AztecTonalpohualliCalendar::setDate(const QVector<int> &parts)
 {
 	this->parts=parts;
 
-	const int rdOnOrBefore=aztecTonalpohualliOnOrBefore(parts, fixedFromJD(JD));
+	const int rdOnOrBefore=aztecTonalpohualliOnOrBefore(parts, fixedFromJD(JD, true));
 	// restore time from JD!
 	double frac=StelUtils::fmodpos(JD+0.5+StelApp::getInstance().getCore()->getUTCOffset(JD)/24., 1.);
 	JD=jdFromFixed(rdOnOrBefore+frac, true);

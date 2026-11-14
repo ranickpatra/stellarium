@@ -99,7 +99,7 @@ QString IslamicCalendar::getFormattedDateString() const
 // set date from a vector of calendar date elements sorted from the largest to the smallest.
 // Year-Month[1...12]-Day[1...30]
 // Time is not changed!
-void IslamicCalendar::setDate(QVector<int> parts)
+void IslamicCalendar::setDate(const QVector<int> &parts)
 {
 	this->parts=parts;
 
@@ -111,11 +111,11 @@ void IslamicCalendar::setDate(QVector<int> parts)
 	emit jdChanged(JD);
 }
 
-int IslamicCalendar::fixedFromIslamic(QVector<int> islamic)
+int IslamicCalendar::fixedFromIslamic(const QVector<int> &islamic)
 {
-	const int year  = islamic.at(0);
-	const int month = islamic.at(1);
-	const int day   = islamic.at(2);
+	const int year  = islamic.value(0);
+	const int month = islamic.value(1);
+	const int day   = islamic.value(2);
 	int rd=islamicEpoch-1+(year-1)*354;
 	rd += StelUtils::intFloorDiv(3+11*year, 30);
 	rd += 29*(month-1);

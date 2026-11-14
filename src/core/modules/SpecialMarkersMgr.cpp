@@ -18,8 +18,10 @@
  */
 
 #include "SpecialMarkersMgr.hpp"
+#include "Planet.hpp"
 #include "StelApp.hpp"
 #include "StelCore.hpp"
+#include "StelUtils.hpp"
 #include "StelPainter.hpp"
 #include "StelProjector.hpp"
 #include "StelFader.hpp"
@@ -40,7 +42,7 @@ public:
 		COMPASS_MARKS
 	};
 	SpecialSkyMarker(SKY_MARKER_TYPE _marker_type = FOV_CENTER);
-	virtual ~SpecialSkyMarker();
+	virtual ~SpecialSkyMarker(){}
 	void draw(StelCore* core) const;
 	void setColor(const Vec3f& c) {color = c;}
 	const Vec3f& getColor() const {return color;}
@@ -54,6 +56,9 @@ public:
 	bool isDisplayed() const {return fader;}
 
 private:
+	void drawFoVRect(const StelProjectorP& projector, const Mat4f& derotate,
+			 double fovX, double fovY) const;
+
 	SKY_MARKER_TYPE marker_type;
 	Vec3f color;
 	Vec2d angularSize;
@@ -77,9 +82,65 @@ SpecialSkyMarker::SpecialSkyMarker(SKY_MARKER_TYPE _marker_type) : marker_type(_
 	}
 }
 
-SpecialSkyMarker::~SpecialSkyMarker()
+void SpecialSkyMarker::drawFoVRect(const StelProjectorP& projector, const Mat4f& derotate,
+				   const double fovX, const double fovY) const
 {
-	//
+	StelPainter sPainter(projector);
+	sPainter.setLineSmooth(true);
+	sPainter.setBlending(true);
+	sPainter.setColor(color, fader.getInterstate());
+
+	const float tanFovX = std::tan(fovX/2);
+	const float tanFovY = std::tan(fovY/2);
+
+	const int numPointsPerLine = 30;
+
+	sPainter.enableClientStates(true);
+
+	std::vector<Vec2f> lineLoopPoints;
+	lineLoopPoints.reserve(numPointsPerLine * 4);
+	// Left line
+	for(int n = 0; n < numPointsPerLine; ++n)
+	{
+		const auto x = 1;
+		const auto y = tanFovX;
+		const auto z = tanFovY * (2.f / (numPointsPerLine - 1) * n - 1);
+		Vec3f win;
+		projector->project(derotate * Vec3f(x,y,z), win);
+		lineLoopPoints.push_back(Vec2f(win[0], win[1]));
+	}
+	// Top line
+	for(int n = 1; n < numPointsPerLine; ++n)
+	{
+		const auto x = 1;
+		const auto y = -tanFovX * (2.f / (numPointsPerLine - 1) * n - 1);
+		const auto z = tanFovY;
+		Vec3f win;
+		projector->project(derotate * Vec3f(x,y,z), win);
+		lineLoopPoints.push_back(Vec2f(win[0], win[1]));
+	}
+	// Right line
+	for(int n = 1; n < numPointsPerLine; ++n)
+	{
+		const auto x = 1;
+		const auto y = -tanFovX;
+		const auto z = tanFovY * (1 - 2.f / (numPointsPerLine - 1) * n);
+		Vec3f win;
+		projector->project(derotate * Vec3f(x,y,z), win);
+		lineLoopPoints.push_back(Vec2f(win[0], win[1]));
+	}
+	// Bottom line
+	for(int n = 1; n < numPointsPerLine-1; ++n)
+	{
+		const auto x = 1;
+		const auto y = -tanFovX * (1 - 2.f / (numPointsPerLine - 1) * n);
+		const auto z = -tanFovY;
+		Vec3f win;
+		projector->project(derotate * Vec3f(x,y,z), win);
+		lineLoopPoints.push_back(Vec2f(win[0], win[1]));
+	}
+	sPainter.setVertexPointer(2, GL_FLOAT, lineLoopPoints.data());
+	sPainter.drawFromArray(StelPainter::LineLoop, lineLoopPoints.size(), 0, false);
 }
 
 void SpecialSkyMarker::draw(StelCore *core) const
@@ -92,7 +153,8 @@ void SpecialSkyMarker::draw(StelCore *core) const
 	// Initialize a painter and set openGL state
 	StelPainter sPainter(prj);
 	StelProjector::StelProjectorParams params = core->getCurrentStelProjectorParams();
-	sPainter.setColor(color, fader);
+	sPainter.setBlending(true);
+	sPainter.setColor(color, fader.getInterstate());
 	Vec2i centerScreen(prj->getViewportPosX() + prj->getViewportWidth() / 2, prj->getViewportPosY() + prj->getViewportHeight() / 2);
 
 	/////////////////////////////////////////////////
@@ -117,7 +179,7 @@ void SpecialSkyMarker::draw(StelCore *core) const
 		case FOV_CIRCULAR:
 		{
 			const double pixelsPerRad = static_cast<double>(prj->getPixelPerRadAtCenter());
-			sPainter.drawCircle(centerScreen[0], centerScreen[1], 0.5f * pixelsPerRad * static_cast<float>(M_PI/180) * (angularSize[0]));
+			sPainter.drawCircle(centerScreen[0], centerScreen[1], 0.5f * static_cast<float>((M_PI/180.) * pixelsPerRad * angularSize[0]));
 
 			/*
 			 * NOTE: uncomment the code for display FOV value in top right corner of marker
@@ -134,81 +196,70 @@ void SpecialSkyMarker::draw(StelCore *core) const
 			break;
 		case FOV_RECTANGULAR:
 		{
-			QPoint a, b;
-			//const double fovRatio = qMax(angularSize[0], angularSize[1])/static_cast<double>(params.fov);
-			const double pixelsPerRad = static_cast<double>(prj->getPixelPerRadAtCenter());
-			const double width = pixelsPerRad * angularSize[0] * M_PI/180 ;
-			const double height = pixelsPerRad * angularSize[1] * M_PI/180 ;
-			QTransform transform = QTransform().translate(centerScreen[0], centerScreen[1]).rotate(-rotationAngle);
-			// bottom line
-			a = transform.map(QPoint(static_cast<int>(-width*0.5), static_cast<int>(-height*0.5)));
-			b = transform.map(QPoint(static_cast<int>(width*0.5), static_cast<int>(-height*0.5)));
-			sPainter.drawLine2d(a.x(), a.y(), b.x(), b.y());
-			// top line
-			a = transform.map(QPoint(static_cast<int>(-width*0.5), static_cast<int>(height*0.5)));
-			b = transform.map(QPoint(static_cast<int>(width*0.5), static_cast<int>(height*0.5)));
-			sPainter.drawLine2d(a.x(), a.y(), b.x(), b.y());
-			// left line
-			a = transform.map(QPoint(static_cast<int>(-width*0.5), static_cast<int>(-height*0.5)));
-			b = transform.map(QPoint(static_cast<int>(-width*0.5), static_cast<int>(height*0.5)));
-			sPainter.drawLine2d(a.x(), a.y(), b.x(), b.y());
-			// right line
-			a = transform.map(QPoint(static_cast<int>(width*0.5), static_cast<int>(height*0.5)));
-			b = transform.map(QPoint(static_cast<int>(width*0.5), static_cast<int>(-height*0.5)));
-			sPainter.drawLine2d(a.x(), a.y(), b.x(), b.y());
-
-			/*
-			 * NOTE: uncomment the code for display FOV value in top right corner of marker
-			if (fovRatio>=0.25)
-			{
-				QString info = QString("%1%4x%2%4 @ %3%4").arg(QString::number(angularSize[0], 'f', 2)).arg(QString::number(angularSize[1], 'f', 2)).arg(QString::number(rotationAngle, 'f', 1)).arg(QChar(0x00B0));
-				a = transform.map(QPoint(qRound(width*0.5 - sPainter.getFontMetrics().width(info)*params.devicePixelsPerPixel), qRound(height*0.5 + 5.)));
-				sPainter.drawText(a.x(), a.y(), info, static_cast<float>(-rotationAngle));
-			}
-			*/
+			const auto proj = core->getProjection(StelCore::FrameAltAz,
+							      StelCore::RefractionMode::RefractionOff);
+			const auto centerPosX = proj->getViewportPosX() + proj->getViewportWidth() / 2;
+			const auto centerPosY = proj->getViewportPosY() + proj->getViewportHeight() / 2;
+			Vec3d centerPos3d;
+			proj->unProject(centerPosX, centerPosY, centerPos3d);
+			double azimuth, elevation;
+			StelUtils::rectToSphe(&azimuth, &elevation, centerPos3d);
+			const auto derotate = Mat4f::rotation(Vec3f(0,0,1), azimuth) *
+					      Mat4f::rotation(Vec3f(0,1,0), -elevation) *
+					      Mat4f::rotation(Vec3f(1,0,0), rotationAngle * (M_PI/180));
+			drawFoVRect(proj, derotate, angularSize[0] * M_PI/180, angularSize[1] * M_PI/180);
 		}
 			break;
 		case COMPASS_MARKS:
 		{
 			Vec3d pos, screenPos;
 			const int f = (StelApp::getInstance().getFlagSouthAzimuthUsage() ? 180 : 0);
-			const float ppx = core->getCurrentStelProjectorParams().devicePixelsPerPixel;
-			sPainter.setBlending(true);
+			const float ppx = static_cast<float>(core->getCurrentStelProjectorParams().devicePixelsPerPixel);
 			sPainter.setLineSmooth(true);
+			QFont font = QGuiApplication::font();
+			font.setPixelSize(StelApp::getInstance().getScreenFontSize());
+			sPainter.setFont(font);
 
 			for(int i=0; i<360; i++)
 			{
-				float a = i*M_PI/180;
-				pos.set(sin(a),cos(a), 0.f);
-				float h = -0.002;
+				double a = i*(M_PI/180);
+				pos.set(sin(a),cos(a), 0.);
+				double h = 6.; // height of tickmark endpoint, arcminutes
 				if (i % 15 == 0)
 				{
-					h = -0.02;  // the size of the mark every 15 degrees
+					h = 15.;  // the size of the mark every 15 degrees remains small: it is labeled!
 
-					QString s = QString("%1").arg((i+90+f)%360);
+					QString s = QString("%1°").arg((i+90+f)%360);
 
-					float shiftx = ppx*sPainter.getFontMetrics().width(s) / 2.;
-					float shifty = ppx*sPainter.getFontMetrics().height() / 2.;
-					sPainter.drawText(pos, s, 0, -shiftx, shifty);
+					Vec3d target(pos[0], pos[1], tan(h/60.*M_PI/180.)); target.normalize();
+					Vec3d screenPos, screenTgt;
+					prj->project(pos, screenPos);
+					prj->project(target, screenTgt);
+					double dx=screenTgt[0]-screenPos[0];
+					double dy=screenTgt[1]-screenPos[1];
+					float textAngle=static_cast<float>(atan2(dx, dy));
+					float wx = ppx*sPainter.getFontMetrics().boundingRect(s).width() *0.5f;
+					float wy = ppx*sPainter.getFontMetrics().height() *0.25f;
+
+					// Gravity labels look outright terrible here! Disable them.
+					sPainter.drawText(target, s, -textAngle*180.f/M_PI, -wx, wy, true);
 				}
 				else if (i % 5 == 0)
 				{
-					h = -0.01;  // the size of the mark every 5 degrees
+					h = 30.;  // the size of the mark every 5 degrees
 				}
 
 				// Limit arcs to those that are visible for improved performance
 				if (prj->project(pos, screenPos) &&
 				     screenPos[0]>prj->getViewportPosX() && screenPos[0] < prj->getViewportPosX() + prj->getViewportWidth()) {
-					sPainter.drawGreatCircleArc(pos, Vec3d(pos[0], pos[1], h), Q_NULLPTR);
+					Vec3d target(pos[0], pos[1], tan(h/60.*M_PI/180.)); target.normalize();
+					sPainter.drawGreatCircleArc(pos, target, Q_NULLPTR);
 				}
 			}
-			sPainter.setBlending(false);
-			sPainter.setLineSmooth(false);
 		}
 			break;
 	}
 }
-
 
 SpecialMarkersMgr::SpecialMarkersMgr()
 {
@@ -278,16 +329,20 @@ void SpecialMarkersMgr::update(double deltaTime)
 
 void SpecialMarkersMgr::draw(StelCore* core)
 {
+	if (!core->getFlagClearSky())
+		return;
 	fovCenterMarker->draw(core);
 	fovCircularMarker->draw(core);
 	fovRectangularMarker->draw(core);
-	compassMarks->draw(core);
+	if (core->getCurrentPlanet()->getPlanetType()!=Planet::isObserver)
+		compassMarks->draw(core);
 }
 
 void SpecialMarkersMgr::setFlagFOVCenterMarker(const bool displayed)
 {
 	if(displayed != fovCenterMarker->isDisplayed()) {
 		fovCenterMarker->setDisplayed(displayed);
+		StelApp::immediateSave("viewing/flag_fov_center_marker", displayed);
 		emit fovCenterMarkerDisplayedChanged(displayed);
 	}
 }
@@ -314,6 +369,7 @@ void SpecialMarkersMgr::setFlagFOVCircularMarker(const bool displayed)
 {
 	if(displayed != fovCircularMarker->isDisplayed()) {
 		fovCircularMarker->setDisplayed(displayed);
+		StelApp::immediateSave("viewing/flag_fov_circular_marker", displayed);
 		emit fovCircularMarkerDisplayedChanged(displayed);
 	}
 }
@@ -339,6 +395,7 @@ void SpecialMarkersMgr::setColorFOVCircularMarker(const Vec3f& newColor)
 void SpecialMarkersMgr::setFOVCircularMarkerSize(const double size)
 {
 	fovCircularMarker->setAngularSize(Vec2d(size, 0.));
+	StelApp::immediateSave("viewing/size_fov_circular_marker", size);
 	emit fovCircularMarkerSizeChanged(size);
 }
 
@@ -351,6 +408,7 @@ void SpecialMarkersMgr::setFlagFOVRectangularMarker(const bool displayed)
 {
 	if(displayed != fovRectangularMarker->isDisplayed()) {
 		fovRectangularMarker->setDisplayed(displayed);
+		StelApp::immediateSave("viewing/flag_fov_rectangular_marker", displayed);
 		emit fovRectangularMarkerDisplayedChanged(displayed);
 	}
 }
@@ -376,6 +434,7 @@ Vec3f SpecialMarkersMgr::getColorFOVRectangularMarker() const
 void SpecialMarkersMgr::setFOVRectangularMarkerWidth(const double size)
 {
 	fovRectangularMarker->setAngularSize(Vec2d(size, fovRectangularMarker->getAngularSize()[1]));
+	StelApp::immediateSave("viewing/width_fov_rectangular_marker", size);
 	emit fovRectangularMarkerWidthChanged(size);
 }
 
@@ -387,6 +446,7 @@ double SpecialMarkersMgr::getFOVRectangularMarkerWidth() const
 void SpecialMarkersMgr::setFOVRectangularMarkerHeight(const double size)
 {
 	fovRectangularMarker->setAngularSize(Vec2d(fovRectangularMarker->getAngularSize()[0], size));
+	StelApp::immediateSave("viewing/height_fov_rectangular_marker", size);
 	emit fovRectangularMarkerHeightChanged(size);
 }
 
@@ -398,6 +458,7 @@ double SpecialMarkersMgr::getFOVRectangularMarkerHeight() const
 void SpecialMarkersMgr::setFOVRectangularMarkerRotationAngle(const double angle)
 {
 	fovRectangularMarker->setRotationAngle(angle);
+	StelApp::immediateSave("viewing/rot_fov_rectangular_marker", angle);
 	emit fovRectangularMarkerRotationAngleChanged(angle);
 }
 
@@ -410,6 +471,7 @@ void SpecialMarkersMgr::setFlagCompassMarks(const bool displayed)
 {
 	if(displayed != compassMarks->isDisplayed()) {
 		compassMarks->setDisplayed(displayed);
+		StelApp::immediateSave("viewing/flag_compass_marks", displayed);
 		emit compassMarksDisplayedChanged(displayed);
 	}
 }

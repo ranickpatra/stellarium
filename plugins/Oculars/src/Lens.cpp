@@ -22,7 +22,7 @@
 #include <QSettings>
 
 Lens::Lens()
-	: m_multipler(1.)
+	: m_multipler(2.)
 {
 }
 
@@ -36,14 +36,13 @@ Lens::~Lens()
 {
 }
 
-static QMap<int, QString> mapping;
+const QMap<int, QString> Lens::mapping = {
+	{0, "name"     },
+	{1, "multipler"}};
+;
+
 QMap<int, QString> Lens::propertyMap()
 {
-	if(mapping.isEmpty()) {
-		mapping = QMap<int, QString>();
-		mapping[0] = "name";
-		mapping[1] = "multipler";
-	}
 	return mapping;
 }
 
@@ -74,20 +73,13 @@ void Lens::writeToSettings(QSettings * settings, const int index)
 	settings->setValue(prefix + "multipler", this->getMultipler());
 }
 
-/* ********************************************************************* */
-#if 0
-#pragma mark -
-#pragma mark Static Methods
-#endif
-/* ********************************************************************* */
-
 Lens* Lens:: lensFromSettings(QSettings* theSettings, int lensIndex)
 {
 	Lens* lens = new Lens();
 	QString prefix = "lens/" + QVariant(lensIndex).toString() + "/";
 
 	lens->setName(theSettings->value(prefix + "name", "").toString());
-	lens->setMultipler(theSettings->value(prefix + "multipler", "1").toDouble());
+	lens->setMultipler(theSettings->value(prefix + "multipler", "2").toDouble());
 
 	return lens;
 }
@@ -96,6 +88,5 @@ Lens* Lens::lensModel()
 {
 	Lens* model = new Lens();
 	model->setName("My Lens");
-	model->setMultipler(2.0);
 	return model;
 }

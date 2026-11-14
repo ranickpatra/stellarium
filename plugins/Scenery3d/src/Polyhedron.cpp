@@ -35,7 +35,7 @@ Polyhedron::~Polyhedron()
 
 void Polyhedron::clear()
 {
-	//TODO this frees the used memory, but about the same number of objects will get re-added soon after in a loop, leading to unnecssary reallocations. optimize?
+	//TODO this frees the used memory, but about the same number of objects will get re-added soon after in a loop, leading to unnecessary reallocations. optimize?
 	polygons.clear();
 	uniqueVerts.clear();
 }
@@ -102,7 +102,7 @@ void Polyhedron::intersect(const Plane &p)
 	//Iterate over this polyhedron's polygons
 	for (auto it = polygons.begin(); it != polygons.end();)
 	{
-		//Retrive the polygon and intersect it with the specified plane, save the intersection points
+		//Retrieve the polygon and intersect it with the specified plane, save the intersection points
 		(*it).intersect(p, intersectionPoints);
 
 		//If all vertices were clipped, remove the polygon
@@ -254,7 +254,7 @@ const QVector<Vec3f> &Polyhedron::getVerts() const
 
 void Polyhedron::render() const
 {
-#if !defined(QT_OPENGL_ES_2)
+#if !QT_CONFIG(opengles2)
 
 	//render each polygon
 	glExtFuncs->glColor3f(0.4f,0.4f,0.4f);

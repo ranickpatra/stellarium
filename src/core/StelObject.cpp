@@ -19,21 +19,24 @@
 
 
 #include "StelObject.hpp"
+#include "Constellation.hpp"
+#include "ConstellationMgr.hpp"
+#include "StelObjectMgr.hpp"
 #include "StelApp.hpp"
 #include "StelCore.hpp"
-#include "StelProjector.hpp"
 #include "StelUtils.hpp"
 #include "StelTranslator.hpp"
 #include "StelSkyDrawer.hpp"
 #include "RefractionExtinction.hpp"
 #include "StelLocation.hpp"
+#include "StelObserver.hpp"
 #include "SolarSystem.hpp"
 #include "StelModuleMgr.hpp"
 #include "LandscapeMgr.hpp"
+#include "SpecificTimeMgr.hpp"
 #include "planetsephems/sidereal_time.h"
-#include "planetsephems/precession.h"
 
-#include <QRegExp>
+#include <QRegularExpression>
 #include <QDebug>
 #include <QSettings>
 
@@ -55,13 +58,13 @@ Vec3d StelObject::getEquinoxEquatorialPosAuto(const StelCore* core) const
 }
 
 
-// Get observer local sidereal coordinate
+// Get observer-centered hour angle + declination (at current equinox)
 Vec3d StelObject::getSiderealPosGeometric(const StelCore* core) const
 {
 	return Mat4d::zrotation(-core->getLocalSiderealTime())* getEquinoxEquatorialPos(core);
 }
 
-// Get observer local sidereal coordinates, deflected by refraction
+// Get observer-centered hour angle + declination (at current equinox), deflected by refraction
 Vec3d StelObject::getSiderealPosApparent(const StelCore* core) const
 {
 	Vec3d v=getAltAzPosApparent(core); // These already come with refraction!
@@ -102,7 +105,7 @@ Vec3d StelObject::getSupergalacticPos(const StelCore *core) const
 // Meeus, Astronomical Algorithms, 2nd ed. (1998), p.98.
 float StelObject::getParallacticAngle(const StelCore* core) const
 {
-	const double phi=static_cast<double>(core->getCurrentLocation().latitude)*M_PI/180.0;
+	const double phi=static_cast<double>(core->getCurrentLocation().getLatitude())*M_PI/180.0;
 	const Vec3d siderealPos=getSiderealPosApparent(core);
 	double delta, ha;
 	StelUtils::rectToSphe(&ha, &delta, siderealPos);
@@ -142,76 +145,170 @@ bool StelObject::isAboveRealHorizon(const StelCore *core) const
 float StelObject::getVMagnitude(const StelCore* core) const 
 {
 	Q_UNUSED(core)
-	return 99;
+	return 99.f;
 }
 
-Vec3f StelObject::getRTSTime(StelCore *core) const
+Vec4d StelObject::getRTSTime(const StelCore *core, const double altitude) const
 {
-	return computeRTSTime(core);
-}
+	const StelLocation loc=core->getCurrentLocation();
+	if (core->getCurrentObserver()->isObserverLifeOver()) // a spaceship
+		return Vec4d(0., 0., 0., -1000.);
 
-Vec3f StelObject::computeRTSTime(StelCore *core) const
-{
-	double hz = 0.;
-	if ( (getEnglishName()=="Moon") && (core->getCurrentLocation().planetName=="Earth"))
-		hz = +0.7275*0.95; // horizon parallax factor
-	else if (getEnglishName()=="Sun")
-		hz = - getAngularSize(core); // semidiameter; Canonical value 16', but this is accurate even from other planets...
-	hz *= M_PI_180;
-
+	//StelObjectMgr* omgr=GETSTELMODULE(StelObjectMgr);
+	double ho = 0.;
 	if (core->getSkyDrawer()->getFlagHasAtmosphere())
 	{
 		// canonical" refraction at horizon is -34'. Replace by pressure-dependent value here!
+		// This fixes 0-degree refraction. Not sure if we use refracted position throughout? Canonical ephemerides have -6/-12/-18 without refraction.
 		Refraction refraction=core->getSkyDrawer()->getRefraction();
 		Vec3d zeroAlt(1.0,0.0,0.0);
 		refraction.backward(zeroAlt);
-		hz += asin(zeroAlt[2]);
+		ho += asin(zeroAlt[2]);
 	}
-	const double phi = static_cast<double>(core->getCurrentLocation().latitude) * M_PI_180;
-	PlanetP cp = core->getCurrentPlanet();
-	const double coeff = cp->getMeanSolarDay() / cp->getSiderealDay();
+	if (altitude != 0.)
+		ho = altitude*M_PI_180; // Not sure if we use refraction for off-zero settings?
+	const double phi = static_cast<double>(loc.getLatitude()) * M_PI_180;
+	const double L = static_cast<double>(loc.getLongitude()) * M_PI_180; // OUR longitude. Meeus has it reversed
+	PlanetP obsPlanet = core->getCurrentPlanet();
+	const double rotDuration = obsPlanet->getSiderealDay();
+	const double currentJD=core->getJD();
+	const double currentJDE=core->getJDE();
+	const double utcShift = core->getUTCOffset(currentJD) / 24.;
+	int year, month, day, currentdate;
+	StelUtils::getDateFromJulianDay(currentJD+utcShift, &year, &month, &currentdate);
 
-	Vec3f rts = Vec3f(-100.f,-100.f,-100.f);  // init as "never rises" [abs must be larger than 24!]
-
-	double dec, ra, ha, t;
-	StelUtils::rectToSphe(&ra, &dec, getSiderealPosGeometric(core));
-	ra = 2.*M_PI-ra;
-	ha = ra*12./M_PI;
-	if (ha>24.)
-		ha -= 24.;
-	// It seems necessary to have ha in [-12,12]!
-	if (ha>12.)
-		ha -= 24.;
-
-	const double JD = core->getJD();
-	const double ct = (JD - static_cast<int>(JD))*24.;
-
-	t = ct - ha*coeff; // earth: coeff=(360.985647/360.);
-	if (ha>12. && ha<=24.)
-		t += 24.;
-
-	t += static_cast<double>(core->getUTCOffset(JD)) + 12.;
-	t = StelUtils::fmodpos(t, 24.0);
-	rts[1] = static_cast<float>(t);
-
-	const double cosH = (sin(hz) - sin(phi)*sin(dec))/(cos(phi)*cos(dec));
-	if (cosH<-1.) // circumpolar
+	// And convert to equatorial coordinates of date. We can also use this day's current aberration, given the other uncertainties/omissions.
+	const Vec3d eq_2=getEquinoxEquatorialPos(core);
+	double ra2, de2;
+	StelUtils::rectToSphe(&ra2, &de2, eq_2);
+	// Around ra~12 there may be a jump between 12h and -12h which could crash interpolation. We better make sure to have either negative RA or RA>24 in this case.
+	if (cos(ra2)<0.)
 	{
-		rts[0]=rts[2]=100.f;
+		ra2=StelUtils::fmodpos(ra2, 2*M_PI);
 	}
-	else if (cosH>1.) // never rises
+
+	// 3. Approximate times:
+	// we use Sidereal Time of Place!
+	const double Theta2=obsPlanet->getSiderealTime(currentJD, currentJDE) * (M_PI/180.) + L;  // [radians]
+	double cosH0=(sin(ho)-sin(phi)*sin(de2))/(cos(phi)*cos(de2));
+
+	//omgr->removeExtraInfoStrings(StelObject::DebugAid);
+	//omgr->addToExtraInfoString(StelObject::DebugAid, QString("&alpha;<sub>2</sub>: %1=%2 &delta;<sub>2</sub>: %3<br/>").arg(QString::number(ra2, 'f', 4)).arg(StelUtils::radToHmsStr(ra2)).arg(StelUtils::radToDmsStr(de2)));
+	//omgr->addToExtraInfoString(StelObject::DebugAid, QString("h<sub>0</sub>= %1<br/>").arg(StelUtils::radToDmsStr(ho)));
+	//omgr->addToExtraInfoString(StelObject::DebugAid, QString("JD<sub>2</sub>= %1<br/>").arg(QString::number(currentJD, 'f', 5)));
+	//omgr->addToExtraInfoString(StelObject::DebugAid, QString("&Theta;<sub>2</sub>= %1<br/>").arg(StelUtils::radToHmsStr(Theta2)));
+	//omgr->addToExtraInfoString(StelObject::DebugAid, QString("cos H<sub>0</sub>= %1<br/>").arg(QString::number(cosH0, 'f', 4)));
+
+
+	double h2=StelUtils::fmodpos(Theta2-ra2, 2.*M_PI); if (h2>M_PI) h2-=2.*M_PI; // Hour angle at currentJD. This should be [-pi, pi]
+	// Find approximation of transit time
+	//double JDt=currentJD-h2/(M_PI*2.)*rotRate;
+	//omgr->addToExtraInfoString(StelObject::DebugAid, QString("h<sub>2</sub>= %1<br/>").arg(QString::number(h2, 'f', 4)));
+	//omgr->addToExtraInfoString(StelObject::DebugAid, QString("JD<sub>t</sub>= %1<br/>").arg(QString::number(JDt, 'f', 4)));
+
+	// In terms of chapter 15, where m0, m1 and m2 are fractions of day within the current day, we use mr, mt, ms as fractions of day from currentJD, and they lie within [-1...+1].
+
+	double mr, ms, flag=0.;
+	double mt=-h2*(0.5*rotDuration/M_PI);
+	// Transit should occur on current date
+	StelUtils::getDateFromJulianDay(currentJD+mt+utcShift, &year, &month, &day);
+	if (day != currentdate)
 	{
-		rts[0]=rts[2]=-100.f;
+		if (mt<0.)
+			mt += rotDuration;
+		else
+			mt -= rotDuration;
+	}
+
+	// circumpolar: set rise and set times to lower culmination, i.e. 1/2 rotation from transit
+	if (fabs(cosH0)>1.)
+	{
+		flag = (cosH0<-1.) ? 100 : -100; // circumpolar / never rises
+		mr   = (cosH0<-1.) ? mt-0.5*rotDuration : mt;
+		ms   = (cosH0<-1.) ? mt+0.5*rotDuration : mt;
 	}
 	else
 	{
-		const double HC = acos(cosH)*12.*coeff/M_PI;
+		const double H0 = acos(cosH0);
+		//omgr->addToExtraInfoString(StelObject::DebugAid, QString("H<sub>0</sub>= %1<br/>").arg(QString::number(H0*M_180_PI, 'f', 6)));
 
-		rts[0] = static_cast<float>(StelUtils::fmodpos(t - HC, 24.));
-		rts[2] = static_cast<float>(StelUtils::fmodpos(t + HC, 24.));
+		mr = mt - H0*rotDuration/(2.*M_PI);
+		ms = mt + H0*rotDuration/(2.*M_PI);
 	}
 
-	return rts;
+	// Rise should occur on current date
+	StelUtils::getDateFromJulianDay(currentJD+mr+utcShift, &year, &month, &day);
+	if (day != currentdate)
+	{
+		if (mr<0.)
+			mr += rotDuration;
+		else
+			mr -= rotDuration;
+	}
+
+	// Set should occur on current date
+	StelUtils::getDateFromJulianDay(currentJD+ms+utcShift, &year, &month, &day);
+	if (day != currentdate)
+	{
+		if (ms<0.)
+			ms += rotDuration;
+		else
+			ms -= rotDuration;
+	}
+
+	//omgr->addToExtraInfoString(StelObject::DebugAid, QString("m<sub>t</sub>= %1<br/>").arg(QString::number(mt, 'f', 6)));
+	//omgr->addToExtraInfoString(StelObject::DebugAid, QString("m<sub>r</sub>= %1<br/>").arg(QString::number(mr, 'f', 6)));
+	//omgr->addToExtraInfoString(StelObject::DebugAid, QString("m<sub>s</sub>= %1<br/>").arg(QString::number(ms, 'f', 6)));
+
+	// Not quite done! Do the final tweaks...
+	if (fabs(cosH0)<1.)
+	{
+		// RISE
+		int iterations=0; // add this to limit the loops, just in case.
+		double Delta_mr=1.;
+		while (Delta_mr > 1./8640.) // Do that until accurate to 10 seconds
+		{
+			const double theta_mr=obsPlanet->getSiderealTime(currentJD+mr, currentJDE+mr) * (M_PI/180.) + L;  // [radians]
+			double hr=StelUtils::fmodpos(theta_mr-ra2, 2.*M_PI); if (hr>M_PI) hr-=2.*M_PI; // Hour angle of the rising RA at currentJD. This should be [-pi, pi]
+			//omgr->addToExtraInfoString(StelObject::DebugAid, QString("h<sub>r</sub>': %1 = %2<br/>").arg(QString::number(hr, 'f', 6)).arg(StelUtils::radToHmsStr(hr, true)));
+
+			double ar=asin(sin(phi)*sin(de2)+cos(phi)*cos(de2)*cos(hr)); // altitude at this hour angle
+
+			Delta_mr= (ar-ho)/(cos(de2)*cos(phi)*sin(hr)) / (M_PI*2.);
+			Delta_mr=StelUtils::fmodpos(Delta_mr+0.5, 1.0)-0.5; // ensure this is a small correction
+			mr+=Delta_mr;
+
+			//omgr->addToExtraInfoString(StelObject::DebugAid, QString("alt<sub>r</sub>': %1 = %2<br/>").arg(QString::number(ar, 'f', 6)).arg(StelUtils::radToDmsStr(ar)));
+			//omgr->addToExtraInfoString(StelObject::DebugAid, QString("&Delta;<sub>mr</sub>'= %1<br/>").arg(QString::number(Delta_mr, 'f', 6)));
+			//omgr->addToExtraInfoString(StelObject::DebugAid, QString("m<sub>r</sub>' = %1<br/>").arg(QString::number(mr, 'f', 6)));
+
+			if (++iterations >= 5)
+				break;
+		}
+		// SET
+		iterations=0; // add this to limit the loops, just in case.
+		double Delta_ms=1.;
+		while (Delta_ms > 1./8640.) // Do that until accurate to 10 seconds
+		{
+			const double theta_ms=obsPlanet->getSiderealTime(currentJD+ms, currentJDE+ms) * (M_PI/180.) + L;  // [radians]
+			double hs=StelUtils::fmodpos(theta_ms-ra2, 2.*M_PI); if (hs>M_PI) hs-=2.*M_PI; // Hour angle of the setting RA at currentJD. This should be [-pi, pi]
+			//omgr->addToExtraInfoString(StelObject::DebugAid, QString("h<sub>s</sub>': %1 = %2<br/>").arg(QString::number(hs, 'f', 6)).arg(StelUtils::radToHmsStr(hs, true)));
+
+			double as=asin(sin(phi)*sin(de2)+cos(phi)*cos(de2)*cos(hs)); // altitude at this hour angle
+
+			Delta_ms= (as-ho)/(cos(de2)*cos(phi)*sin(hs)) / (M_PI*2.);
+			Delta_ms=StelUtils::fmodpos(Delta_ms+0.5, 1.0)-0.5; // ensure this is a small correction
+			ms+=Delta_ms;
+
+			//omgr->addToExtraInfoString(StelObject::DebugAid, QString("alt<sub>s</sub>': %1 = %2<br/>").arg(QString::number(as, 'f', 6)).arg(StelUtils::radToDmsStr(as)));
+			//omgr->addToExtraInfoString(StelObject::DebugAid, QString("&Delta;<sub>ms</sub>'= %1<br/>").arg(QString::number(Delta_ms, 'f', 6)));
+			//omgr->addToExtraInfoString(StelObject::DebugAid, QString("m<sub>s</sub>' = %1<br/>").arg(QString::number(ms, 'f', 6)));
+
+			if (++iterations >= 5)
+				break;
+		}
+	}
+	return Vec4d(currentJD+mr, currentJD+mt, currentJD+ms, flag);
 }
 
 float StelObject::getSelectPriority(const StelCore* core) const
@@ -219,11 +316,11 @@ float StelObject::getSelectPriority(const StelCore* core) const
 	return qMin(getVMagnitudeWithExtinction(core), 15.0f);
 }
 
-float StelObject::getVMagnitudeWithExtinction(const StelCore* core) const
+float StelObject::getVMagnitudeWithExtinction(const StelCore* core, const float knownVMag, const float& magoffset) const
 {
 	Vec3d altAzPos = getAltAzPosGeometric(core);
 	altAzPos.normalize();
-	float vMag = getVMagnitude(core);
+	float vMag = (knownVMag>-1000.f ? knownVMag + magoffset : getVMagnitude(core) + magoffset);
 	// without the test, planets flicker stupidly in fullsky atmosphere-less view.
 	if (core->getSkyDrawer()->getFlagHasAtmosphere())
 		core->getSkyDrawer()->getExtinction().forward(altAzPos, &vMag);
@@ -244,16 +341,35 @@ float StelObject::getAirmass(const StelCore *core) const
 		return -1.f;
 }
 
-// Format the magnitude info string for the object
-QString StelObject::getMagnitudeInfoString(const StelCore *core, const InfoStringGroup& flags, const int decimals) const
+// Format the magnitude info string for the object, allow offset from changing distance
+QString StelObject::getMagnitudeInfoString(const StelCore *core, const InfoStringGroup& flags, const int decimals, const float& magoffset) const
 {
 	if (flags&Magnitude)
 	{
-		QString str = QString("%1: <b>%2</b>").arg(q_("Magnitude"), QString::number(getVMagnitude(core), 'f', decimals));
+		float mag = getVMagnitude(core);
+		QString str = QString("%1: <b>%2</b>").arg(q_("Magnitude"), QString::number(mag + magoffset, 'f', decimals));
 		const float airmass = getAirmass(core);
 		if (airmass>-1.f) // Don't show extincted magnitude much below horizon where model is meaningless.
-			str += QString(" (%1 <b>%2</b> %3 <b>%4</b> %5)").arg(q_("reduced to"), QString::number(getVMagnitudeWithExtinction(core), 'f', decimals), q_("by"), QString::number(airmass, 'f', 2), q_("Airmasses"));
-		str +="<br />";
+			str += QString(" (%1 <b>%2</b> %3 <b>%4</b> %5)").arg(q_("reduced to"), QString::number(getVMagnitudeWithExtinction(core, mag, magoffset), 'f', decimals), q_("by"), QString::number(airmass, 'f', 2), q_("Airmasses"));
+		str += "<br/>" + getExtraInfoStrings(Magnitude).join("");
+		return str;
+	}
+	else
+		return QString();
+}
+
+// Format the magnitude info string for the object, allow offset from changing distance
+QString StelObject::getMagnitudeNarration(const StelCore *core, const InfoStringGroup& flags, const int decimals, const float& magoffset) const
+{
+	if (flags&Magnitude)
+	{
+		const float mag = getVMagnitude(core);
+		QString str = QString("%1 %2").arg(q_("The object's visual magnitude is"), StelUtils::narrateDecimal(mag + magoffset, decimals));
+		const float airmass = getAirmass(core);
+		if (airmass>-1.f) // Don't show extincted magnitude much below horizon where model is meaningless.
+			str += ", " + QString(qc_("reduced to %1 by %2 airmasses of atmospheric extinction", "object narration: reduced magnitude by extinction"))
+					.arg(StelUtils::narrateDecimal(getVMagnitudeWithExtinction(core, mag, magoffset), decimals),
+					     StelUtils::narrateDecimal(airmass, 2)) + ". ";
 		str += getExtraInfoStrings(Magnitude).join("");
 		return str;
 	}
@@ -261,34 +377,98 @@ QString StelObject::getMagnitudeInfoString(const StelCore *core, const InfoStrin
 		return QString();
 }
 
+QString StelObject::getB_VInfoString(float b_v)
+{
+	return QString("%1: <b>%2</b><br/>").arg(q_("Color Index (B-V)"), QString::number(b_v, 'f', 2));
+}
+QString StelObject::getB_VNarration(float b_v)
+{
+	return QString(qc_("Its B minus V Color Index is %1", "object narration")).arg(StelUtils::narrateDecimal(b_v, 2));
+}
+
+
 // Format the positional info string contain J2000/of date/altaz/hour angle positions for the object
+// computing positional info sometimes also compute others like proper motion too, so store them in the object
 QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGroup& flags) const
 {
 	StelApp& app = StelApp::getInstance();
+	static StelObjectMgr* omgr=GETSTELMODULE(StelObjectMgr);
+	static ConstellationMgr *cMgr=GETSTELMODULE(ConstellationMgr);
+	const float airmass = getAirmass(core);
+	const StelLocation currentLocation=core->getCurrentLocation();
+	const bool onTransitionToNewLocation=core->getCurrentObserver()->isTraveling();
 	const bool withAtmosphere = core->getSkyDrawer()->getFlagHasAtmosphere();
-	const bool withDecimalDegree = app.getFlagShowDecimalDegrees();
+	const bool withDecimalDegreeCoords = app.getFlagUseDecDegreesCoords();
+	const bool withDecimalDegreeOther = app.getFlagUseDecDegreesOther();
 	const bool useSouthAzimuth = app.getFlagSouthAzimuthUsage();
+	const bool usePolarDistance = app.getFlagPolarDistanceUsage();
 	const bool withTables = app.getFlagUseFormattingOutput();
 	const bool withDesignations = app.getFlagUseCCSDesignation();
 	const QString cepoch = qc_("on date", "coordinates for current epoch");
 	const QString currentPlanet = core->getCurrentPlanet()->getEnglishName();
-	const QString apparent = " " + (withAtmosphere ? q_("(apparent)") : "");
+	const QString apparent = " " + (withAtmosphere && (airmass>-1.f) ? q_("(apparent)") : "");
+	const QString dash = QChar(0x2014);
+	const double currentJD = core->getJD();
+	const double utcShift = core->getUTCOffset(currentJD) / 24.; // Fix DST shift...
+	QString currentObjStr = getEnglishName();
+	if (currentObjStr == "") // If objects have no name, we need something to represent it.
+	{
+		double ra_j2000, dec_j2000;
+		StelUtils::rectToSphe(&ra_j2000,&dec_j2000,getJ2000EquatorialPos(core));
+		currentObjStr = StelUtils::radToHmsStr(ra_j2000);
+	}
+
+	const Vec3d eqNow=getEquinoxEquatorialPos(core);
 	QString res, firstCoordinate, secondCoordinate;
+	int currentYear, currentMonth, currentDay;
+	double currentLatitude=static_cast<double>(currentLocation.getLatitude());
+	double currentLongitude=static_cast<double>(currentLocation.getLongitude());
+
+	StelUtils::getDateFromJulianDay(currentJD+utcShift, &currentYear, &currentMonth, &currentDay);
 	double az_app, alt_app;
 	StelUtils::rectToSphe(&az_app,&alt_app,getAltAzPosApparent(core));
 	Q_UNUSED(az_app)
 
-	if (withTables)
-		res += "<table style='margin:0em 0em 0em -0.125em;border-spacing:0px;border:0px;'>";
+	if (withTables && (flags&(RaDecJ2000|RaDecOfDate|HourAngle|AltAzi|GalacticCoord|SupergalacticCoord|EclipticCoordJ2000) || ((flags&EclipticCoordOfDate) && (currentPlanet==L1S("Earth")))))
+		res += "<table class='info-string'>";
+	else
+		res+="<br/>";
 
-	// TRANSLATORS: Right ascension/Declination
-	const QString RADec = withDesignations ? QString("&alpha;/&delta;") : qc_("RA/Dec", "celestial coordinate system");
+	QString RADec;
+	if (usePolarDistance)
+	{
+		if (withDesignations)
+		{
+			// TRANSLATORS: Designations for Right ascension/Polar distance
+			RADec = qc_("&alpha;/p", "celestial coordinate system");
+		}
+		else
+		{
+			// TRANSLATORS: Right ascension/Polar distance
+			RADec = qc_("RA/PD", "celestial coordinate system");
+		}
+	}
+	else
+	{
+		if (withDesignations)
+		{
+			// TRANSLATORS: Designations for Right ascension/Declination
+			RADec = qc_("&alpha;/&delta;", "celestial coordinate system");
+		}
+		else
+		{
+			// TRANSLATORS: Right ascension/Declination
+			RADec = qc_("RA/Dec", "celestial coordinate system");
+		}
+	}
 
 	if (flags&RaDecJ2000)
 	{
 		double dec_j2000, ra_j2000;
 		StelUtils::rectToSphe(&ra_j2000,&dec_j2000,getJ2000EquatorialPos(core));
-		if (withDecimalDegree)
+		if (usePolarDistance)
+			dec_j2000 = M_PI_2 - dec_j2000;
+		if (withDecimalDegreeCoords)
 		{
 			firstCoordinate  = StelUtils::radToDecDegStr(ra_j2000,5,false,true);
 			secondCoordinate = StelUtils::radToDecDegStr(dec_j2000);
@@ -302,15 +482,18 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 		if (withTables)
 			res += QString("<tr><td>%1 (J2000.0):</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td><td></td></tr>").arg(RADec, firstCoordinate, secondCoordinate);
 		else
-			res += QString("%1 (J2000.0): %2/%3").arg(RADec, firstCoordinate, secondCoordinate) + "<br>";
+			res += QString("%1 (J2000.0): %2/%3<br/>").arg(RADec, firstCoordinate, secondCoordinate);
 		res += getExtraInfoStrings(RaDecJ2000).join("");
+		res += omgr->getExtraInfoStrings(RaDecJ2000).join("");
 	}
 
 	if (flags&RaDecOfDate)
 	{
 		double dec_equ, ra_equ;
-		StelUtils::rectToSphe(&ra_equ,&dec_equ,getEquinoxEquatorialPos(core));
-		if (withDecimalDegree)
+		StelUtils::rectToSphe(&ra_equ,&dec_equ,eqNow);
+		if (usePolarDistance)
+			dec_equ = M_PI_2 - dec_equ;
+		if (withDecimalDegreeCoords)
 		{
 			firstCoordinate  = StelUtils::radToDecDegStr(ra_equ,5,false,true);
 			secondCoordinate = StelUtils::radToDecDegStr(dec_equ);
@@ -324,58 +507,76 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 		if (withTables)
 			res += QString("<tr><td>%1 (%4):</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td><td></td></tr>").arg(RADec, firstCoordinate, secondCoordinate, cepoch);
 		else
-			res += QString("%1 (%4): %2/%3").arg(RADec, firstCoordinate, secondCoordinate, cepoch) + "<br>";
+			res += QString("%1 (%4): %2/%3<br/>").arg(RADec, firstCoordinate, secondCoordinate, cepoch);
 		res += getExtraInfoStrings(RaDecOfDate).join("");
+		res += omgr->getExtraInfoStrings(RaDecOfDate).join("");
 	}
 
 	if (flags&HourAngle)
 	{
-		double dec_sidereal, ra_sidereal, ha_sidereal;
-		StelUtils::rectToSphe(&ra_sidereal,&dec_sidereal,getSiderealPosGeometric(core));
-		ra_sidereal = 2.*M_PI-ra_sidereal;
+		const bool useNegHA=StelApp::getInstance().getFlagUseNegativeHourAngles();
+		double dec_sidereal, ra_sidereal;
 		if (withAtmosphere && (alt_app>-2.0*M_PI/180.0)) // Don't show refracted values much below horizon where model is meaningless.
-		{
 			StelUtils::rectToSphe(&ra_sidereal,&dec_sidereal,getSiderealPosApparent(core));
-			ra_sidereal = 2.*M_PI-ra_sidereal;
-			if (withDecimalDegree)
+		else
+			StelUtils::rectToSphe(&ra_sidereal,&dec_sidereal,getSiderealPosGeometric(core));
+
+		ra_sidereal = StelUtils::fmodpos(2.*M_PI-ra_sidereal, 2.*M_PI); // reverse counting sense.
+		if (useNegHA && ra_sidereal>M_PI)
+			ra_sidereal -= 2.*M_PI;
+		if (usePolarDistance)
+			dec_sidereal = M_PI_2 - dec_sidereal;
+
+		if (withDecimalDegreeCoords)
+		{
+			//firstCoordinate  = QString("%1h").arg(ra_sidereal*12/M_PI, 0, 'f', 5); // Decimal hours
+			firstCoordinate  = QString("%1°").arg(ra_sidereal*M_180_PI, 0, 'f', 5); // Decimal degrees
+			secondCoordinate = StelUtils::radToDecDegStr(dec_sidereal);
+		}
+		else
+		{
+			const bool negHA= (ra_sidereal<0);
+			firstCoordinate  = StelUtils::radToHmsStr(fabs(ra_sidereal),true);
+			if (negHA)
+				firstCoordinate = firstCoordinate.trimmed().prepend('-');
+			secondCoordinate = StelUtils::radToDmsStr(dec_sidereal,true);
+		}
+
+		QString HADec;
+		
+		if (usePolarDistance)
+		{
+			if (withDesignations)
 			{
-				ha_sidereal = ra_sidereal*12/M_PI;
-				if (ha_sidereal>24.)
-					ha_sidereal -= 24.;
-				firstCoordinate  = QString("%1h").arg(ha_sidereal, 0, 'f', 5);
-				secondCoordinate = StelUtils::radToDecDegStr(dec_sidereal);
+				// TRANSLATORS: Designations for Hour angle/Polar distance
+				HADec = qc_("h/p", "celestial coordinate system");
 			}
 			else
 			{
-				firstCoordinate  = StelUtils::radToHmsStr(ra_sidereal,true);
-				secondCoordinate = StelUtils::radToDmsStr(dec_sidereal,true);
+				// TRANSLATORS: Hour angle/Polar distance
+				HADec = qc_("HA/PD",  "celestial coordinate system");
 			}
 		}
 		else
 		{
-			if (withDecimalDegree)
+			if (withDesignations)
 			{
-				ha_sidereal = ra_sidereal*12/M_PI;
-				if (ha_sidereal>24.)
-					ha_sidereal -= 24.;
-				firstCoordinate  = QString("%1h").arg(ha_sidereal, 0, 'f', 5);
-				secondCoordinate = StelUtils::radToDecDegStr(dec_sidereal);
+				// TRANSLATORS: Designations for Hour angle/Declination
+				HADec = qc_("h/&delta;", "celestial coordinate system");
 			}
 			else
 			{
-				firstCoordinate  = StelUtils::radToHmsStr(ra_sidereal,true);
-				secondCoordinate = StelUtils::radToDmsStr(dec_sidereal,true);
+				// TRANSLATORS: Hour angle/Declination
+				HADec = qc_("HA/Dec", "celestial coordinate system");
 			}
 		}
-
-		// TRANSLATORS: Hour angle/Declination
-		const QString HADec = withDesignations ? QString("h/&delta;") : qc_("HA/Dec", "celestial coordinate system");
 
 		if (withTables)
 			res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td><td>%4</td></tr>").arg(HADec, firstCoordinate, secondCoordinate, apparent);
 		else
-			res += QString("%1: %2/%3 %4").arg(HADec, firstCoordinate, secondCoordinate, apparent) + "<br>";
+			res += QString("%1: %2/%3 %4<br/>").arg(HADec, firstCoordinate, secondCoordinate, apparent);
 		res += getExtraInfoStrings(HourAngle).join("");
+		res += omgr->getExtraInfoStrings(HourAngle).join("");
 	}
 
 	if (flags&AltAzi)
@@ -391,7 +592,7 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 			az -= M_PI*2;
 		if (withAtmosphere && (alt_app>-2.0*M_PI/180.0)) // Don't show refracted altitude much below horizon where model is meaningless.
 		{
-			if (withDecimalDegree)
+			if (withDecimalDegreeCoords)
 			{
 				firstCoordinate  = StelUtils::radToDecDegStr(az);
 				secondCoordinate = StelUtils::radToDecDegStr(alt_app);
@@ -404,7 +605,7 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 		}
 		else
 		{
-			if (withDecimalDegree)
+			if (withDecimalDegreeCoords)
 			{
 				firstCoordinate  = StelUtils::radToDecDegStr(az);
 				secondCoordinate = StelUtils::radToDecDegStr(alt);
@@ -416,13 +617,22 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 			}
 		}
 
-		// TRANSLATORS: Azimuth/Altitude
-		const QString AzAlt = (withDesignations ? "A/a" : qc_("Az./Alt.", "celestial coordinate system"));
+		QString AzAlt;
+		if (withDesignations)
+		{
+			// TRANSLATORS: Designations for Azimuth/Altitude
+			AzAlt = qc_("A/a", "celestial coordinate system");
+		}
+		else
+		{
+			// TRANSLATORS: Azimuth/Altitude
+			AzAlt = qc_("Az./Alt.", "celestial coordinate system");
+		}
 
 		if (withTables)
 			res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td><td>%4</td></tr>").arg(AzAlt, firstCoordinate, secondCoordinate, apparent);
 		else
-			res += QString("%1: %2/%3 %4").arg(AzAlt, firstCoordinate, secondCoordinate, apparent) + "<br>";
+			res += QString("%1: %2/%3 %4<br/>").arg(AzAlt, firstCoordinate, secondCoordinate, apparent);
 		res += getExtraInfoStrings(AltAzi).join("");
 	}
 
@@ -430,23 +640,34 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 	{
 		double glong, glat;
 		StelUtils::rectToSphe(&glong, &glat, getGalacticPos(core));
-		if (withDecimalDegree)
+		if (glong<0.) glong += 2.0*M_PI;
+		if (withDecimalDegreeCoords)
 		{
 			firstCoordinate  = StelUtils::radToDecDegStr(glong);
 			secondCoordinate = StelUtils::radToDecDegStr(glat);
 		}
 		else
 		{
-			firstCoordinate  = StelUtils::radToDmsStr(glong,true);
-			secondCoordinate = StelUtils::radToDmsStr(glat,true);
+			firstCoordinate  = StelUtils::radToDmsStr(glong, true);
+			secondCoordinate = StelUtils::radToDmsStr(glat, true);
 		}
 
-		// TRANSLATORS: Galactic longitude/latitude
-		const QString GalLongLat = (withDesignations ? "l/b" : qc_("Gal. long./lat.", "celestial coordinate system"));
+		QString GalLongLat;
+		if (withDesignations)
+		{
+			// TRANSLATORS: Designations for Galactic longitude/latitude
+			GalLongLat = qc_("l/b", "celestial coordinate system");
+		}
+		else
+		{
+			// TRANSLATORS: Galactic longitude/latitude
+			GalLongLat = qc_("Gal. long./lat.", "celestial coordinate system");
+		}
+		
 		if (withTables)
 			res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td><td></td></tr>").arg(GalLongLat, firstCoordinate, secondCoordinate);
 		else
-			res += QString("%1: %2/%3").arg(GalLongLat, firstCoordinate, secondCoordinate) + "<br>";
+			res += QString("%1: %2/%3<br/>").arg(GalLongLat, firstCoordinate, secondCoordinate);
 		res += getExtraInfoStrings(GalacticCoord).join("");
 	}
 
@@ -454,24 +675,34 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 	{
 		double sglong, sglat;
 		StelUtils::rectToSphe(&sglong, &sglat, getSupergalacticPos(core));
-		if (withDecimalDegree)
+		if (sglong<0.) sglong += 2.0*M_PI;
+		if (withDecimalDegreeCoords)
 		{
 			firstCoordinate  = StelUtils::radToDecDegStr(sglong);
 			secondCoordinate = StelUtils::radToDecDegStr(sglat);
 		}
 		else
 		{
-			firstCoordinate  = StelUtils::radToDmsStr(sglong,true);
-			secondCoordinate = StelUtils::radToDmsStr(sglat,true);
+			firstCoordinate  = StelUtils::radToDmsStr(sglong, true);
+			secondCoordinate = StelUtils::radToDmsStr(sglat, true);
 		}
 
-		// TRANSLATORS: Supergalactic longitude/latitude
-		const QString SGalLongLat = (withDesignations ? "SGL/SGB" : qc_("Supergal. long./lat.", "celestial coordinate system"));
+		QString SGalLongLat;
+		if (withDesignations)
+		{
+			// TRANSLATORS: Designations for Supergalactic longitude/latitude
+			SGalLongLat = qc_("SGL/SGB", "celestial coordinate system");
+		}
+		else
+		{
+			// TRANSLATORS: Supergalactic longitude/latitude
+			SGalLongLat = qc_("Supergal. long./lat.", "celestial coordinate system");
+		}
 
 		if (withTables)
 			res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td><td></td></tr>").arg(SGalLongLat, firstCoordinate, secondCoordinate);
 		else
-			res += QString("%1: %2/%3").arg(SGalLongLat, firstCoordinate, secondCoordinate) + "<br>";
+			res += QString("%1: %2/%3<br/>").arg(SGalLongLat, firstCoordinate, secondCoordinate);
 		res += getExtraInfoStrings(SupergalacticCoord).join("");
 	}
 
@@ -482,9 +713,17 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 	// or ever displayed the coordinates in the observer planet's equivalent to Earth's ecliptical coordinates.
 	// As quick test you can observe if in any "Ecliptic coordinate" as seen from e.g. Mars or Jupiter the Sun was ever close to beta=0 (except if crossing the node...).
 
-	// TRANSLATORS: Ecliptic longitude/latitude
-	const QString EqlLongLat = (withDesignations ? QString("&lambda;/&beta;") :
-						       qc_("Ecl. long./lat.", "celestial coordinate system") );
+	QString EqlLongLat;
+	if (withDesignations)
+	{
+		// TRANSLATORS: Designations for Ecliptic longitude/latitude
+		EqlLongLat = qc_("&lambda;/&beta;", "celestial coordinate system");
+	}
+	else
+	{
+		// TRANSLATORS: Ecliptic longitude/latitude
+		EqlLongLat = qc_("Ecl. long./lat.", "celestial coordinate system");
+	}
 
 	if (flags&EclipticCoordJ2000)
 	{
@@ -493,7 +732,7 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 		StelUtils::rectToSphe(&ra_equ,&dec_equ,getJ2000EquatorialPos(core));
 		StelUtils::equToEcl(ra_equ, dec_equ, eclJ2000, &lambda, &beta);
 		if (lambda<0) lambda+=2.0*M_PI;
-		if (withDecimalDegree)
+		if (withDecimalDegreeCoords)
 		{
 			firstCoordinate  = StelUtils::radToDecDegStr(lambda);
 			secondCoordinate = StelUtils::radToDecDegStr(beta);
@@ -507,26 +746,20 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 		if (withTables)
 			res += QString("<tr><td>%1 (J2000.0):</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td><td></td></tr>").arg(EqlLongLat, firstCoordinate, secondCoordinate);
 		else
-			res += QString("%1 (J2000.0): %2/%3").arg(EqlLongLat, firstCoordinate, secondCoordinate) + "<br>";
+			res += QString("%1 (J2000.0): %2/%3<br/>").arg(EqlLongLat, firstCoordinate, secondCoordinate);
 		res += getExtraInfoStrings(EclipticCoordJ2000).join("");
 	}
 
-	if ((flags&EclipticCoordOfDate) && (QString("Earth Sun").contains(currentPlanet)))
+	if ((flags&EclipticCoordOfDate) && (currentPlanet==L1S("Earth")))
 	{
 		const double jde=core->getJDE();
 		double eclJDE = GETSTELMODULE(SolarSystem)->getEarth()->getRotObliquity(jde);
-		if (StelApp::getInstance().getCore()->getUseNutation())
-		{
-			double deltaEps, deltaPsi;
-			getNutationAngles(jde, &deltaPsi, &deltaEps);
-			eclJDE+=deltaEps;
-		}
 		double ra_equ, dec_equ, lambdaJDE, betaJDE;
 
-		StelUtils::rectToSphe(&ra_equ,&dec_equ,getEquinoxEquatorialPos(core));
+		StelUtils::rectToSphe(&ra_equ,&dec_equ,eqNow);
 		StelUtils::equToEcl(ra_equ, dec_equ, eclJDE, &lambdaJDE, &betaJDE);
 		if (lambdaJDE<0) lambdaJDE+=2.0*M_PI;
-		if (withDecimalDegree)
+		if (withDecimalDegreeCoords)
 		{
 			firstCoordinate  = StelUtils::radToDecDegStr(lambdaJDE);
 			secondCoordinate = StelUtils::radToDecDegStr(betaJDE);
@@ -540,11 +773,11 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 		if (withTables)
 			res += QString("<tr><td>%1 (%4):</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td><td></td></tr>").arg(EqlLongLat, firstCoordinate, secondCoordinate, cepoch) + "</table>";
 		else
-			res += QString("%1 (%4): %2/%3").arg(EqlLongLat, firstCoordinate, secondCoordinate, cepoch) + "<br>";
+			res += QString("%1 (%4): %2/%3<br/>").arg(EqlLongLat, firstCoordinate, secondCoordinate, cepoch);
 		res += getExtraInfoStrings(EclipticCoordOfDate).join("");
 
 		// GZ Only for now: display epsilon_A, angle between Earth's Axis and ecl. of date.
-		if (withDecimalDegree)
+		if (withDecimalDegreeOther)
 			firstCoordinate = StelUtils::radToDecDegStr(eclJDE);
 		else
 			firstCoordinate = StelUtils::radToDmsStr(eclJDE, true);
@@ -552,11 +785,11 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 		QString eqlObl = q_("Ecliptic obliquity");
 		if (withTables)
 		{
-			res += "<table style='margin:0em 0em 0em -0.125em;border-spacing:0px;border:0px;'>";
-			res += QString("<tr><td>%1 (%4):</td><td>%2</td></tr>").arg(eqlObl, firstCoordinate, cepoch);
+			res += "<table class='info-string'>";
+			res += QString("<tr><td>%1 (%3):</td><td>%2</td></tr>").arg(eqlObl, firstCoordinate, cepoch);
 		}
 		else
-			res += QString("%1 (%3): %2").arg(eqlObl, firstCoordinate, cepoch) + "<br>";
+			res += QString("%1 (%3): %2<br/>").arg(eqlObl, firstCoordinate, cepoch);
 	}
 
 	if (withTables)
@@ -566,228 +799,975 @@ QString StelObject::getCommonInfoString(const StelCore *core, const InfoStringGr
 	if (flags&OtherCoord)
 	{
 		if (withTables)
-			res += "<table style='margin:0em 0em 0em -0.125em;border-spacing:0px;border:0px;'>";
+			res += "<table class='info-string'>";
 		res += getExtraInfoStrings(OtherCoord).join("");
+		res += omgr->getExtraInfoStrings(OtherCoord).join("");
 		if (withTables)
 			 res += "</table>";
 	}
 
-	if ((flags&SiderealTime) && (currentPlanet==QStringLiteral("Earth")))
+	if ((flags&SiderealTime) && (currentPlanet==L1S("Earth")))
 	{
-		const double longitude=static_cast<double>(core->getCurrentLocation().longitude);
+		const double longitude=static_cast<double>(core->getCurrentLocation().getLongitude());
 		double sidereal=(get_mean_sidereal_time(core->getJD(), core->getJDE())  + longitude) / 15.;
-		sidereal=fmod(sidereal, 24.);
-		if (sidereal < 0.) sidereal+=24.;
+		sidereal=StelUtils::fmodpos(sidereal, 24.);
 		QString STc = q_("Mean Sidereal Time");
 		QString STd = StelUtils::hoursToHmsStr(sidereal);
 
 		if (withTables)
 		{
-			res += "<table style='margin:0em 0em 0em -0.125em;border-spacing:0px;border:0px;'>";
+			res += "<table class='info-string'>";
 			res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(STc, STd);
 		}
 		else
-			res += QString("%1: %2").arg(STc, STd) + "<br>";
+			res += QString("%1: %2<br/>").arg(STc, STd);
 
 		if (core->getUseNutation())
 		{
 			sidereal=(get_apparent_sidereal_time(core->getJD(), core->getJDE()) + longitude) / 15.;
-			sidereal=fmod(sidereal, 24.);
-			if (sidereal < 0.) sidereal+=24.;
+			sidereal=StelUtils::fmodpos(sidereal, 24.);
 			STc = q_("Apparent Sidereal Time");
 			STd = StelUtils::hoursToHmsStr(sidereal);
 			if (withTables)
 				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(STc, STd);
 			else
-				res += QString("%1: %2").arg(STc, STd) + "<br>";
+				res += QString("%1: %2<br/>").arg(STc, STd);
 		}
 		res += getExtraInfoStrings(flags&SiderealTime).join("");
-		if (withTables && !(flags&RTSTime && getType()!=QStringLiteral("Satellite")))
+		res += omgr->getExtraInfoStrings(flags&SiderealTime).join("");
+		if (withTables && !(flags&RTSTime && !onTransitionToNewLocation && getType()!=L1S("Satellite") && getType()!=L1S("Flight") && currentLocation.role!='o'))
 			res += "</table>";
 	}
 
-	if (flags&RTSTime && getType()!=QStringLiteral("Satellite") && !currentPlanet.contains("observer", Qt::CaseInsensitive))
+	if (flags&RTSTime && getType()!=L1S("Satellite") && getType()!=L1S("Flight") && currentLocation.role!='o' && !onTransitionToNewLocation)
 	{
-		Vec3f rts = getRTSTime(StelApp::getInstance().getCore()); // required not const StelCore!
+		static int prevYear, prevMonth, prevDay;
+		static QString prevObjStr, prevPlanet;
+		static double prevLatitude, prevLongitude;
+
+		const bool isSun = (getEnglishName()=="Sun");
+		static Vec4d rts;
+		bool dayChanged = false;
+		bool locationChanged = false;
+		if ((currentYear != prevYear) || (currentMonth != prevMonth) || (currentDay != prevDay))
+		{
+			dayChanged = true;
+		}
+
+		if ((currentLatitude != prevLatitude) || (currentLongitude != prevLongitude))
+		{
+			locationChanged = true;
+		}
+
+		// Avoid frequent RTS recalculation
+		if ((currentObjStr != prevObjStr) || (currentPlanet != prevPlanet) || dayChanged || locationChanged)
+		{
+			rts = getRTSTime(core);
+		}
 		QString sTransit = qc_("Transit", "celestial event; passage across a meridian");
 		QString sRise = qc_("Rise", "celestial event");
 		QString sSet = qc_("Set", "celestial event");
-		float sunrise = 0.f;
-		float sunset = 24.f;
-		bool isSun = false;
-		if (getEnglishName()=="Sun")
-			isSun = true;
+		double sunrise = 0.;
+		double sunset = 24.;
+		double hour(0);
+		int year, month, day;
 
-		if (withTables && !(flags&SiderealTime && currentPlanet==QStringLiteral("Earth")))
-			res += "<table style='margin:0em 0em 0em -0.125em;border-spacing:0px;border:0px;'>";
+		if (withTables && !(flags&SiderealTime && currentPlanet==L1S("Earth")))
+			res += "<table class='info-string'>";
 
-		if (rts[0]>-99.f && rts[0]<100.f)
+		// Rise
+		StelUtils::getDateFromJulianDay(rts[0]+utcShift, &year, &month, &day);
+		if (rts[3]==30 || rts[3]<0 || rts[3]>50 || day != currentDay) // no rise
 		{
 			if (withTables)
-				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sRise, StelUtils::hoursToHmsStr(rts[0], true));
+				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sRise, dash);
 			else
-				res += QString("%1: %2").arg(sRise, StelUtils::hoursToHmsStr(rts[0], true)) + "<br />";
-
-			sunrise = rts[0];
+				res += QString("%1: %2<br/>").arg(sRise, dash);
 		}
-
-		if (withTables)
-			res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sTransit, StelUtils::hoursToHmsStr(rts[1], true));
 		else
-			res += QString("%1: %2").arg(sTransit, StelUtils::hoursToHmsStr(rts[1], true)) + "<br />";
-
-		if (rts[2]>-99.f && rts[2]<100.f)
 		{
+			hour = StelUtils::getHoursFromJulianDay(rts[0]+utcShift);
 			if (withTables)
-				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sSet, StelUtils::hoursToHmsStr(rts[2], true));
+				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sRise, StelUtils::hoursToHmsStr(hour, true));
 			else
-				res += QString("%1: %2").arg(sSet, StelUtils::hoursToHmsStr(rts[2], true)) + "<br />";
+				res += QString("%1: %2<br/>").arg(sRise, StelUtils::hoursToHmsStr(hour, true));
 
-			sunset = rts[2];
+			sunrise = hour;
 		}
 
-		float day = sunset - sunrise;
-		if (isSun && day<24.f)
+		// Transit
+		StelUtils::getDateFromJulianDay(rts[1]+utcShift, &year, &month, &day);
+		if (rts[3]==20 || day != currentDay) // no transit
 		{
-			QString sDay = q_("Daytime");
 			if (withTables)
-				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sDay, StelUtils::hoursToHmsStr(day, true));
+				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sTransit, dash);
 			else
-				res += QString("%1: %2").arg(sDay, StelUtils::hoursToHmsStr(day, true)) + "<br />";
+				res += QString("%1: %2<br/>").arg(sTransit, dash);
+		}
+		else {
+			hour = StelUtils::getHoursFromJulianDay(rts[1]+utcShift);
+
+			if (withTables)
+				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sTransit, StelUtils::hoursToHmsStr(hour, true));
+			else
+				res += QString("%1: %2<br/>").arg(sTransit, StelUtils::hoursToHmsStr(hour, true));
+		}
+
+		// Set
+		StelUtils::getDateFromJulianDay(rts[2]+utcShift, &year, &month, &day);
+		if (rts[3]==40 || rts[3]<0 || rts[3]>50 || day != currentDay) // no set
+		{
+			if (withTables)
+				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sSet, dash);
+			else
+				res += QString("%1: %2<br/>").arg(sSet, dash);
+		}
+		else {
+			hour = StelUtils::getHoursFromJulianDay(rts[2]+utcShift);
+			if (withTables)
+				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sSet, StelUtils::hoursToHmsStr(hour, true));
+			else
+				res += QString("%1: %2<br/>").arg(sSet, StelUtils::hoursToHmsStr(hour, true));
+
+			sunset = hour;
+		}
+
+		if (isSun)
+		{
+			QString sMTwilight = qc_("Morning twilight", "celestial event");
+			QString sETwilight = qc_("Evening twilight", "celestial event");
+			const double twilightAltitude = GETSTELMODULE(SpecificTimeMgr)->getTwilightAltitude();
+			QString alt = QString::number(twilightAltitude, 'f', 1);
+			Vec4d twilight = getRTSTime(core, twilightAltitude);
+			if (twilight[3]==0.)
+			{
+				hour = StelUtils::getHoursFromJulianDay(twilight[0]+utcShift);
+				if (withTables)
+					res += QString("<tr><td>%1 (h=%2°):</td><td style='text-align:right;'>%3</td></tr>").arg(sMTwilight, alt, StelUtils::hoursToHmsStr(hour, true));
+				else
+					res += QString("%1 (h=%2°): %3<br/>").arg(sMTwilight, alt, StelUtils::hoursToHmsStr(hour, true));
+
+				hour = StelUtils::getHoursFromJulianDay(twilight[2]+utcShift);
+				if (withTables)
+					res += QString("<tr><td>%1 (h=%2°):</td><td style='text-align:right;'>%3</td></tr>").arg(sETwilight, alt, StelUtils::hoursToHmsStr(hour, true));
+				else
+					res += QString("%1 (h=%2°): %3<br/>").arg(sETwilight, alt, StelUtils::hoursToHmsStr(hour, true));
+			}
+			double lengthOfDay = StelUtils::fmodpos(sunset - sunrise, 24.); // prevent negative value
+			if (lengthOfDay<24. && rts[3]==0.) // avoid showing Daytime: 0h 00m
+			{
+				QString sDay = q_("Daytime");
+				if (withTables)
+					res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2</td></tr>").arg(sDay, StelUtils::hoursToHmsStr(lengthOfDay, true));
+				else
+					res += QString("%1: %2<br/>").arg(sDay, StelUtils::hoursToHmsStr(lengthOfDay, true));
+			}
 		}
 
 		if (withTables)
 			res += "</table>";
 
-		if (rts[0]<-99.f && rts[2]<-99.f )
+		if (rts[3]<0.)
 		{
 			if (isSun)
 				res += q_("Polar night") + "<br />";
 			else
 				res += q_("This object never rises") + "<br />";
 		}
-		else if (rts[0]>99.f && rts[2]>99.f)
+		else if (rts[3]>50.)
 		{
 			if (isSun)
 				res += q_("Polar day") + "<br />";
 			else
 				res += q_("Circumpolar (never sets)") + "<br />";
 		}
-		else if (rts[0]>99.f && rts[2]<99.f)
-			res += q_("Polar dawn") + "<br />";
-		else if (rts[0]<99.f && rts[2]>99.f)
-			res += q_("Polar dusk") + "<br />";
+		// These never could have been seen before (??)
+		//else if (rts[0]>99. && rts[2]<99.)
+		//	res += q_("Polar dawn") + "<br />";
+		//else if (rts[0]<99. && rts[2]>99.)
+		//	res += q_("Polar dusk") + "<br />";
+
+
+		// Greatest Digression: limiting azimuth and hour angles for stars with upper culmination between pole and zenith
+		double dec_equ, ra_equ;
+		StelUtils::rectToSphe(&ra_equ,&dec_equ,eqNow);
+		const double latitude=static_cast<double>(core->getCurrentLocation().getLatitude())*M_PI_180;
+		if (((latitude>0.) && (dec_equ>=latitude)) || ((latitude<0.) && (dec_equ<=latitude)))
+		{
+			const double theta=acos(tan(latitude)/tan(dec_equ)); // hour angle
+			double az=asin(cos(dec_equ)/cos(latitude)); // azimuth (eastern)
+			// TRANSLATORS: Greatest Eastern Digression is the maximum azimuth for stars with upper culmination between pole and zenith
+			QString event(q_("Max. E. Digression"));
+			// TRANSLATORS: azimuth (abbrev.)
+			QString azStr=(withDesignations? qc_("A", "celestial coordinate system") : qc_("Az.", "celestial coordinate system"));
+			// Translators: hour angle  (abbrev.)
+			QString haStr=(withDesignations? qc_("h", "celestial coordinate system") : qc_("HA", "celestial coordinate system"));
+			if (latitude<0.)
+				az=M_PI-az;
+			if (StelApp::getInstance().getFlagSouthAzimuthUsage())
+				az+=M_PI;
+
+			if (withDecimalDegreeCoords)
+			{
+				firstCoordinate  = StelUtils::radToDecDegStr(az,5,false,true);
+				secondCoordinate = StelUtils::radToDecDegStr(-theta);
+			}
+			else
+			{
+				firstCoordinate  = StelUtils::radToDmsStr(az,true);
+				secondCoordinate = StelUtils::radToHmsStr(-theta,true);
+			}
+
+			if (withTables)
+			{
+				res += "<table class='info-string'>";
+				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2:</td><td style='text-align:right;'>%3</td><td style='text-align:right;'>/%4:</td><td style='text-align:right;'>%5</td></tr>").arg(event,  azStr,  firstCoordinate, haStr, secondCoordinate);
+			}
+			else
+				res += QString("%1: %2=%3, %4=%5<br/>").arg(event,  azStr,  firstCoordinate, haStr, secondCoordinate);
+
+			// TRANSLATORS: Greatest Western Digression is the maximum western azimuth for stars with upper culmination between pole and zenith
+			event=q_("Max. W. Digression");
+			if (withDecimalDegreeCoords)
+			{
+				firstCoordinate  = StelUtils::radToDecDegStr(StelUtils::fmodpos(-az, 2.*M_PI),5,false,true);
+				secondCoordinate = StelUtils::radToDecDegStr(theta);
+			}
+			else
+			{
+				firstCoordinate  = StelUtils::radToDmsStr(StelUtils::fmodpos(-az, 2.*M_PI),true);
+				secondCoordinate = StelUtils::radToHmsStr(theta,true);
+			}
+
+			if (withTables)
+			{
+				res += QString("<tr><td>%1:</td><td style='text-align:right;'>%2:</td><td style='text-align:right;'>%3</td><td style='text-align:right;'>/%4:</td><td style='text-align:right;'>%5</td></tr>").arg(event,  azStr,  firstCoordinate, haStr, secondCoordinate);
+				res += QString("</table>");
+			}
+			else
+				res += QString("%1: %2=%3, %4=%5<br/>").arg(event, azStr,  firstCoordinate, haStr, secondCoordinate);
+		}
 		res += getExtraInfoStrings(flags&RTSTime).join(' ');
+		res += omgr->getExtraInfoStrings(flags&RTSTime).join(' ');
+
+		prevObjStr = currentObjStr;
+		prevYear = currentYear;
+		prevMonth = currentMonth;
+		prevDay = currentDay;
+		prevLatitude = currentLatitude;
+		prevLongitude = currentLongitude;
+		prevPlanet = currentPlanet;
 	}
 
 	if (flags&Extra)
 	{
-		if (getType()!=QStringLiteral("Star"))
+		if (getType()!=L1S("Star"))
 		{
 			QString pa;
 			const double par = static_cast<double>(getParallacticAngle(core));
-			if (withDecimalDegree)
+			if (withDecimalDegreeOther)
 				pa = StelUtils::radToDecDegStr(par);
 			else
 				pa = StelUtils::radToDmsStr(par, true);
 
-			res += QString("%1: %2").arg(q_("Parallactic Angle")).arg(pa) + "<br />";
+			res += QString("%1: %2<br/>").arg(q_("Parallactic Angle"), pa);
 		}
 		res += getExtraInfoStrings(Extra).join("");
+		res += omgr->getExtraInfoStrings(Extra).join("");
 	}
 
 	if (flags&IAUConstellation)
 	{
-		QString constel=core->getIAUConstellation(getEquinoxEquatorialPos(core));
-		res += QString("%1: %2").arg(q_("IAU Constellation"), constel) + "<br>";
+		QString constel = (fuzzyEquals(eqNow.normSquared(),0.) ? "---" : core->getIAUConstellation(eqNow));
+		res += QString("%1: %2<br/>").arg(q_("IAU Constellation"), constel);
 		res += getExtraInfoStrings(flags&IAUConstellation).join("");
+		res += omgr->getExtraInfoStrings(flags&IAUConstellation).join("");
+	}
+	if (flags&CulturalConstellation)
+	{
+		// Add constellation from convex hull, if that is enabled in the first place.
+		static QSettings *conf=StelApp::getInstance().getSettings();
+		static const bool hullsEnabled = conf->value("gui/skyculture_enable_hulls", false).toBool();
+		if (hullsEnabled)
+		{
+			QList<Constellation*> constels=cMgr->isObjectIn(this, true);
+			QString constelStr = dash;
+			if (!constels.isEmpty())
+			{
+				QStringList cNames;
+				for(const auto &cst: std::as_const(constels))
+				{
+					cNames.append(cst->getInfoLabel());
+				}
+				constelStr = cNames.join(", ");
+			}
+			res += QString("%1: %2<br/>").arg(q_("Constellations"), constelStr);
+		}
+
+		if (cMgr->hasZodiac() && (currentPlanet==L1S("Earth")))
+		{
+			QString zodiacSystemLabel = cMgr->getZodiacSystemName();
+			QString zodiacalPos = (fuzzyEquals(eqNow.normSquared(),0.) ? "---" : cMgr->getZodiacCoordinate(eqNow));
+			res += QString("%1: %2<br/>").arg(zodiacSystemLabel, zodiacalPos);
+		}
+		if (cMgr->hasLunarSystem() && (currentPlanet==L1S("Earth")))
+		{
+			QString lunarSystemLabel = cMgr->getLunarSystemName();
+			QString lunarSystemPos = (fuzzyEquals(eqNow.normSquared(),0.) ? "---" : cMgr->getLunarSystemCoordinate(eqNow));
+			res += QString("%1: %2<br/>").arg(lunarSystemLabel, lunarSystemPos);
+		}
 	}
 
 	return res;
 }
 
+// Format the positional narration contain J2000/of date/altaz/hour angle positions for the object
+// computing positional info sometimes also compute others like proper motion too, so store them in the object
+QString StelObject::getCommonNarration(const StelCore *core, const InfoStringGroup& flags) const
+{
+	StelApp& app = StelApp::getInstance();
+	static StelObjectMgr* omgr=GETSTELMODULE(StelObjectMgr);
+	static ConstellationMgr *cMgr=GETSTELMODULE(ConstellationMgr);
+	const float airmass = getAirmass(core);
+	const StelLocation currentLocation=core->getCurrentLocation();
+	const bool onTransitionToNewLocation=core->getCurrentObserver()->isTraveling();
+	const bool withAtmosphere = core->getSkyDrawer()->getFlagHasAtmosphere();
+	const bool withDecimalDegreeCoords = app.getFlagUseDecDegreesCoords();
+	const bool withDecimalDegreeOther = app.getFlagUseDecDegreesOther();
+	const bool useSouthAzimuth = app.getFlagSouthAzimuthUsage();
+	const bool usePolarDistance = app.getFlagPolarDistanceUsage();
+	//const bool withDesignations = app.getFlagUseCCSDesignation();
+	//const QString cepoch = qc_("on date", "coordinates for current epoch");
+	const QString currentPlanetName = core->getCurrentPlanet()->getEnglishName();
+	const QString apparent = " " + (withAtmosphere && (airmass>-1.f) ? q_("(apparent)") : "");
+	const double currentJD = core->getJD();
+	const double utcShift = core->getUTCOffset(currentJD) / 24.; // Fix DST shift...
+	QString currentObjStr = getEnglishName();
+	if (currentObjStr == "") // If objects have no name, we need something to represent it.
+	{
+		double ra_j2000, dec_j2000;
+		StelUtils::rectToSphe(&ra_j2000,&dec_j2000,getJ2000EquatorialPos(core));
+		currentObjStr = StelUtils::radToHmsStr(ra_j2000);
+	}
+
+	const Vec3d eqNow=getEquinoxEquatorialPos(core);
+	QString res, firstCoordinate, secondCoordinate;
+	int currentYear, currentMonth, currentDay;
+	double currentLatitude=static_cast<double>(currentLocation.getLatitude());
+	double currentLongitude=static_cast<double>(currentLocation.getLongitude());
+
+	StelUtils::getDateFromJulianDay(currentJD+utcShift, &currentYear, &currentMonth, &currentDay);
+	double az_app, alt_app;
+	StelUtils::rectToSphe(&az_app,&alt_app,getAltAzPosApparent(core));
+	Q_UNUSED(az_app)
+
+	if (flags&RaDecJ2000)
+	{
+		double dec_j2000, ra_j2000;
+		StelUtils::rectToSphe(&ra_j2000,&dec_j2000,getJ2000EquatorialPos(core));
+		if (usePolarDistance)
+			dec_j2000 = M_PI_2 - dec_j2000;
+		if (withDecimalDegreeCoords)
+		{
+			firstCoordinate  = StelUtils::narrateDecimal(ra_j2000*M_180_PI, 2);
+			secondCoordinate = StelUtils::narrateDecimal(dec_j2000*M_180_PI, 2);
+		}
+		else
+		{
+			firstCoordinate  = StelUtils::radToHmsNarration(ra_j2000,true);
+			secondCoordinate = StelUtils::radToDmsNarration(dec_j2000,true);
+		}
+
+		res += qc_("Equatorial coordinates for J2000: ", "object narration");
+		res += QString(qc_("Right Ascension %1, and %2 %3. ", "object narration")).arg(firstCoordinate,
+											       usePolarDistance ? qc_("Polar Distance", "object narration") : qc_("Declination", "object narration"),
+											       secondCoordinate) + " ";
+		//res += getExtraInfoStrings(RaDecJ2000).join("");
+		//res += omgr->getExtraInfoStrings(RaDecJ2000).join("");
+	}
+
+	if (flags&RaDecOfDate)
+	{
+		double dec_equ, ra_equ;
+		StelUtils::rectToSphe(&ra_equ,&dec_equ,eqNow);
+		if (usePolarDistance)
+			dec_equ = M_PI_2 - dec_equ;
+		if (withDecimalDegreeCoords)
+		{
+			firstCoordinate  = StelUtils::narrateDecimal(ra_equ*M_180_PI, 2);
+			secondCoordinate = StelUtils::narrateDecimal(dec_equ*M_180_PI, 2);
+		}
+		else
+		{
+			firstCoordinate  = StelUtils::radToHmsNarration(ra_equ,true);
+			secondCoordinate = StelUtils::radToDmsNarration(dec_equ,true);
+		}
+
+		res += qc_("Equatorial coordinates of date: ", "object narration");
+		res += QString(qc_("Right Ascension %1, and %2 %3. ", "object narration")).arg(firstCoordinate,
+											       usePolarDistance ? qc_("Polar Distance", "object narration") : qc_("Declination", "object narration"),
+											       secondCoordinate) + " ";
+
+		//res += getExtraInfoStrings(RaDecOfDate).join("");
+		//res += omgr->getExtraInfoStrings(RaDecOfDate).join("");
+	}
+
+	if (flags&HourAngle)
+	{
+		const bool useNegHA=StelApp::getInstance().getFlagUseNegativeHourAngles();
+		double dec_sidereal, ra_sidereal;
+		if (withAtmosphere && (alt_app>-2.0*M_PI/180.0)) // Don't show refracted values much below horizon where model is meaningless.
+			StelUtils::rectToSphe(&ra_sidereal,&dec_sidereal,getSiderealPosApparent(core));
+		else
+			StelUtils::rectToSphe(&ra_sidereal,&dec_sidereal,getSiderealPosGeometric(core));
+
+		ra_sidereal = StelUtils::fmodpos(2.*M_PI-ra_sidereal, 2.*M_PI); // reverse counting sense.
+		if (useNegHA && ra_sidereal>M_PI)
+			ra_sidereal -= 2.*M_PI;
+		if (usePolarDistance)
+			dec_sidereal = M_PI_2 - dec_sidereal;
+
+		if (withDecimalDegreeCoords)
+		{
+			//firstCoordinate  = QString("%1h").arg(ra_sidereal*12/M_PI, 0, 'f', 5); // Decimal hours
+			firstCoordinate  = QString("%1°").arg(StelUtils::narrateDecimal(ra_sidereal*M_180_PI, 2)); // Decimal degrees
+			secondCoordinate = StelUtils::narrateDecimal(dec_sidereal*M_180_PI, 2);
+		}
+		else
+		{
+			const bool negHA= (ra_sidereal<0);
+			firstCoordinate  = StelUtils::radToHmsNarration(fabs(ra_sidereal),true);
+			if (negHA)
+				firstCoordinate = firstCoordinate.trimmed().prepend('-');
+			secondCoordinate = StelUtils::radToDmsNarration(dec_sidereal,true);
+		}
+
+		res += apparent + qc_("Fixed-Equatorial coordinates of date:", "object narration") + " ";
+		res += QString(qc_("Hour Angle %1, and %2 %3. ", "object narration")).arg(firstCoordinate,
+											  usePolarDistance ? qc_("Polar Distance", "object narration") : qc_("Declination", "object narration"),
+											  secondCoordinate) + " ";
+
+		//res += getExtraInfoStrings(HourAngle).join("");
+		//res += omgr->getExtraInfoStrings(HourAngle).join("");
+	}
+
+	if (flags&AltAzi)
+	{
+		// calculate alt az
+		double az,alt;
+		StelUtils::rectToSphe(&az,&alt,getAltAzPosGeometric(core));
+		double direction = 3.; // N is zero, E is 90 degrees
+		if (useSouthAzimuth)
+			direction = 2.;
+		az = direction*M_PI - az;
+		if (az > M_PI*2)
+			az -= M_PI*2;
+		if (withAtmosphere && (alt_app>-2.0*M_PI/180.0)) // Don't show refracted altitude much below horizon where model is meaningless.
+		{
+			if (withDecimalDegreeCoords)
+			{
+				firstCoordinate  = StelUtils::narrateDecimal(az*M_180_PI, 2);
+				secondCoordinate = StelUtils::narrateDecimal(alt_app*M_180_PI, 2);
+			}
+			else
+			{
+				firstCoordinate  = StelUtils::radToDmsNarration(az,false);
+				secondCoordinate = StelUtils::radToDmsNarration(alt_app,false);
+			}
+		}
+		else
+		{
+			if (withDecimalDegreeCoords)
+			{
+				firstCoordinate  = StelUtils::narrateDecimal(az*M_180_PI, 2);
+				secondCoordinate = StelUtils::narrateDecimal(alt*M_180_PI, 2);
+			}
+			else
+			{
+				firstCoordinate  = StelUtils::radToDmsNarration(az,false);
+				secondCoordinate = StelUtils::radToDmsNarration(alt,false);
+			}
+		}
+
+		res += apparent + qc_("Azimuthal coordinates are:", "object narration") + " ";
+		res += QString(qc_("Azimuth %1, and altitude %2. ", "object narration")).arg(firstCoordinate, secondCoordinate) + " ";
+		//res += getExtraInfoStrings(AltAzi).join("");
+	}
+
+	if (flags&GalacticCoord)
+	{
+		double glong, glat;
+		StelUtils::rectToSphe(&glong, &glat, getGalacticPos(core));
+		if (glong<0.) glong += 2.0*M_PI;
+		if (withDecimalDegreeCoords)
+		{
+			firstCoordinate  = StelUtils::narrateDecimal(glong*M_180_PI, 2);
+			secondCoordinate = StelUtils::narrateDecimal(glat*M_180_PI, 2);
+		}
+		else
+		{
+			firstCoordinate  = StelUtils::radToDmsNarration(glong, false);
+			secondCoordinate = StelUtils::radToDmsNarration(glat, false);
+		}
+
+		res += qc_("Galactic coordinates are:", "object narration") + " ";
+		res += QString(qc_("Longitude %1, and latitude %2. ", "object narration")).arg(firstCoordinate, secondCoordinate) + " ";
+		//res += getExtraInfoStrings(GalacticCoord).join("");
+	}
+
+	if (flags&SupergalacticCoord)
+	{
+		double sglong, sglat;
+		StelUtils::rectToSphe(&sglong, &sglat, getSupergalacticPos(core));
+		if (sglong<0.) sglong += 2.0*M_PI;
+		if (withDecimalDegreeCoords)
+		{
+			firstCoordinate  = StelUtils::narrateDecimal(sglong*M_180_PI, 2);
+			secondCoordinate = StelUtils::narrateDecimal(sglat*M_180_PI, 2);
+		}
+		else
+		{
+			firstCoordinate  = StelUtils::radToDmsNarration(sglong, false);
+			secondCoordinate = StelUtils::radToDmsNarration(sglat, false);
+		}
+
+		res += qc_("Supergalactic coordinates are:", "object narration") + " ";
+		res += QString(qc_("Longitude %1, and latitude %2. ", "object narration")).arg(firstCoordinate, secondCoordinate) + " ";
+		//res += getExtraInfoStrings(SupergalacticCoord).join("");
+	}
+
+	// N.B. Ecliptical coordinates are particularly earth-bound.
+	// It may be OK to have terrestrial ecliptical coordinates of J2000.0 (standard epoch) because those are in practice linked with VSOP XY plane,
+	// and because the ecliptical grid of J2000 is also shown for observers on other planets.
+	// The formulation here has never computed the true position of any observer planet's orbital plane except for Earth,
+	// or ever displayed the coordinates in the observer planet's equivalent to Earth's ecliptical coordinates.
+	// As quick test you can observe if in any "Ecliptic coordinate" as seen from e.g. Mars or Jupiter the Sun was ever close to beta=0 (except if crossing the node...).
+	if (flags&EclipticCoordJ2000)
+	{
+		static const double eclJ2000=GETSTELMODULE(SolarSystem)->getEarth()->getRotObliquity(2451545.0);
+		double ra_equ, dec_equ, lambda, beta;
+		StelUtils::rectToSphe(&ra_equ,&dec_equ,getJ2000EquatorialPos(core));
+		StelUtils::equToEcl(ra_equ, dec_equ, eclJ2000, &lambda, &beta);
+		if (lambda<0) lambda+=2.0*M_PI;
+		if (withDecimalDegreeCoords)
+		{
+			firstCoordinate  = StelUtils::narrateDecimal(lambda*M_180_PI, 2);
+			secondCoordinate = StelUtils::narrateDecimal(beta*M_180_PI, 2);
+		}
+		else
+		{
+			firstCoordinate  = StelUtils::radToDmsNarration(lambda, false);
+			secondCoordinate = StelUtils::radToDmsNarration(beta, false);
+		}
+
+		res += qc_("Ecliptical coordinates for Equinox 2000 are:", "object narration") + " ";
+		res += QString(qc_("Longitude %1, and latitude %2. ", "object narration")).arg(firstCoordinate, secondCoordinate) + " ";
+		//res += getExtraInfoStrings(EclipticCoordJ2000).join("");
+	}
+
+	if ((flags&EclipticCoordOfDate) && (currentPlanetName==L1S("Earth")))
+	{
+		const double jde=core->getJDE();
+		double eclJDE = GETSTELMODULE(SolarSystem)->getEarth()->getRotObliquity(jde);
+		double ra_equ, dec_equ, lambdaJDE, betaJDE;
+
+		StelUtils::rectToSphe(&ra_equ,&dec_equ,eqNow);
+		StelUtils::equToEcl(ra_equ, dec_equ, eclJDE, &lambdaJDE, &betaJDE);
+		if (lambdaJDE<0) lambdaJDE+=2.0*M_PI;
+		if (withDecimalDegreeCoords)
+		{
+			firstCoordinate  = StelUtils::narrateDecimal(lambdaJDE*M_180_PI, 2);
+			secondCoordinate = StelUtils::narrateDecimal(betaJDE*M_180_PI, 2);
+		}
+		else
+		{
+			firstCoordinate  = StelUtils::radToDmsNarration(lambdaJDE, false);
+			secondCoordinate = StelUtils::radToDmsNarration(betaJDE, false);
+		}
+
+		res += qc_("Ecliptical coordinates of date are:", "object narration") + " ";
+		res += QString(qc_("Longitude %1, and latitude %2. ", "object narration")).arg(firstCoordinate, secondCoordinate) + " ";
+		//res += getExtraInfoStrings(EclipticCoordOfDate).join("");
+
+		// report epsilon_A, angle between Earth's Axis and ecl. of date.
+		res += qc_("The Ecliptic obliquity of date is", "object narration") + " ";
+		res += withDecimalDegreeOther ? StelUtils::narrateDecimal(eclJDE*M_180_PI, 2) : StelUtils::radToDmsNarration(eclJDE, false) + ". ";
+	}
+
+	// Specialized plugins (e.g. Astro Navigation or ethno-astronomical specialties) may want to provide additional types of coordinates here.
+	if (flags&OtherCoord)
+	{
+		res += getExtraInfoStrings(OtherCoord).join("");
+		res += omgr->getExtraInfoStrings(OtherCoord).join("");
+	}
+
+	if ((flags&SiderealTime) && (currentPlanetName==L1S("Earth")))
+	{
+		const double longitude=static_cast<double>(core->getCurrentLocation().getLongitude());
+		double sidereal=(get_mean_sidereal_time(core->getJD(), core->getJDE())  + longitude) / 15.;
+		sidereal=StelUtils::fmodpos(sidereal, 24.);
+		QString STc = qc_("The Mean Sidereal Time is", "object narration");
+		QString STd = StelUtils::hoursToHmsNarration(sidereal);
+
+		res += QString("%1: %2. ").arg(STc, STd);
+
+		if (core->getUseNutation())
+		{
+			sidereal=(get_apparent_sidereal_time(core->getJD(), core->getJDE()) + longitude) / 15.;
+			sidereal=StelUtils::fmodpos(sidereal, 24.);
+			STc = qc_("The Apparent Sidereal Time is", "object narration");
+			STd = StelUtils::hoursToHmsNarration(sidereal);
+			res += QString("%1: %2. ").arg(STc, STd);
+		}
+		//res += getExtraInfoStrings(flags&SiderealTime).join("");
+		//res += omgr->getExtraInfoStrings(flags&SiderealTime).join("");
+	}
+
+	if (flags&RTSTime && getType()!=L1S("Satellite") && getType()!=L1S("Flight") && currentLocation.role!='o' && !onTransitionToNewLocation)
+	{
+		static int prevYear, prevMonth, prevDay;
+		static QString prevObjStr, prevPlanet;
+		static double prevLatitude, prevLongitude;
+
+		const bool isSun = (getEnglishName()=="Sun");
+		static Vec4d rts;
+		bool dayChanged = false;
+		bool locationChanged = false;
+		if ((currentYear != prevYear) || (currentMonth != prevMonth) || (currentDay != prevDay))
+		{
+			dayChanged = true;
+		}
+
+		if ((currentLatitude != prevLatitude) || (currentLongitude != prevLongitude))
+		{
+			locationChanged = true;
+		}
+
+		// Avoid frequent RTS recalculation
+		if ((currentObjStr != prevObjStr) || (currentPlanetName != prevPlanet) || dayChanged || locationChanged)
+		{
+			rts = getRTSTime(core);
+		}
+		QString sTransit = qc_("Transit on this day is at:", "object narration; celestial event; passage across a meridian");
+		QString sRise = qc_("Rise on this day is at:", "object narration");
+		QString sSet = qc_("Set on this day is at:", "object narration");
+		double sunrise = 0.;
+		double sunset = 24.;
+		double hour(0);
+		int year, month, day;
+
+		// Rise
+		StelUtils::getDateFromJulianDay(rts[0]+utcShift, &year, &month, &day);
+		if (rts[3]==30 || rts[3]<0 || rts[3]>50 || day != currentDay) // no rise
+		{
+			res += qc_("The object does not rise on this day.", "object narration") + " ";
+		}
+		else
+		{
+			hour = StelUtils::getHoursFromJulianDay(rts[0]+utcShift);
+			res += QString("%1 %2. ").arg(sRise, StelUtils::hoursToHmsNarration(hour, true));
+
+			sunrise = hour;
+		}
+
+		// Transit
+		StelUtils::getDateFromJulianDay(rts[1]+utcShift, &year, &month, &day);
+		if (rts[3]==20 || day != currentDay) // no transit
+		{
+			res += qc_("There is no meridian transit on this day.", "object narration") + " ";
+		}
+		else {
+			hour = StelUtils::getHoursFromJulianDay(rts[1]+utcShift);
+
+			res += QString("%1 %2. ").arg(sTransit, StelUtils::hoursToHmsNarration(hour, true));
+		}
+
+		// Set
+		StelUtils::getDateFromJulianDay(rts[2]+utcShift, &year, &month, &day);
+		if (rts[3]==40 || rts[3]<0 || rts[3]>50 || day != currentDay) // no set
+		{
+			res += qc_("The object does not set on this day.", "object narration") + " ";
+		}
+		else {
+			hour = StelUtils::getHoursFromJulianDay(rts[2]+utcShift);
+			res += QString("%1 %2. ").arg(sSet, StelUtils::hoursToHmsNarration(hour, true));
+
+			sunset = hour;
+		}
+
+		if (isSun)
+		{
+			const double twilightAltitude = GETSTELMODULE(SpecificTimeMgr)->getTwilightAltitude();
+			QString alt = QString::number(twilightAltitude, 'f', 1);
+			Vec4d twilight = getRTSTime(core, twilightAltitude);
+			if (twilight[3]==0.)
+			{
+				QString sMTwilight = qc_("Morning twilight for a Solar altitude of %1 degrees begins at %2. ", "celestial event");
+				QString sETwilight = qc_("Evening twilight for a Solar altitude of %1 degrees ends at %2. ",   "celestial event");
+
+				hour = StelUtils::getHoursFromJulianDay(twilight[0]+utcShift);
+				res += QString(sMTwilight).arg(alt, StelUtils::hoursToHmsStr(hour, true));
+
+				hour = StelUtils::getHoursFromJulianDay(twilight[2]+utcShift);
+				res += QString(sETwilight).arg(alt, StelUtils::hoursToHmsStr(hour, true));
+			}
+			double lengthOfDay = StelUtils::fmodpos(sunset - sunrise, 24.); // prevent negative value
+			if (lengthOfDay<24. && rts[3]==0.) // avoid showing Daytime: 0h 00m
+			{
+				QString sDay = qc_("Duration of Daytime", "object narration");
+				res += QString("%1: %2").arg(sDay, StelUtils::hoursToHmsStr(lengthOfDay, true));
+			}
+		}
+
+		if (rts[3]<0.)
+		{
+			if (isSun)
+				res += qc_("It is Polar night", "object narration") + ". ";
+			else
+				res += q_("This object never rises") + ". ";
+		}
+		else if (rts[3]>50.)
+		{
+			if (isSun)
+				res += q_("It is Polar day") + ". ";
+			else
+				res += q_("This object is circumpolar and so never sets") + ". ";
+		}
+		// These never could have been seen before (??)
+		//else if (rts[0]>99. && rts[2]<99.)
+		//	res += q_("Polar dawn") + "<br />";
+		//else if (rts[0]<99. && rts[2]>99.)
+		//	res += q_("Polar dusk") + "<br />";
+
+
+		// Greatest Digression: limiting azimuth and hour angles for stars with upper culmination between pole and zenith
+		double dec_equ, ra_equ;
+		StelUtils::rectToSphe(&ra_equ,&dec_equ,eqNow);
+		const double latitude=static_cast<double>(core->getCurrentLocation().getLatitude())*M_PI_180;
+		if (((latitude>0.) && (dec_equ>=latitude)) || ((latitude<0.) && (dec_equ<=latitude)))
+		{
+			const double theta=acos(tan(latitude)/tan(dec_equ)); // hour angle
+			double az=asin(cos(dec_equ)/cos(latitude)); // azimuth (eastern)
+			// TRANSLATORS: Greatest Eastern Digression is the maximum azimuth for stars with upper culmination between pole and zenith
+			if (latitude<0.)
+				az=M_PI-az;
+			if (StelApp::getInstance().getFlagSouthAzimuthUsage())
+				az+=M_PI;
+
+			if (withDecimalDegreeCoords)
+			{
+				firstCoordinate  = StelUtils::narrateDecimal(az*M_180_PI, 2);
+				secondCoordinate = StelUtils::narrateDecimal(-theta*M_180_PI, 2);
+			}
+			else
+			{
+				firstCoordinate  = StelUtils::radToDmsNarration(az,true);
+				secondCoordinate = StelUtils::radToHmsNarration(-theta,true);
+			}
+
+			res += QString(qc_("Greatest Eastern Digression is at Azimuth %1, Hour Angle %2", "object narration")).arg(firstCoordinate, secondCoordinate) + ". ";
+
+			// TRANSLATORS: Greatest Western Digression is the maximum western azimuth for stars with upper culmination between pole and zenith
+			if (withDecimalDegreeCoords)
+			{
+				firstCoordinate  = StelUtils::narrateDecimal(StelUtils::fmodpos(-az, 2.*M_PI)*M_180_PI, 2);
+				secondCoordinate = StelUtils::narrateDecimal(theta*M_180_PI, 2);
+			}
+			else
+			{
+				firstCoordinate  = StelUtils::radToDmsNarration(StelUtils::fmodpos(-az, 2.*M_PI),true);
+				secondCoordinate = StelUtils::radToHmsNarration(theta,true);
+			}
+
+			res += QString(qc_("Greatest Western Digression is at Azimuth %1, Hour Angle %2", "object narration")).arg(firstCoordinate, secondCoordinate) + ". ";
+		}
+		res += getExtraInfoStrings(flags&RTSTime).join(". ");
+		res += omgr->getExtraInfoStrings(flags&RTSTime).join(". ");
+
+		prevObjStr = currentObjStr;
+		prevYear = currentYear;
+		prevMonth = currentMonth;
+		prevDay = currentDay;
+		prevLatitude = currentLatitude;
+		prevLongitude = currentLongitude;
+		prevPlanet = currentPlanetName;
+	}
+
+	if (flags&Extra)
+	{
+		if (getType()!=L1S("Star"))
+		{
+			QString pa;
+			const double par = static_cast<double>(getParallacticAngle(core));
+			if (withDecimalDegreeOther)
+				pa = StelUtils::radToDecDegNarration(par);
+			else
+				pa = StelUtils::radToDmsNarration(par, false);
+
+			res += QString("%1: %2. ").arg(qc_("The Parallactic Angle is", "object narration"), pa);
+		}
+		//res += getExtraInfoStrings(Extra).join("");
+		//res += omgr->getExtraInfoStrings(Extra).join("");
+	}
+
+	// Subclasses may want to exclude this by better wording sequence. For this, call with a modified flags mask that excludes what should not be repeated.
+	if (flags&IAUConstellation)
+	{
+		QString constel = (fuzzyEquals(eqNow.normSquared(),0.) ? QString() : ConstellationMgr::getIAUconstellationName(core->getIAUConstellation(eqNow)));
+		if (!constel.isEmpty())
+			res += QString("%1: %2. ").arg(q_("IAU Constellation"), constel);
+		res += getExtraInfoStrings(flags&IAUConstellation).join("");
+		res += omgr->getExtraInfoStrings(flags&IAUConstellation).join("");
+	}
+	if (flags&CulturalConstellation)
+	{
+		// Add constellation from convex hull, if that is enabled in the first place.
+		static QSettings *conf=StelApp::getInstance().getSettings();
+		static const bool hullsEnabled = conf->value("gui/skyculture_enable_hulls", false).toBool();
+		if (hullsEnabled)
+		{
+			QList<Constellation*> cList=cMgr->isObjectIn(this, true);
+			//QString constelStr = dash;
+			QStringList cNames;
+				for(const auto &cst: std::as_const(cList))
+					cNames.append(cst->getNamePronounce());
+				//constelStr = cNames.join(", ");
+			if (cNames.length()>0)
+				res.append(" " + qc_("In this skyculture, it lies within the area of", "object narration") + " "
+					   + cNames.join(QString(" %1 ").arg(qc_("and", "object narration"))) + ". ");
+		}
+
+		if (cMgr->hasZodiac() && (currentPlanetName==L1S("Earth")))
+		{
+			QString zodiacSystemLabel = cMgr->getZodiacSystemName();
+			if (!fuzzyEquals(eqNow.normSquared(),0.))
+				// TRANSLATORS: Its Zodiacal position is ... (with %1=zodiac system name)
+				res += QString(qc_("Its %1 Position is %2", "object narration")).arg(zodiacSystemLabel, cMgr->getZodiacCoordinate(eqNow, true)) + ". ";
+		}
+		if (cMgr->hasLunarSystem() && (currentPlanetName==L1S("Earth")))
+		{
+			QString lunarSystemLabel = cMgr->getLunarSystemName();
+			if (!fuzzyEquals(eqNow.normSquared(),0.))
+				// TRANSLATORS: Its lunar station position is ... (with %1=lunar system name)
+				res += QString(qc_("Its %1 Position is %2", "object narration")).arg(lunarSystemLabel, cMgr->getLunarSystemCoordinate(eqNow, true)) + ". ";
+		}
+	}
+
+	return res;
+}
+
+
 // Apply post processing on the info string
 void StelObject::postProcessInfoString(QString& str, const InfoStringGroup& flags) const
 {
+	static const QString FSI{"\u2068"}; // First strong isolate: Treat following text as isolated and in the direction of its first strong directional character.
+					    // ASSUMPTION: Can be used as autodetect feature? Mark all parts inside embeddings?
+	static const QString PDI{"\u2069"}; // Pop directional isolate: terminate scope of last LRI/RLI/FSI
+	static const QString LRM{"\u200e"}; // left-right-mark which may be present in Arab strings from translations.
+
+	str.replace(LRM, "");
+	str.replace(FSI, "<span dir='auto'>");
+	//str.replace(FSI, "<span dir='ltr'>");
+	str.replace(PDI, "</span>");
+
+	StelObjectMgr* omgr;
+	omgr=GETSTELMODULE(StelObjectMgr);
 	str.append(getExtraInfoStrings(Script).join(' '));
+	str.append(omgr->getExtraInfoStrings(Script).join(' '));
 	str.append(getExtraInfoStrings(DebugAid).join(' ')); // TBD: Remove for Release builds?
+	str.append(omgr->getExtraInfoStrings(DebugAid).join(' ')); // TBD: Remove for Release builds?
 
 	// hack for avoiding an empty line before table
-	str.replace(QRegExp("<br(\\s*/)?><table"), "<table");
-	// chomp trailing line breaks
-	str.replace(QRegExp("<br(\\s*/)?>\\s*$"), "");
+	static const QRegularExpression tableRe("<br(\\s*/)?><table");
+	static const QRegularExpression  brRe("<br(\\s*/)?>\\s*$");
+	str.replace(tableRe, "<table");
+	// chomp trailing line break (TBD: Why?)
+	str.replace(brRe, "");
+	// avoid two breaks (Comet Core diameter w/o table mode?)
+	static const QRegularExpression brbrRe("<br(\\s*/)?><br(\\s*/)?>");
+	str.replace(brbrRe, "<br/>");
+
 
 	if (flags&PlainText)
 	{
+		static const QRegularExpression h2Re("<h2[^>]*>");
+		static const QRegularExpression brRe2("<br(\\s*/)?>\\s*");
+		static const QRegularExpression tdRe1("<td\\s*>");
+		static const QRegularExpression tdRe2("<td \\w+='[^']*'>"); // Seen: style, align, colspan, rowspan. Always only one expression.
+		static const QRegularExpression tdRe3("<td \\w+=\"[^\"]*\">");
+		static const QRegularExpression tableRe2("<table\\s*>");
+		static const QRegularExpression tableRe3("<table style='[^']*'>");
+		static const QRegularExpression tableRe5("<table class='[^']*'>");
 		str.replace("<b>", "");
 		str.replace("</b>", "");
-		str.replace("<h2>", "");
+		str.replace(h2Re, "");
 		str.replace("</h2>", "\n");
-		str.replace(QRegExp("<br(\\s*/)?>"), "\n");
+		str.replace(brRe2, "\n");
 		str.replace("<tr>", "");
-		str.replace(QRegExp("<td(\\w*)?>"), "");
-		str.replace("<td>", "");
+		str.replace(tdRe1, "");
+		str.replace(tdRe2, "");
+		str.replace(tdRe3, "");
+		str.replace("</td>", "");
 		str.replace("</tr>", "\n");
-		str.replace(QRegExp("<table(\\w*)?>"), "");
+		str.replace(tableRe2, "");
+		str.replace(tableRe3, "");
+		str.replace(tableRe5, "");
 		str.replace("</table>", "");
-	}
-	else if(!(flags&NoFont))
-	{
-		Vec3f color = getInfoColor();
-		StelCore* core = StelApp::getInstance().getCore();
-		if (StelApp::getInstance().getFlagOverwriteInfoColor())
-		{
-			// make info text more readable...
-			color = StelApp::getInstance().getOverwriteInfoColor();
-		}
-		if (core->isBrightDaylight() && !StelApp::getInstance().getVisionModeNight())
-		{
-			// make info text more readable when atmosphere enabled at daylight.
-			color = StelApp::getInstance().getDaylightInfoColor();
-		}
-		str.prepend(QString("<font color=%1>").arg(color.toHtmlColor()));
-		str.append(QString("</font>"));
 	}
 }
 
 QVariantMap StelObject::getInfoMap(const StelCore *core) const
 {
+	const bool useSouthAzimuth = StelApp::getInstance().getFlagSouthAzimuthUsage();
 	QVariantMap map;
 
-	Vec3d pos;
 	double ra, dec, alt, az, glong, glat;
-	bool useOldAzimuth = StelApp::getInstance().getFlagSouthAzimuthUsage();
-
-	map.insert("type", getType());
 	// ra/dec
-	pos = getEquinoxEquatorialPos(core);
+	Vec3d pos = getEquinoxEquatorialPos(core);
 	StelUtils::rectToSphe(&ra, &dec, pos);
 	map.insert("ra", ra*M_180_PI);
 	map.insert("dec", dec*M_180_PI);
+	// polar distance
+	map.insert("pd", (M_PI_2 - dec)*M_180_PI);
 	map.insert("iauConstellation", core->getIAUConstellation(pos));
 
-	if (getType()!=QStringLiteral("Star"))
+	QString currentObjStr = getEnglishName();
+	if (currentObjStr == "") // If objects have no name, we need something to represent it.
+	{
+		currentObjStr = StelUtils::radToHmsStr(ra);
+	}
+
+	map.insert("type", getType());
+	map.insert("object-type", getObjectType());
+
+	if (getType()!=L1S("Star"))
 		map.insert("parallacticAngle", static_cast<double>(getParallacticAngle(core))*M_180_PI);
 
 	// Sidereal Time and hour angle
-	if (core->getCurrentLocation().planetName=="Earth")
+	if (core->getCurrentLocation().planetName==L1S("Earth"))
 	{
-		const double longitude=static_cast<double>(core->getCurrentLocation().longitude);
+		const double longitude=static_cast<double>(core->getCurrentLocation().getLongitude());
 		double sidereal=(get_mean_sidereal_time(core->getJD(), core->getJDE())  + longitude) / 15.;
-		sidereal=fmod(sidereal, 24.);
-		if (sidereal < 0.) sidereal+=24.;
+		sidereal=StelUtils::fmodpos(sidereal, 24.);
 		map.insert("meanSidTm", StelUtils::hoursToHmsStr(sidereal));
+		map.insert("meanSidTm-dd", sidereal * 15.);
 
 		sidereal=(get_apparent_sidereal_time(core->getJD(), core->getJDE()) + longitude) / 15.;
-		sidereal=fmod(sidereal, 24.);
-		if (sidereal < 0.) sidereal+=24.;
+		sidereal=StelUtils::fmodpos(sidereal, 24.);
 		map.insert("appSidTm", StelUtils::hoursToHmsStr(sidereal));
+		map.insert("appSidTm-dd", sidereal * 15.);
 
 		double ha = sidereal * 15.0 - ra * M_180_PI;
-		ha=fmod(ha, 360.0);
-		if (ha < 0.) ha+=360.0;
+		ha=StelUtils::fmodpos(ha, 360.0);
+		if (StelApp::getInstance().getFlagUseNegativeHourAngles() && ha>180.)
+			ha-=360.;
+
 		map.insert("hourAngle-dd", ha);
-		map.insert("hourAngle-hms", StelUtils::hoursToHmsStr(ha/15.0));
+		// This must show negative times if users want negative HA....
+		QString haStr=StelUtils::hoursToHmsStr(fabs(ha)/15.0);
+		if (ha<0)
+			haStr=haStr.trimmed().prepend('-');
+		map.insert("hourAngle-hms", haStr);
 	}
 
 	// ra/dec in J2000
@@ -795,13 +1775,13 @@ QVariantMap StelObject::getInfoMap(const StelCore *core) const
 	StelUtils::rectToSphe(&ra, &dec, pos);
 	map.insert("raJ2000", ra*M_180_PI);
 	map.insert("decJ2000", dec*M_180_PI);
+	// polar distance
+	map.insert("pdJ2000", (M_PI_2 - dec)*M_180_PI);
 
 	// apparent altitude/azimuth
 	pos = getAltAzPosApparent(core);
 	StelUtils::rectToSphe(&az, &alt, pos);
-	double direction = 3.; // N is zero, E is 90 degrees
-	if (useOldAzimuth)
-		direction = 2.;
+	const double direction = (useSouthAzimuth ? 2. : 3.); // 2: S is zero, W is 90 degrees. 3: N is zero, E is 90 degrees
 	az = direction*M_PI - az;
 	if (az > M_PI*2)
 		az -= M_PI*2;
@@ -823,12 +1803,14 @@ QVariantMap StelObject::getInfoMap(const StelCore *core) const
 	// galactic long/lat
 	pos = getGalacticPos(core);
 	StelUtils::rectToSphe(&glong, &glat, pos);
+	if (glong<0.) glong += 2.0*M_PI;
 	map.insert("glong", glong*M_180_PI);
 	map.insert("glat", glat*M_180_PI);
 
 	// supergalactic long/lat
 	pos = getSupergalacticPos(core);
 	StelUtils::rectToSphe(&glong, &glat, pos);
+	if (glong<0.) glong += 2.0*M_PI;
 	map.insert("sglong", glong*M_180_PI);
 	map.insert("sglat", glat*M_180_PI);
 
@@ -837,6 +1819,7 @@ QVariantMap StelObject::getInfoMap(const StelCore *core) const
 	// J2000
 	double eclJ2000 = ssmgr->getEarth()->getRotObliquity(2451545.0);
 	double ecl = ssmgr->getEarth()->getRotObliquity(core->getJDE());
+	map.insert("ecliptic-obliquity", ecl*M_180_PI);
 
 	// ecliptic longitude/latitude (J2000 frame)
 	StelUtils::rectToSphe(&ra_equ,&dec_equ, getJ2000EquatorialPos(core));
@@ -860,14 +1843,10 @@ QVariantMap StelObject::getInfoMap(const StelCore *core) const
 	map.insert("vmage", getVMagnitudeWithExtinction(core));
 
 	// angular size
-	double angularSize = 2.*getAngularSize(core)*M_PI_180;
-	bool sign;
-	double deg;
-	StelUtils::radToDecDeg(angularSize, sign, deg);
-	if (!sign)
-		deg *= -1;
+	double angularSize = getAngularRadius(core)*(2.*M_PI_180);
+	Q_ASSERT(angularSize>=0.);
 	map.insert("size", angularSize);
-	map.insert("size-dd", deg);
+	map.insert("size-dd", angularSize*M_180_PI);
 	map.insert("size-deg", StelUtils::radToDecDegStr(angularSize, 5));
 	map.insert("size-dms", StelUtils::radToDmsPStr(angularSize, 2));
 
@@ -878,13 +1857,87 @@ QVariantMap StelObject::getInfoMap(const StelCore *core) const
 	// 'above horizon' flag
 	map.insert("above-horizon", isAboveRealHorizon(core));
 
-	Vec3d rts = getRTSTime(StelApp::getInstance().getCore()).toVec3d();
-	map.insert("rise", StelUtils::hoursToHmsStr(rts[0], true));
-	map.insert("rise-dhr", rts[0]);
-	map.insert("transit", StelUtils::hoursToHmsStr(rts[1], true));
-	map.insert("transit-dhr", rts[1]);
-	map.insert("set", StelUtils::hoursToHmsStr(rts[2], true));
-	map.insert("set-dhr", rts[2]);
+	const double currentJD = core->getJD();
+	const double utcShift = core->getUTCOffset(currentJD) / 24.; // Fix DST shift...
+	int currentYear, currentMonth, currentDay;
+	const StelLocation currentLocation=core->getCurrentLocation();
+	double currentLatitude=static_cast<double>(currentLocation.getLatitude());
+	double currentLongitude=static_cast<double>(currentLocation.getLongitude());
+	const QString currentPlanet = core->getCurrentPlanet()->getEnglishName();
+	StelUtils::getDateFromJulianDay(currentJD+utcShift, &currentYear, &currentMonth, &currentDay);
+
+	static int prevYear, prevMonth, prevDay;
+	static Vec4d rts;
+	static QString prevObjStr, prevPlanet;
+	static double prevLatitude, prevLongitude;
+	bool dayChanged = false;
+	bool locationChanged = false;
+	if ((currentYear != prevYear) || (currentMonth != prevMonth) || (currentDay != prevDay))
+	{
+		dayChanged = true;
+	}
+
+	if ((currentLatitude != prevLatitude) || (currentLongitude != prevLongitude))
+	{
+		locationChanged = true;
+	}
+
+	// Avoid frequent RTS recalculation
+	if ((currentObjStr != prevObjStr) || (currentPlanet != prevPlanet) || dayChanged || locationChanged)
+	{
+		rts = getRTSTime(core);
+	}
+	if (rts[3]>-1000.)
+	{
+		const double utcShift = core->getUTCOffset(core->getJD()) / 24.; // Fix DST shift...
+		int hr, min, sec;
+		StelUtils::getTimeFromJulianDay(rts[1]+utcShift, &hr, &min, &sec);
+		double hours=hr+static_cast<double>(min)/60. + static_cast<double>(sec)/3600.;
+
+		int year, month, day;
+		StelUtils::getDateFromJulianDay(core->getJD()+utcShift, &year, &month, &currentDay);
+		StelUtils::getDateFromJulianDay(rts[1]+utcShift, &year, &month, &day);
+		if (rts[3]==20 || day != currentDay) // no transit
+		{
+			map.insert("transit", "---");
+		}
+		else {
+			map.insert("transit", StelUtils::hoursToHmsStr(hours, true));
+			map.insert("transit-dhr", hours);
+		}
+
+		StelUtils::getDateFromJulianDay(rts[0]+utcShift, &year, &month, &day);
+		if (rts[3]==30 || rts[3]<0 || rts[3]>50 || day != currentDay) // no rise
+		{
+			map.insert("rise", "---");
+		}
+		else {
+			StelUtils::getTimeFromJulianDay(rts[0]+utcShift, &hr, &min, &sec);
+			hours=hr+static_cast<double>(min)/60. + static_cast<double>(sec)/3600.;
+			map.insert("rise", StelUtils::hoursToHmsStr(hours, true));
+			map.insert("rise-dhr", hours);
+		}
+
+		StelUtils::getDateFromJulianDay(rts[2]+utcShift, &year, &month, &day);
+		if (rts[3]==40 || rts[3]<0 || rts[3]>50 || day != currentDay) // no set
+		{
+			map.insert("set", "---");
+		}
+		else {
+			StelUtils::getTimeFromJulianDay(rts[2]+utcShift, &hr, &min, &sec);
+			hours=hr+static_cast<double>(min)/60. + static_cast<double>(sec)/3600.;
+			map.insert("set", StelUtils::hoursToHmsStr(hours, true));
+			map.insert("set-dhr", hours);
+		}
+	}
+
+	prevObjStr = currentObjStr;
+	prevYear = currentYear;
+	prevMonth = currentMonth;
+	prevDay = currentDay;
+	prevLatitude = currentLatitude;
+	prevLongitude = currentLongitude;
+	prevPlanet = currentPlanet;
 
 	return map;
 }
@@ -892,14 +1945,14 @@ QVariantMap StelObject::getInfoMap(const StelCore *core) const
 void StelObject::setExtraInfoString(const InfoStringGroup& flags, const QString &str)
 {
 	extraInfoStrings.remove(flags); // delete all entries with these flags
-	if (str.length()>0)
+	if (!str.isEmpty())
 		extraInfoStrings.insert(flags, str);
 }
 void StelObject::addToExtraInfoString(const StelObject::InfoStringGroup &flags, const QString &str)
 {
 	// Avoid insertion of full duplicates!
 	if (!extraInfoStrings.contains(flags, str))
-		extraInfoStrings.insertMulti(flags, str);
+		extraInfoStrings.insert(flags, str);
 }
 
 QStringList StelObject::getExtraInfoStrings(const InfoStringGroup& flags) const
@@ -911,7 +1964,6 @@ QStringList StelObject::getExtraInfoStrings(const InfoStringGroup& flags) const
 		if (i.key() & flags)
 		{
 			QString val=i.value();
-			// TODO: Maybe exclude DebugAid flags from Release builds?
 			if (flags&DebugAid)
 				val.prepend("DEBUG: ");
 			// For unclear reasons the sequence of entries can be preserved by *pre*pending in the returned list.
@@ -924,12 +1976,123 @@ QStringList StelObject::getExtraInfoStrings(const InfoStringGroup& flags) const
 
 void StelObject::removeExtraInfoStrings(const InfoStringGroup& flags)
 {
-	QMultiMap<InfoStringGroup, QString>::iterator i = extraInfoStrings.begin();
-	while (i != extraInfoStrings.end())
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+	QMutableMultiMapIterator<InfoStringGroup, QString> i(extraInfoStrings);
+#else
+	QMutableMapIterator<InfoStringGroup, QString> i(extraInfoStrings);
+#endif
+	while (i.hasNext())
 	{
+		i.next();
 		if (i.key() & flags)
-			i=extraInfoStrings.erase(i);
-		else
-			++i;
+			i.remove();
 	}
+}
+
+// Add horizontal coordinates of Sun and Moon where useful
+QString StelObject::getSolarLunarInfoString(const StelCore *core, const InfoStringGroup& flags) const
+{
+	QString str;
+	QTextStream oss(&str);
+	static SolarSystem *ssystem=GETSTELMODULE(SolarSystem);
+	PlanetP earth = ssystem->getEarth();
+	if ((core->getCurrentPlanet()==earth) && (flags&SolarLunarPosition))
+	{
+		const bool withTables = StelApp::getInstance().getFlagUseFormattingOutput();
+		const bool withDecimalDegree = StelApp::getInstance().getFlagUseDecDegreesCoords();
+
+		if (withTables)
+			oss << "<table class='info-string'>";
+		const bool useSouthAzimuth = StelApp::getInstance().getFlagSouthAzimuthUsage();
+		const bool withDesignations = StelApp::getInstance().getFlagUseCCSDesignation();
+		double az, alt;
+		QString azStr, altStr;
+
+		if (getEnglishName()!="Sun")
+		{
+			StelUtils::rectToSphe(&az,&alt,ssystem->getSun()->getAltAzPosAuto(core));
+			az = (useSouthAzimuth? 2. : 3.)*M_PI - az;
+			if (az > M_PI*2)
+				az -= M_PI*2;
+			azStr  = (withDecimalDegree ? StelUtils::radToDecDegStr(az)  : StelUtils::radToDmsStr(az,false));
+			altStr = (withDecimalDegree ? StelUtils::radToDecDegStr(alt) : StelUtils::radToDmsStr(alt,false));
+
+			// TRANSLATORS: Azimuth/Altitude
+			const QString SolarAzAlt = (withDesignations ? qc_("Solar A/a", "celestial coordinate system") : qc_("Solar Az./Alt.", "celestial coordinate system"));
+			if (withTables)
+			{
+				oss << QString("<tr><td>%1:</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td></tr>").arg(SolarAzAlt, azStr, altStr);
+			}
+			else
+				oss << QString("%1: %2/%3<br/>").arg(SolarAzAlt, azStr, altStr);
+		}
+		if (getEnglishName()!="Moon")
+		{
+			StelUtils::rectToSphe(&az,&alt,ssystem->getMoon()->getAltAzPosAuto(core));
+			az = (useSouthAzimuth? 2. : 3.)*M_PI - az;
+			if (az > M_PI*2)
+				az -= M_PI*2;
+			azStr  = (withDecimalDegree ? StelUtils::radToDecDegStr(az)  : StelUtils::radToDmsStr(az,false));
+			altStr = (withDecimalDegree ? StelUtils::radToDecDegStr(alt) : StelUtils::radToDmsStr(alt,false));
+
+			// TRANSLATORS: Azimuth/Altitude
+			const QString LunarAzAlt = (withDesignations ? qc_("Lunar A/a", "celestial coordinate system") : qc_("Lunar Az./Alt.", "celestial coordinate system"));
+			if (withTables)
+			{
+				oss << QString("<tr><td>%1:</td><td style='text-align:right;'>%2/</td><td style='text-align:right;'>%3</td></tr>").arg(LunarAzAlt, azStr, altStr);
+			}
+			else
+				oss << QString("%1: %2/%3<br/>").arg(LunarAzAlt, azStr, altStr);
+		}
+		if (withTables)
+			oss << "</table>";
+	}
+	return str;
+}
+
+// Add horizontal coordinates of Sun and Moon where useful
+QString StelObject::getSolarLunarNarration(const StelCore *core, const InfoStringGroup& flags) const
+{
+	QString str;
+	QTextStream oss(&str);
+	static SolarSystem *ssystem=GETSTELMODULE(SolarSystem);
+	PlanetP earth = ssystem->getEarth();
+	if ((core->getCurrentPlanet()==earth) && (flags&SolarLunarPosition))
+	{
+		const bool withDecimalDegree = StelApp::getInstance().getFlagUseDecDegreesCoords();
+
+		const bool useSouthAzimuth = StelApp::getInstance().getFlagSouthAzimuthUsage();
+		double az, alt;
+		QString azStr, altStr;
+
+		if (getEnglishName()!="Sun")
+		{
+			StelUtils::rectToSphe(&az,&alt,ssystem->getSun()->getAltAzPosAuto(core));
+			az = (useSouthAzimuth? 2. : 3.)*M_PI - az;
+			if (az > M_PI*2)
+				az -= M_PI*2;
+			azStr  = (withDecimalDegree ? StelUtils::narrateDecimal(az*M_180_PI, 2)  : StelUtils::radToDmsNarration(az,false));
+			altStr = (withDecimalDegree ? StelUtils::narrateDecimal(alt*M_180_PI, 2) : StelUtils::radToDmsNarration(alt,false));
+
+			oss << QString(qc_("The Sun's azimuth is %1, and its altitude is %2.", "object narration")).arg(azStr, altStr);
+		}
+		if (getEnglishName()!="Moon")
+		{
+			StelUtils::rectToSphe(&az,&alt,ssystem->getMoon()->getAltAzPosAuto(core));
+			az = (useSouthAzimuth? 2. : 3.)*M_PI - az;
+			if (az > M_PI*2)
+				az -= M_PI*2;
+			azStr  = (withDecimalDegree ? StelUtils::narrateDecimal(az*M_180_PI, 2)  : StelUtils::radToDmsNarration(az,false));
+			altStr = (withDecimalDegree ? StelUtils::narrateDecimal(alt*M_180_PI, 2) : StelUtils::radToDmsNarration(alt,false));
+
+			oss << QString(qc_("The Moon's azimuth is %1, and its altitude is %2.", "object narration")).arg(azStr, altStr);
+		}
+	}
+	return str;
+}
+
+QString StelObject::getNarration(const StelCore *core, const InfoStringGroup &flags) const
+{
+	Q_UNUSED(core) Q_UNUSED(flags)
+	return getNameI18n();
 }

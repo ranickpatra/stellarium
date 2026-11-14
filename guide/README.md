@@ -15,7 +15,7 @@ The classic TeX environment on Windows is MikTeX, a very complete TeX environmen
 
 Alternatively, to be inline with the other Systems, consider TeXlive also for Windows (https://www.tug.org/texlive/windows.html). 
 
-Windows is still the most common desktop platform in 2019, like it or not. However, its command shell is an embarassing relic of the DOS era and a far cry from tools available on the tiniest Linux system. 
+Windows is still the most common desktop platform in 2019, like it or not. However, its command shell is an embarrassing relic of the DOS era and a far cry from tools available on the tiniest Linux system. 
 The shortcomings of the command line have brought several Options for Linux-affine working:
 
 * GNUWin32 tools
@@ -39,21 +39,19 @@ whether your System is properly identified. Note that it does not check whether 
 
 ### Linux
 
-These instructions are based on Ubuntu. Find out and add the changes required for your System.
+These instructions are based on Ubuntu and TeXlive (https://www.tug.org/texlive/quickinstall.html). Find out and add the changes required for your System.
 
-Ubuntu 14.04's TeXlive is a bit outdated. Install TeXlive directly. See https://www.tug.org/texlive/quickinstall.html
-
-On Ubuntu 18.04 and later the following should work: 
+On Ubuntu 22.04 and later the following should work: 
 
 ```
 sudo apt-get install texlive-base texlive-bibtex-extra texlive-latex-recommended \
-texlive-latex-extra texlive-pictures texlive-fonts-recommended biber make
+texlive-latex-extra texlive-pictures texlive-fonts-recommended texlive-fonts-extra biber make
 ```
 
 
-### Mac OS X
+### macOS
 
-It is assumed that some system similar to TeXlive is available for Mac OS X. See https://www.tug.org/texlive/quickinstall.html
+It is assumed that some system similar to TeXlive is available for macOS. See https://www.tug.org/mactex/
 
 
 

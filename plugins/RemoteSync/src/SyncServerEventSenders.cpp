@@ -32,7 +32,7 @@ using namespace SyncProtocol;
 
 SyncServerEventSender::SyncServerEventSender()
 	: isDirty(false)
-	, server(Q_NULLPTR)
+	, server(nullptr)
 {
 	core = StelApp::getInstance().getCore();
 }
@@ -45,7 +45,7 @@ void SyncServerEventSender::broadcastMessage(const SyncMessage &msg)
 TimeEventSender::TimeEventSender()
 {
 	//this is the only event we need to listen to
-	connect(core,SIGNAL(timeSyncOccurred(double)),this,SLOT(reactToStellariumEvent()));
+	connect(core, &StelCore::timeSyncOccurred, this, &TimeEventSender::reactToStellariumEvent);
 }
 
 Time TimeEventSender::constructMessage()
@@ -59,7 +59,8 @@ Time TimeEventSender::constructMessage()
 
 LocationEventSender::LocationEventSender()
 {
-	connect(core,SIGNAL(targetLocationChanged(StelLocation)), this, SLOT(reactToStellariumEvent()));
+	//connect(core,&StelCore::targetLocationChanged, this, &LocationEventSender::reactToStellariumEvent);
+	connect(core,&StelCore::locationChanged, this, &LocationEventSender::reactToStellariumEvent);
 }
 
 Location LocationEventSender::constructMessage()
@@ -87,7 +88,7 @@ Location LocationEventSender::constructMessage()
 SelectionEventSender::SelectionEventSender()
 {
 	objMgr = &StelApp::getInstance().getStelObjectMgr();
-	connect(objMgr,SIGNAL(selectedObjectChanged(StelModule::StelModuleSelectAction)),this,SLOT(reactToStellariumEvent()));
+	connect(objMgr, &StelObjectMgr::selectedObjectChanged, this, &SelectionEventSender::reactToStellariumEvent);
 }
 
 Selection SelectionEventSender::constructMessage()
@@ -111,7 +112,7 @@ Selection SelectionEventSender::constructMessage()
 StelPropertyEventSender::StelPropertyEventSender()
 {
 	propMgr = StelApp::getInstance().getStelPropertyManager();
-	connect(propMgr, SIGNAL(stelPropertyChanged(StelProperty*,QVariant)), this, SLOT(sendStelPropChange(StelProperty*,QVariant)));
+	connect(propMgr, &StelPropertyMgr::stelPropertyChanged, this, &StelPropertyEventSender::sendStelPropChange);
 }
 
 void StelPropertyEventSender::sendStelPropChange(StelProperty* prop, const QVariant &val)
@@ -169,30 +170,6 @@ void ViewEventSender::update()
 	if(!(qFuzzyCompare(viewDir[0], lastView[0]) && qFuzzyCompare(viewDir[1], lastView[1]) && qFuzzyCompare(viewDir[2], lastView[2])))
 	{
 		lastView = viewDir;
-		broadcastMessage(constructMessage());
-	}
-}
-
-FovEventSender::FovEventSender()
-	: lastFov(0.0)
-{
-	mvMgr = core->getMovementMgr();
-}
-
-
-SyncProtocol::Fov FovEventSender::constructMessage()
-{
-	Fov msg;
-	msg.fov = mvMgr->getCurrentFov();
-	return msg;
-}
-
-void FovEventSender::update()
-{
-	double curFov = mvMgr->getCurrentFov();
-	if(curFov-lastFov != 0.0)
-	{
-		lastFov = curFov;
 		broadcastMessage(constructMessage());
 	}
 }

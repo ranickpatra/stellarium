@@ -2,7 +2,7 @@
 The stellarium telescope library helps building
 telescope server programs, that can communicate with stellarium
 by means of the stellarium TCP telescope protocol.
-It also contains smaple server classes (dummy, Meade LX200).
+It also contains sample server classes (dummy, Meade LX200).
 
 Author and Copyright of this file and of the stellarium telescope library:
 Johannes Gajdosik, 2006
@@ -26,9 +26,10 @@ Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
 #define SOCKET_HPP
 
 #include <QtGlobal>
+#include "TelescopeLogging.hpp"
 
 #ifdef Q_OS_WIN
-#include <winsock2.h>
+#include <WinSock2.h>
 #include <fcntl.h>
 
 //FIXME: Remove these macro-redefinitions, we have no business messing with them
@@ -52,10 +53,8 @@ static inline int SetNonblocking(int s)
 }
 #define SETNONBLOCK(s) SetNonblocking(s)
 #define SOCKLEN_T int
-#define close closesocket
 #define IS_INVALID_SOCKET(fd) (fd==INVALID_SOCKET)
 #define STRERROR(x) x
-//  #define DEBUG5
 
 #else
 
@@ -77,6 +76,7 @@ static inline int SetNonblocking(int s)
 
 #endif //Q_OS_WIN
 
+//! retrieve system time in microseconds from the UNIX epoch (1970)
 long long int GetNow(void);
 
 class Server;
@@ -93,9 +93,15 @@ public:
 		return IS_INVALID_SOCKET(fd);
 	}
 	virtual bool isTcpConnection() const { return false; }
-	virtual void sendPosition(unsigned int ra_int, int dec_int, int status) {Q_UNUSED(ra_int); Q_UNUSED(dec_int); Q_UNUSED(status);}
+	virtual void sendPosition(unsigned int ra_int, int dec_int, int status) {Q_UNUSED(ra_int) Q_UNUSED(dec_int) Q_UNUSED(status)}
 	
 protected:
+	//! Closes a native socket with the platform's socket API.
+	static void closeSocket(SOCKET socket);
+
+	//! Prefix identifying the telescope that owns this transport.
+	TelescopeLogPrefix getLogPrefix() const;
+
 	Socket(Server &server, SOCKET fd) : server(server), fd(fd) {}
 	Server & server;
 	

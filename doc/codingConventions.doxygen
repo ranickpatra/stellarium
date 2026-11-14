@@ -25,7 +25,10 @@
 
 The increasing number of contributors require that we clearly define coding rules and guidelines. Although for historical reasons the current code of Stellarium does not always comply to these rules, they should now be respected for any addition or modification of the code.
 
-Settings for <a href="http://doc.qt.io/qtcreator/index.html">QtCreator</a> IDE you can get <a href="http://www.stellarium.org/files/ide/stellarium-ide.xml">here</a> (or <a href="http://www.stellarium.org/files/ide/stellarium-ide.xml.tgz">TGZ archive</a> for it).
+For <a href="http://doc.qt.io/qtcreator/index.html">QtCreator</a> IDE you can find the settings below. Note that to have the ClangFormat settings work as expected you need to disable *Clean whitespace* in *Preferences* → *Text Editor* → *Behavior* → *Cleanups Upon Saving*, otherwise editing will work fine, but saving will reset the formatting of the file to a wrong state.
+ - <a href="https://github.com/Stellarium/stellarium/blob/master/.clang-format">ClangFormat config file</a> for QtCreator ≥ 13,
+ - <a href="stellarium-ide.xml">Legacy XML file</a> for the built-in indentor of QtCreator < 13.
+
 
 @section stylistic_conventions_sec Stylistic Conventions
  - Source code should use the ASCII character set. Characters such as '&egrave;'
@@ -59,8 +62,7 @@ Settings for <a href="http://doc.qt.io/qtcreator/index.html">QtCreator</a> IDE y
 #define MIN_WIDTH 3
 static const QString VERSION = "0.10.1";
  @endcode
- - Indentation should be done with tabs, not spaces. This allows developers
- to use their favorite indent size without changing the code. 
+ - Indentation should be done with tabs, not spaces. Tab size is 8 characters.
  - When wrapping lines from long function calls, where the wrapped line does not start at the same level of indentation as the start of the function call, tab up to the start of the function call, and then use spaces to the opening parenthesis.
  @verbatim
  [--tab-][--tab-][--tab-]someFunction(param, ...
@@ -141,7 +143,7 @@ Use C++ replacement for C functions and %Qt replacements for C++ functions/STL w
  - Use <a href="http://doc.qt.io/qt-5/qstring.html">QString</a>
  instead of @c std::string or <tt>char *</tt>
  - Use <a href="http://doc.qt.io/qt-5/qiodevice.html">QIODevice</a>
- instead of C file managment with @c fopen()
+ instead of C file management with @c fopen()
  - Pass objects as references when needed instead of using pointers.
  - Include standard headers the C++ way, it is more portable:
  @code
@@ -157,7 +159,7 @@ Use C++ replacement for C functions and %Qt replacements for C++ functions/STL w
 #define RADIUS 12 // Bad 
 static const int RADIUS = 12; // Good
  @endcode
- - Use stdc++ math functions instead of C ones. There are more portable and are also overrided for float, thus may be faster.
+ - Use stdc++ math functions instead of C ones. They're more portable and are also overridden for float, thus may be faster.
  @code
 double cosLat = cos(lat);     // Bad 
 double cosLat = std::cos(lat); // Good
@@ -181,7 +183,7 @@ A string literal can be marked for translation in with three different macros,
 
 Several guidelines:
  - Translatable text in sources or data files should be written in English, encoded in ASCII or UTF-8 if needed.
- - Translatable strings should be modified only if really necessary. Any modification to one of them means that all the translators for all the langages will have to re-translate the new string.
+ - Translatable strings should be modified only if really necessary. Any modification to one of them means that all the translators for all the languages will have to re-translate the new string.
  This also means that new strings should be chosen carefully, to avoid the need to modify them later.
  - Do not concatenate strings, use @c QString::arg() instead. Concatenated strings are very hard (or even impossible) to translate.
 @code
@@ -193,7 +195,7 @@ text = q_("Distance: %1AU").arg(distance);          // Good
 QString myTranslatedText(q_("Distance of the planet :")); // Bad
 QString myTranslatedText(q_("Distance of the planet:"));  // Good
 @endcode
- - In general no translated text should be output on the console because there are problems when string and wstring are output on the same console. This means that you should never use wcout, wcerr or wprintf(). Console output should be used for informations, errors and warnings which are not required by the user in nominal use.
+ - In general no translated text should be output on the console because there are problems when string and wstring are output on the same console. This means that you should never use wcout, wcerr or wprintf(). Console output should be used for information, errors and warnings which are not required by the user in nominal use.
  - Errors and warnings should be output in the stderr file, not stdout. [OBSOLETE? We use qDebug() and qWarning() now.]
 @code
 std::cout << "Error while opening file " << qPrintable(myFileName) << "." << std::endl; // Bad 

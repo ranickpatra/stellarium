@@ -21,7 +21,15 @@
 #include "StoredPointsDialog.hpp"
 #include "ui_storedPointsDialog.h"
 
-StoredPointsDialog::StoredPointsDialog(): StelDialog("TelescopeControlStoredPoints")
+#include "StelApp.hpp"
+#include "StelCore.hpp"
+#include "StelModuleMgr.hpp"
+#include "StelObjectMgr.hpp"
+#include "StelUtils.hpp"
+#include "StelTranslator.hpp"
+
+StoredPointsDialog::StoredPointsDialog(const QString &dialogName, QObject* parent):
+	StelDialog(dialogName, parent)
 {
 	ui = new Ui_StoredPoints;
 	storedPointsListModel = new QStandardItemModel(0, ColumnCount);
@@ -43,16 +51,16 @@ void StoredPointsDialog::createDialogContent()
 {
 	ui->setupUi(dialog);
 	//Inherited connect
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &StoredPointsDialog::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
-	connect(ui->pushButtonAddPoint,   SIGNAL(clicked()), this, SLOT(buttonAddPressed()));
-	connect(ui->pushButtonRemovePoint,SIGNAL(clicked()), this, SLOT(buttonRemovePressed()));
-	connect(ui->pushButtonClearList,  SIGNAL(clicked()), this, SLOT(buttonClearPressed()));
+	connect(ui->pushButtonAddPoint,    &QPushButton::clicked, this, &StoredPointsDialog::buttonAddPressed);
+	connect(ui->pushButtonRemovePoint, &QPushButton::clicked, this, &StoredPointsDialog::buttonRemovePressed);
+	connect(ui->pushButtonClearList,   &QPushButton::clicked, this, &StoredPointsDialog::buttonClearPressed);
 
-	connect(ui->pushButtonCurrent, SIGNAL(clicked()), this, SLOT(getCurrentObjectInfo()));
-	connect(ui->pushButtonCenter, SIGNAL(clicked()), this, SLOT(getCenterInfo()));
+	connect(ui->pushButtonCurrent, &QPushButton::clicked, this, &StoredPointsDialog::getCurrentObjectInfo);
+	connect(ui->pushButtonCenter, &QPushButton::clicked, this, &StoredPointsDialog::getCenterInfo);
 
 	//Initializing the list of telescopes
 	storedPointsListModel->setColumnCount(ColumnCount);
@@ -89,12 +97,12 @@ void StoredPointsDialog::populatePointsList(QVariantList list)
 
 void StoredPointsDialog::setHeaderNames()
 {
-	QStringList headerStrings;
-	// TRANSLATORS: Symbol for "number"
-	headerStrings << q_("#");
-	headerStrings << q_("Name");
-	headerStrings << q_("Right Ascension (J2000)");
-	headerStrings << q_("Declination (J2000)");
+	const QStringList headerStrings = {
+		// TRANSLATORS: Symbol for "number"
+		qc_("#", "numero sign"),
+		q_("Name"),
+		q_("Right Ascension (J2000)"),
+		q_("Declination (J2000)")};
 	storedPointsListModel->setHorizontalHeaderLabels(headerStrings);
 }
 
@@ -134,7 +142,7 @@ void StoredPointsDialog::buttonClearPressed()
 
 void StoredPointsDialog::addModelRow(int number, QString name, QString RA, QString Dec)
 {
-	QStandardItem* tempItem = Q_NULLPTR;
+	QStandardItem* tempItem = nullptr;
 
 	tempItem = new QStandardItem(QString::number(number+1));
 	tempItem->setEditable(false);

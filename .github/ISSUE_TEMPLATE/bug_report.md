@@ -15,7 +15,7 @@ Before reporting an issue, please *absolutely make sure* to check the recent ope
 (https://github.com/Stellarium/stellarium/issues?q=is%3Aissue+is%3Aclosed) 
 whether it has been reported and solved/closed already! Don't report a new issue in this case, you may join the discussion.
 
-Sometimes installing our almost weekly Beta version (i.e., the latest development version) helps: https://github.com/Stellarium/stellarium-data/releases/tag/beta
+Sometimes installing our almost weekly Beta version (i.e., the latest development version) helps: https://github.com/Stellarium/stellarium-data/releases/tag/weekly-snapshot
 
 Also look into the wiki https://github.com/Stellarium/stellarium/wiki/Common-Problems-for-the-current-version 
 and FAQ https://github.com/Stellarium/stellarium/wiki/FAQ 
@@ -23,7 +23,7 @@ and check if you are attempting to report a known issue. Don't report in this ca
 
 Also look into the User Guide before reporting unexpected but correct behaviour. Don't report in this case.
 
-If you miss translations, please help us with your language and join our translators at Transifex: https://www.transifex.com/stellarium/stellarium/dashboard/
+If you miss translations, please help us with your language and join our translators at Transifex: https://app.transifex.com/stellarium/stellarium/dashboard/
 
 If you want to report a feature wish, delete these template lines above and below, and fill in. 
 

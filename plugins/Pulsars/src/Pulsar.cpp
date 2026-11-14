@@ -17,7 +17,6 @@
  */
 
 #include "Pulsar.hpp"
-#include "Pulsars.hpp"
 #include "StelObject.hpp"
 #include "StelPainter.hpp"
 #include "StelApp.hpp"
@@ -25,11 +24,11 @@
 #include "StelTexture.hpp"
 #include "StelUtils.hpp"
 #include "StelTranslator.hpp"
-#include "StelModuleMgr.hpp"
 #include "StelSkyDrawer.hpp"
 #include "StelProjector.hpp"
 #include "StelLocaleMgr.hpp"
 #include "StelTranslator.hpp"
+#include "Planet.hpp"
 
 #include <QTextStream>
 #include <QDebug>
@@ -53,6 +52,7 @@ Vec3f Pulsar::glitchColor = Vec3f(0.2f,0.3f,1.0f);
 Pulsar::Pulsar(const QVariantMap& map)
 	: initialized(false)
 	, designation("")
+	, bdesignation("")
 	, pulsarName("")
 	, RA(0.)
 	, DE(0.)
@@ -69,6 +69,7 @@ Pulsar::Pulsar(const QVariantMap& map)
 	, s600(0.)
 	, s1400(0.)
 	, distance(0.)
+	, adistance(0.)
 	, glitch(-1)
 	, notes("")
 {
@@ -80,6 +81,7 @@ Pulsar::Pulsar(const QVariantMap& map)
 	}
 
 	designation  = map.value("designation").toString();
+	bdesignation  = map.value("bdesignation").toString();
 	pulsarName = map.value("name").toString();
 	parallax = map.value("parallax").toFloat();
 	period = map.value("period").toDouble();
@@ -98,16 +100,17 @@ Pulsar::Pulsar(const QVariantMap& map)
 	s600 = map.value("s600").toFloat();
 	s1400 = map.value("s1400").toFloat();
 	distance = map.value("distance").toFloat();
+	adistance = map.value("adistance").toFloat();
 	glitch = map.value("glitch").toInt();
 	notes = map.value("notes").toString();
 
 	// If barycentric period not set then calculate it
-	if (period==0 && frequency>0)
+	if (qFuzzyCompare(period,0.) && frequency>0.)
 	{
 		period = 1/frequency;
 	}
 	// If barycentric period derivative not set then calculate it
-	if (pderivative==0)
+	if (qFuzzyCompare(pderivative,0.))
 	{
 		pderivative = getP1(period, pfrequency);
 	}
@@ -124,6 +127,7 @@ QVariantMap Pulsar::getMap(void) const
 {
 	QVariantMap map;
 	map["designation"] = designation;
+	map["bdesignation"] = bdesignation;
 	map["name"] = pulsarName;
 	map["parallax"] = parallax;
 	map["bperiod"] = bperiod;
@@ -142,6 +146,7 @@ QVariantMap Pulsar::getMap(void) const
 	map["s600"] = s600;
 	map["s1400"] = s1400;
 	map["distance"] = distance;
+	map["adistance"] = adistance;
 	map["glitch"] = glitch;
 	map["notes"] = notes;
 
@@ -158,7 +163,7 @@ QString Pulsar::getNameI18n(void) const
 	QString name = getEnglishName();
 	const StelTranslator& trans = StelApp::getInstance().getLocaleMgr().getSkyTranslator();
 	if (!pulsarName.isEmpty())
-		name = trans.qtranslate(pulsarName);
+		name = trans.qtranslate(pulsarName, "pulsar");
 
 	return name;
 }
@@ -178,15 +183,15 @@ QString Pulsar::getInfoString(const StelCore* core, const InfoStringGroup& flags
 		oss << "<h2>";
 		if (!getNameI18n().isEmpty())
 			oss << getNameI18n() << "< br />";
-		oss << getDesignation() << "</h2>";
+		oss << (getBDesignation().isEmpty() ? getDesignation() : QString("%1 - %2").arg(getDesignation(), getBDesignation())) << "</h2>";
 	}
 
 	if (flags&ObjectType)
 	{
 		if (glitch==0)
-			oss << QString("%1: <b>%2</b>").arg(q_("Type"), q_("pulsar")) << "<br />";
+			oss << QString("%1: <b>%2</b><br />").arg(q_("Type"), getObjectTypeI18n());
 		else
-			oss << QString("%1: <b>%2</b> (%3: %4)").arg(q_("Type"), q_("pulsar with glitches"), q_("registered glitches"), QString::number(glitch)) << "<br />";
+			oss << QString("%1: <b>%2</b> (%3: %4)<br />").arg(q_("Type"), getObjectTypeI18n(), q_("registered glitches"), QString::number(glitch));
 	}
 
 	// Ra/Dec etc.
@@ -194,74 +199,69 @@ QString Pulsar::getInfoString(const StelCore* core, const InfoStringGroup& flags
 
 	if (flags&ProperMotion && (pmRA!=0.0 && pmDE!=0.0))
 	{
-		float pa = std::atan2(pmRA, pmDE)*M_180_PIf;
+		double pa = std::atan2(pmRA, pmDE)*M_180_PI;
 		if (pa<0)
-			pa += 360.f;
-		oss << QString("%1: %2 %3 %4 %5%6").arg(q_("Proper motion"))
-		       .arg(QString::number(std::sqrt(pmRA*pmRA + pmDE*pmDE), 'f', 1)).arg(qc_("mas/yr", "milliarc second per year"))
-		       .arg(qc_("towards", "into the direction of")).arg(QString::number(pa, 'f', 1)).arg(QChar(0x00B0)) << "<br />";
-		oss << QString("%1: %2 %3 (%4)").arg(q_("Proper motions by axes")).arg(QString::number(pmRA, 'f', 1)).arg(QString::number(pmDE, 'f', 1)).arg(qc_("mas/yr", "milliarc second per year")) << "<br />";
+			pa += 360.;
+		oss << QString("%1: %2 %3 %4 %5&deg;<br />").arg(q_("Proper motion"),
+			       QString::number(std::sqrt(pmRA*pmRA + pmDE*pmDE), 'f', 1), qc_("mas/yr", "milliarc second per year"),
+			       qc_("towards", "into the direction of"), QString::number(pa, 'f', 1));
+		oss << QString("%1: %2 %3 (%4)<br />").arg(q_("Proper motions by axes"), QString::number(pmRA, 'f', 1), QString::number(pmDE, 'f', 1), qc_("mas/yr", "milliarc second per year"));
 	}
 
 	if (flags&Extra)
 	{
-		if (period>0)
+		if (period>0.)
 		{
-			oss << QString("%1: %2 %3")
-			       .arg(q_("Barycentric period"))
-			       .arg(QString::number(period, 'f', 16))
+			oss << QString("%1: %2 %3<br />").arg(
+			       q_("Barycentric period"),
+			       QString::number(period, 'f', 16),
 			       //TRANSLATORS: Unit of measure for period - seconds
-			       .arg(qc_("s", "period"));
-			oss << "<br />";
+			       qc_("s", "period"));
 		}
-		if (pderivative>0)
-			oss << QString("%1: %2").arg(q_("Time derivative of barycentric period"), QString::number(pderivative, 'e', 5)) << "<br />";
+		if (pderivative>0.)
+			oss << QString("%1: %2<br />").arg(q_("Time derivative of barycentric period"), QString::number(pderivative, 'e', 5));
 
-		if (dmeasure>0)
+		if (dmeasure>0.)
 		{
-			oss << QString("%1: %2 %3/%4<sup>3</sup>")
-			       .arg(q_("Dispersion measure"))
-			       .arg(QString::number(dmeasure, 'f', 3))
-			       //TRANSLATORS: Unit of measure for distance - parsecs
-			       .arg(qc_("pc", "distance"))
-			       //TRANSLATORS: Unit of measure for distance - centimeters
-			       .arg(qc_("cm", "distance"));
-			oss << "<br />";
+			oss << QString("%1: %2 %3/%4<sup>3</sup><br />").arg(
+				       q_("Dispersion measure"),
+				       QString::number(dmeasure, 'f', 3),
+				       //TRANSLATORS: Unit of measure for distance - parsecs
+				       qc_("pc", "distance"),
+				       //TRANSLATORS: Unit of measure for distance - centimeters
+				       qc_("cm", "distance"));
 		}
 		double edot = getEdot(period, pderivative);
-		if (edot>0)
+		if (edot>0.)
 		{
-			oss << QString("%1: %2 %3")
-			       .arg(q_("Spin down energy loss rate"))
-			       .arg(QString::number(edot, 'e', 2))
-			       //TRANSLATORS: Unit of measure for power - erg per second
-			       .arg(qc_("ergs/s", "power"));
-			oss << "<br>";
+			oss << QString("%1: %2 %3<br />").arg(
+				       q_("Spin down energy loss rate"),
+				       QString::number(edot, 'e', 2),
+				       //TRANSLATORS: Unit of measure for power - erg per second
+				       qc_("ergs/s", "power"));
 		}
-		if (bperiod>0)
+		if (bperiod>0.)
 		{
-			oss << QString("%1: %2 %3")
-			       .arg(q_("Binary period of pulsar"))
-			       .arg(QString::number(bperiod, 'f', 12))
-			       //TRANSLATORS: Unit of measure for period - days
-			       .arg(qc_("days", "period"));
-			oss << "<br>";
+			oss << QString("%1: %2 %3<br />").arg(
+				       q_("Binary period of pulsar"),
+				       QString::number(bperiod, 'f', 12),
+				       //TRANSLATORS: Unit of measure for period - days
+				       qc_("days", "time period"));
 		}
-		if (eccentricity>0)
-			oss << QString("%1: %2").arg(q_("Eccentricity"), QString::number(eccentricity, 'f', 10)) << "<br />";
+		if (eccentricity>0.)
+			oss << QString("%1: %2<br />").arg(q_("Eccentricity"), QString::number(eccentricity, 'f', 10));
 
-		if (parallax>0)
+		if (parallax>0.f)
 		{
-			oss << QString("%1: %2 %3")
-			       .arg(q_("Annual parallax"))
-			       .arg(parallax)
-			       //TRANSLATORS: Unit of measure for annual parallax - milliarcseconds
-			       .arg(qc_("mas", "parallax"));
-			oss << "<br />";
+			oss << QString("%1: %2 %3<br />").arg(
+				       q_("Annual parallax"),
+				       QString::number(parallax),
+				       //TRANSLATORS: Unit of measure for annual parallax - milliarcseconds
+				       qc_("mas", "parallax"));
 		}
-		if (distance>0)
+		if (distance>0.f)
 		{
-			oss << QString("%1: %2 %3 (%4 %5)")
+			oss << QString("%1: %2 %3 (%4 %5)<br />")
 			       .arg(q_("Distance based on electron density model"))
 			       .arg(distance)
 			       //TRANSLATORS: Unit of measure for distance - kiloparsecs
@@ -269,17 +269,26 @@ QString Pulsar::getInfoString(const StelCore* core, const InfoStringGroup& flags
 			       .arg(distance*3261.563777)
 			       //TRANSLATORS: Unit of measure for distance - light years
 			       .arg(qc_("ly", "distance"));
-			oss << "<br />";
 		}
-		if (w50>0)
+		if (adistance>0.f)
 		{
-			oss << QString("%1: %2 %3")
-			       // xgettext:no-c-format
-			       .arg(q_("Profile width at 50% of peak"))
-			       .arg(QString::number(w50, 'f', 2))
-			       //TRANSLATORS: Unit of measure for time - milliseconds
-			       .arg(qc_("ms", "time"));
-			oss << "<br />";
+			oss << QString("%1: %2 %3 (%4 %5)<br />")
+			       .arg(q_("Distance based on an association with another object"))
+			       .arg(adistance)
+			       //TRANSLATORS: Unit of measure for distance - kiloparsecs
+			       .arg(qc_("kpc", "distance"))
+			       .arg(adistance*3261.563777)
+			       //TRANSLATORS: Unit of measure for distance - light years
+			       .arg(qc_("ly", "distance"));
+		}
+		if (w50>0.f)
+		{
+			oss << QString("%1: %2 %3<br />").arg(
+				       // xgettext:no-c-format
+				       q_("Profile width at 50% of peak"),
+				       QString::number(w50, 'f', 2),
+				       //TRANSLATORS: Unit of measure for time - milliseconds
+				       qc_("ms", "time"));
 		}
 
 		// TRANSLATORS: Full phrase is "Time averaged flux density at XXXMHz"
@@ -289,19 +298,20 @@ QString Pulsar::getInfoString(const StelCore* core, const InfoStringGroup& flags
 		// TRANSLATORS: mJy is milliJansky(10-26W/m2/Hz)
 		QString sfd  = qc_("mJy", "spectral flux density");
 
-		if (s400>0)
-			oss << QString("%1 %2%3: %4 %5").arg(flux, QString::number(400), freq, QString::number(s400, 'f', 2), sfd) << "<br />";
+		if (s400>0.f)
+			oss << QString("%1 %2%3: %4 %5<br />").arg(flux, QString::number(400), freq, QString::number(s400, 'f', 2), sfd);
 
-		if (s600>0)
-			oss << QString("%1 %2%3: %4 %5").arg(flux, QString::number(600), freq, QString::number(s600, 'f', 2), sfd) << "<br />";
+		if (s600>0.f)
+			oss << QString("%1 %2%3: %4 %5<br />").arg(flux, QString::number(600), freq, QString::number(s600, 'f', 2), sfd);
 
-		if (s1400>0)
-			oss << QString("%1 %2%3: %4 %5").arg(flux, QString::number(1400), freq, QString::number(s1400, 'f', 2), sfd) << "<br />";
+		if (s1400>0.f)
+			oss << QString("%1 %2%3: %4 %5<br />").arg(flux, QString::number(1400), freq, QString::number(s1400, 'f', 2), sfd);
 
-		if (notes.length()>0)
-			oss << "<br />" << QString("%1: %2").arg(q_("Notes"), getPulsarTypeInfoString(notes)) << "<br />";
+		if (!notes.isEmpty())
+			oss << StelUtils::wrapText(QString("%1: %2").arg(q_("Notes"), getPulsarTypeInfoString(notes))) << "<br />";
 	}
 
+	oss << getSolarLunarInfoString(core, flags);
 	postProcessInfoString(str, flags);
 	return str;
 }
@@ -323,19 +333,15 @@ QVariantMap Pulsar::getInfoMap(const StelCore *core) const
 	map["s600"] = s600;
 	map["s1400"] = s1400;
 	map["distance"] = distance;
+	map["adistance"] = adistance;
 	map["glitch"] = glitch;
 	map["notes"] = notes;
 	return map;
 }
 
-Vec3f Pulsar::getInfoColor(void) const
-{
-	return Vec3f(1.f, 1.f, 1.f);
-}
-
 float Pulsar::getVMagnitude(const StelCore* core) const
 {
-	Q_UNUSED(core);
+	Q_UNUSED(core)
 	// Calculate fake visual magnitude as function by distance - minimal magnitude is 6
 	float vmag = distance + 6.f;
 
@@ -356,7 +362,7 @@ float Pulsar::getVMagnitudeWithExtinction(const StelCore *core) const
 
 double Pulsar::getEdot(double p0, double p1) const
 {
-	if (p0>0 && p1!=0)
+	if (p0>0 && !qFuzzyCompare(p1,0))
 	{
 		// Calculate spin down energy loss rate (ergs/s)
 		return 4.0 * M_PI * M_PI * PSR_INERTIA * p1 / pow(p0,3);
@@ -369,7 +375,7 @@ double Pulsar::getEdot(double p0, double p1) const
 
 double Pulsar::getP1(double p0, double f1) const
 {
-	if (p0>0 && f1!=0)
+	if (p0>0 && !qFuzzyCompare(f1,0))
 	{
 		// Calculate derivative of barycentric period
 		return -1.0 * p0 * p0 * f1;
@@ -381,7 +387,7 @@ double Pulsar::getP1(double p0, double f1) const
 }
 
 
-QString Pulsar::getPulsarTypeInfoString(QString pcode) const
+QString Pulsar::getPulsarTypeInfoString(const QString &pcode) const
 {
 	QStringList out;
 
@@ -420,17 +426,7 @@ QString Pulsar::getPulsarTypeInfoString(QString pcode) const
 		out.append(q_("isolated neutron star with pulsed thermal X-ray emission but no detectable radio emission"));
 	}
 
-	return out.join(",<br />");
-}
-
-double Pulsar::getAngularSize(const StelCore*) const
-{
-	return 0.00001;
-}
-
-void Pulsar::update(double deltaTime)
-{
-	labelsFader.update(static_cast<int>(deltaTime*1000));
+	return out.join(", ");
 }
 
 void Pulsar::draw(StelCore* core, StelPainter *painter)
@@ -443,6 +439,7 @@ void Pulsar::draw(StelCore* core, StelPainter *painter)
 	float mag = getVMagnitudeWithExtinction(core);
 	StelSkyDrawer* sd = core->getSkyDrawer();
 	const float mlimit = sd->getLimitMagnitude();
+	const float shift = 8.f;
 	bool visible = true;
 	if (filteredMode && s400<filterValue)
 		visible = false;
@@ -450,9 +447,6 @@ void Pulsar::draw(StelCore* core, StelPainter *painter)
 	if (mag <= mlimit && visible)
 	{		
 		Pulsar::markerTexture->bind();
-		float size = getAngularSize(Q_NULLPTR)*M_PI/180.*painter->getProjector()->getPixelPerRadAtCenter();
-		float shift = 5.f + size/1.6f;		
-
 		if (glitch>0 && glitchFlag)
 			painter->setColor(glitchColor, 1.f);
 		else
@@ -460,12 +454,34 @@ void Pulsar::draw(StelCore* core, StelPainter *painter)
 		painter->setBlending(true, GL_ONE, GL_ONE);
 		painter->drawSprite2dMode(coord, distributionMode ? 4.f : 5.f);
 
-		if (labelsFader.getInterstate()<=0.f && !distributionMode && (mag+2.f)<mlimit)
+		if (!distributionMode && (mag+2.f)<mlimit)
 		{
 			QString name = getDesignation();
 			if (!getNameI18n().isEmpty())
 				name = getNameI18n();
 			painter->drawText(coord, name, 0, shift, shift, false);
 		}
+	}
+}
+
+Vec3d Pulsar::getJ2000EquatorialPos(const StelCore* core) const
+{
+	static const double d2000 = 2451545.0;
+	const double movementFactor = (M_PI/180.)*(0.0001/3600.) * (core->getJDE()-d2000)/365.25;
+	Vec3d v;
+	const double cRA = RA + movementFactor*pmRA/::cos(DE*M_180_PI);
+	const double cDE = DE + movementFactor*pmDE;
+	StelUtils::spheToRect(cRA, cDE, v);
+
+	if ((core) && (core->getUseAberration()) && (core->getCurrentPlanet()))
+	{
+		const Vec3d vel = core->getAberrationVec(core->getJDE());
+		Vec3d pos=v+vel;
+		pos.normalize();
+		return pos;
+	}
+	else
+	{
+		return v;
 	}
 }

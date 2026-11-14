@@ -38,16 +38,17 @@ class StelObjectModule : public StelModule
 	Q_OBJECT
 public:
 	StelObjectModule();
-	~StelObjectModule();
+	~StelObjectModule() override;
 	
 	//! Search for StelObject in an area around a specified point.
 	//! The function searches in a disk of diameter limitFov centered on v.
 	//! Only visible objects (i.e. currently displayed on screen) should be returned.
-	//! @param v equatorial position at epoch J2000.
+	//! @param v equatorial position at epoch J2000 (without aberration).
 	//! @param limitFov angular diameter of the searching zone in degree.
-	//! @param core the core instance to use.
+	//! @param core the StelCore instance to use.
 	//! @return the list of all the displayed objects contained in the defined zone.
-	virtual QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const = 0;
+	//! @note the default just returns an empty list.
+	virtual QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const;
 	
 	//! Find a StelObject by name.
 	//! @param nameI18n The translated name for the current sky locale.
@@ -67,18 +68,18 @@ public:
 	//! @param maxNbItem the maximum number of returned object names
 	//! @param useStartOfWords decide if start of word is searched	
 	//! @return a list of matching object name by order of relevance, or an empty list if nothing matches
-	virtual QStringList listMatchingObjects(const QString& objPrefix, int maxNbItem=5, bool useStartOfWords=false) const;
+	virtual QVector<QPair<QString,StelObjectP>> listMatchingObjects(const QString& objPrefix, int maxNbItem=5, bool useStartOfWords=false) const;
 
 	//! List all StelObjects.
 	//! @param inEnglish list names in English (true) or translated (false)
 	//! @return a list of matching object name by order of relevance, or an empty list if nothing matches
-	virtual QStringList listAllObjects(bool inEnglish) const = 0;
+	virtual QVector<QPair<QString,StelObjectP>> listAllObjects(bool inEnglish) const = 0;
 
 	//! List all StelObjects by type.
 	//! @param objType object type
 	//! @param inEnglish list translated names (false) or in English (true)
 	//! @return a list of matching object name by order of relevance, or an empty list if nothing matches
-	virtual QStringList listAllObjectsByType(const QString& objType, bool inEnglish) const;
+	virtual QVector<QPair<QString,StelObjectP>> listAllObjectsByType(const QString& objType, bool inEnglish) const;
 
 	//! Gets a user-displayable name of the object category
 	virtual QString getName() const = 0;

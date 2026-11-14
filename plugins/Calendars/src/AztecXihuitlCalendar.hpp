@@ -33,43 +33,42 @@ class AztecXihuitlCalendar : public Calendar
 public:
 	AztecXihuitlCalendar(double jd);
 
-	virtual ~AztecXihuitlCalendar() Q_DECL_OVERRIDE {}
+	~AztecXihuitlCalendar() override {}
 
 public slots:
-	virtual void retranslate() Q_DECL_OVERRIDE;
+	void retranslate() override;
 
 	//! Set a calendar date from the Julian day number
-	virtual void setJD(double JD) Q_DECL_OVERRIDE;
+	void setJD(double JD) override;
 
 	//! set date from a vector of calendar date elements sorted from the largest to the smallest.
 	//! month[1..19]-day[1..20]
 	//! We face a problem as the year is not counted. We can only find the date before current JD which matches the parts.
-	virtual void setDate(QVector<int> parts) Q_DECL_OVERRIDE;
+	void setDate(const QVector<int> &parts) override;
 
 	//! get a stringlist of calendar date elements sorted from the largest to the smallest.
 	//! monthName-day[1..20]
-	virtual QStringList getDateStrings() const Q_DECL_OVERRIDE;
+	QStringList getDateStrings() const override;
 
 	//! get a formatted complete string for a date
-	virtual QString getFormattedDateString() const Q_DECL_OVERRIDE;
+	QString getFormattedDateString() const override;
 
-public:
 	//! find number in sequence from a xihuitl date of {month[1...19], day[1...20]}
-	inline static int aztecXihuitlOrdinal(QVector<int> xihuitl) {return (xihuitl.at(0)-1)*20+xihuitl.at(1)-1;}
+	inline static int aztecXihuitlOrdinal(const QVector<int> &xihuitl) {return (xihuitl.at(0)-1)*20+xihuitl.at(1)-1;}
 
 	//! get 2-part vector of xihuitl date from RD
 	static QVector<int> aztecXihuitlFromFixed(int rd);
 
 	//! find RD number of a Xihuitl date on or before rd.
-	static int aztecXihuitlOnOrBefore(QVector<int> xihuitl, int rd);
+	static int aztecXihuitlOnOrBefore(const QVector<int> &xihuitl, int rd);
 
 	//! get RD of a combined date on or before rd. They repeat every 18980 days.
-	static int aztecXihuitlTonalpohualliOnOrBefore(QVector<int>xihuitl, QVector<int>tonalpohualli, int rd);
+	static int aztecXihuitlTonalpohualliOnOrBefore(const QVector<int>&xihuitl, const QVector<int>&tonalpohualli, int rd);
 
+public:
 	//! Aztec date of fall of Tenochtitlan
 	static const int aztecCorrelation;
 	static const int aztecXihuitlCorrelation;
-
 
 private:
 	static QMap<int, QString> monthNames;

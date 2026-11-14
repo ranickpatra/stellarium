@@ -33,18 +33,13 @@
 #include <QTcpSocket>
 #include <QObject>
 
-#include "StelApp.hpp"
 #include "StelObject.hpp"
+#include "StelTranslator.hpp"
+#include "TelescopeControl.hpp"
 #include "common/InterpolatedPosition.hpp"
 
 class StelCore;
 
-qint64 getNow(void);
-
-enum Equinox {
-	EquinoxJ2000,
-	EquinoxJNow
-};
 
 //! An abstract base class that should never be used directly, only inherited.
 //! This class used to be called Telescope, but it has been renamed
@@ -55,16 +50,28 @@ class TelescopeClient : public QObject, public StelObject
 	Q_OBJECT
 public:
 	static const QString TELESCOPECLIENT_TYPE;
-	static TelescopeClient *create(const QString &url);
-	virtual ~TelescopeClient(void) {}
+	//! Slot prefix for all diagnostics associated with this client.
+	TelescopeLogPrefix getLogPrefix() const { return logPrefix; }
+	//! example url: My_first_telescope:TCP:J2000:localhost:10000:500000
+	//! split to:
+	//! name    = My_first_telescope
+	//! type    = TCP
+	//! equinox = J2000
+	//! params  = localhost:10000:500000
+	//!
+	//! The params part is optional.  We use QRegularExpression to validate the url and extract the components.
+	//! @param url Telescope definition in the format shown above.
+	//! @param slot Telescope slot for diagnostics, or zero to omit the slot prefix.
+	static TelescopeClient *create(const QString &url, int slot = 0);
+	~TelescopeClient(void) override {}
 	
-	// Method inherited from StelObject
-	QString getEnglishName(void) const {return name;}
-	QString getNameI18n(void) const {return nameI18n;}
-	Vec3f getInfoColor(void) const
-	{
-		return Vec3f(1.f, 1.f, 1.f);
-	}
+	// Methods inherited from StelObject
+	QString getEnglishName(void) const override {return name;}
+	QString getNameI18n(void) const override {return nameI18n;}
+	//Vec3f getInfoColor(void) const override
+	//{
+	//	return Vec3f(1.f, 1.f, 1.f);
+	//}
 	//! TelescopeClient supports the following InfoStringGroup flags:
 	//! - Name
 	//! - RaDecJ2000
@@ -72,35 +79,55 @@ public:
 	//! - PlainText
 	//! @param core the StelCore object
 	//! @param flags a set of InfoStringGroup items to include in the return value.
-	//! @return a QString containing an HMTL encoded description of the Telescope.
-	QString getInfoString(const StelCore* core, const InfoStringGroup& flags) const;
-	QString getType(void) const {return TELESCOPECLIENT_TYPE;}
-	QString getID() const {return name;}
-	virtual double getAngularSize(const StelCore*) const {Q_ASSERT(0); return 0;}	// TODO
+	//! @return a QString containing an HTML encoded description of the Telescope.
+	QString getInfoString(const StelCore* core, const InfoStringGroup& flags) const override;
+	QString getType(void) const override {return TELESCOPECLIENT_TYPE;}
+	QString getObjectType(void) const override {return N_("telescope");}
+	QString getObjectTypeI18n(void) const override {return q_(getObjectType());}
+	QString getID() const override {return name;}
 		
 	// Methods specific to telescope
 	virtual void telescopeGoto(const Vec3d &j2000Pos, StelObjectP selectObject) = 0;
-	virtual void telescopeSync(const Vec3d &j2000Pos, StelObjectP selectObject) = 0;
-	virtual void telescopeAbortSlew() {};
+	//! Some telescopes can synchronize the telescope with the given position or object.
+	//! The base client does nothing.
+	//! Derived classes may override this command
+	//! @todo: Properly document method and the arguments
+	virtual void telescopeSync(const Vec3d &j2000Pos, StelObjectP selectObject)
+	{
+		Q_UNUSED(j2000Pos)
+		Q_UNUSED(selectObject)
+	};
+	//! report whether this client can respond to sync commands.
+	//! Can be used for GUI tweaks
+	virtual bool isTelescopeSyncSupported() const {return false;}
+	//! Send command to abort slew. Not all telescopes support this, base implementation only gives a warning.
+	//! After abort, the current position should be retrieved and displayed.
+	virtual void telescopeAbortSlew();
+	//! report whether this client can abort a running slew.
+	//! Can be used for GUI tweaks
+	virtual bool isAbortSlewSupported() const {return false;}
 
 	//!
 	//! \brief move
-	//! \param angle [0,360)
+	//! \param angle [0,360). 180=Down/South, 270=Right/West, 0=Up/North, 90=Left/East
 	//! \param speed [0,1]
-	//!
+	//! The default implementation does nothing but emit a warning.
 	virtual void move(double angle, double speed);
 	virtual bool isConnected(void) const = 0;
 	virtual bool hasKnownPosition(void) const = 0;
-	void addOcular(double fov) {if (fov>=0.0) oculars.push_back(fov);}
-	const QList<double> &getOculars(void) const {return oculars;}
+	//! Store field of view for an ocular circle (unrelated to Oculars plugin)
+	void addOcular(double fov) {if (fov>=0.0) ocularFovs.push_back(fov);}
+	//! Retrieve list of fields of view for this telescope
+	const QList<double> &getOculars(void) const {return ocularFovs;}
 	
 	virtual bool prepareCommunication() {return false;}
 	virtual void performCommunication() {}
 
-	virtual QWidget* createControlWidget(QSharedPointer<TelescopeClient> telescope, QWidget* parent = Q_NULLPTR) const { Q_UNUSED(telescope) Q_UNUSED(parent) return Q_NULLPTR; }
+	//! Some telescope types may override this method to display additional user interface elements.
+	virtual QWidget* createControlWidget(QSharedPointer<TelescopeClient> telescope, QWidget* parent = nullptr) const { Q_UNUSED(telescope) Q_UNUSED(parent) return nullptr; }
 
 protected:
-	TelescopeClient(const QString &name);
+	TelescopeClient(const QString &name, int slot = 0);
 	QString nameI18n;
 	const QString name;
 
@@ -110,11 +137,15 @@ protected:
 		Q_UNUSED(flags)
 		return QString();
 	}
+
+	//! returns the current system time in microseconds since the Epoch
+	static qint64 getNow(void);
 private:
 	virtual bool isInitialized(void) const {return true;}
-	float getSelectPriority(const StelCore* core) const {Q_UNUSED(core); return -10.f;}
+	float getSelectPriority(const StelCore* core) const override {Q_UNUSED(core) return -10.f;}
 private:
-	QList<double> oculars; // fov of the oculars
+	const TelescopeLogPrefix logPrefix;
+	QList<double> ocularFovs; // fov of the oculars
 };
 
 //! Example Telescope class. A physical telescope does not exist.
@@ -126,43 +157,45 @@ private:
 class TelescopeClientDummy : public TelescopeClient
 {
 public:
-	TelescopeClientDummy(const QString &name, const QString &) : TelescopeClient(name)
+	TelescopeClientDummy(const QString &name, const QString &, int slot = 0)
+		: TelescopeClient(name, slot)
 	{
 		desired_pos[0] = XYZ[0] = 1.0;
 		desired_pos[1] = XYZ[1] = 0.0;
 		desired_pos[2] = XYZ[2] = 0.0;
 	}
-	~TelescopeClientDummy(void) {}
-	bool isConnected(void) const
+	~TelescopeClientDummy(void) override {}
+	bool isConnected(void) const override
 	{
 		return true;
 	}
-	bool prepareCommunication(void)
+	bool prepareCommunication(void) override
 	{
 		XYZ = XYZ * 31.0 + desired_pos;
-		const double lq = XYZ.lengthSquared();
+		const double lq = XYZ.normSquared();
 		if (lq > 0.0)
 			XYZ *= (1.0/std::sqrt(lq));
 		else
 			XYZ = desired_pos;
 		return true;
 	}
-	void telescopeGoto(const Vec3d &j2000Pos, StelObjectP selectObject)
+	void telescopeGoto(const Vec3d &j2000Pos, StelObjectP selectObject) override
 	{
 		Q_UNUSED(selectObject)
 		desired_pos = j2000Pos;
 		desired_pos.normalize();
 	}
-	void telescopeSync(const Vec3d &j2000Pos, StelObjectP selectObject)
+	void telescopeAbortSlew() override
 	{
-		Q_UNUSED(selectObject)
-		Q_UNUSED(j2000Pos)
+		desired_pos=XYZ;
+		qCInfo(Telescopes) << getLogPrefix() << "Telescope" << getID() << "Slew aborted";
 	}
-	bool hasKnownPosition(void) const
+	bool isAbortSlewSupported() const override {return true;}
+	bool hasKnownPosition(void) const override
 	{
 		return true;
 	}
-	Vec3d getJ2000EquatorialPos(const StelCore*) const
+	Vec3d getJ2000EquatorialPos(const StelCore*) const override
 	{
 		return XYZ;
 	}
@@ -181,24 +214,24 @@ class TelescopeTCP : public TelescopeClient
 {
 	Q_OBJECT
 public:
-	TelescopeTCP(const QString &name, const QString &params, Equinox eq = EquinoxJ2000);
-	~TelescopeTCP(void)
+	TelescopeTCP(const QString &name, const QString &params,
+	             TelescopeControl::Equinox eq = TelescopeControl::EquinoxJ2000, int slot = 0);
+	~TelescopeTCP(void) override
 	{
 		hangup();
 	}
-	bool isConnected(void) const
+	bool isConnected(void) const override
 	{
 		//return (tcpSocket->isValid() && !wait_for_connection_establishment);
 		return (tcpSocket->state() == QAbstractSocket::ConnectedState);
 	}
 	
 private:
-	Vec3d getJ2000EquatorialPos(const StelCore* core=Q_NULLPTR) const;
-	bool prepareCommunication();
-	void performCommunication();
-	void telescopeGoto(const Vec3d &j2000Pos, StelObjectP selectObject);
-	void telescopeSync(const Vec3d &j2000Pos, StelObjectP selectObject);
-	bool isInitialized(void) const
+	Vec3d getJ2000EquatorialPos(const StelCore* core=nullptr) const override;
+	bool prepareCommunication() override;
+	void performCommunication() override;
+	void telescopeGoto(const Vec3d &j2000Pos, StelObjectP selectObject) override;
+	bool isInitialized(void) const override
 	{
 		return (!address.isNull());
 	}
@@ -219,12 +252,12 @@ private:
 	int time_delay;
 
 	InterpolatedPosition interpolatedPosition;
-	virtual bool hasKnownPosition(void) const
+	bool hasKnownPosition(void) const override
 	{
 		return interpolatedPosition.isKnown();
 	}
 
-	Equinox equinox;
+	TelescopeControl::Equinox equinox;
 	
 private slots:
 	void socketConnected(void);

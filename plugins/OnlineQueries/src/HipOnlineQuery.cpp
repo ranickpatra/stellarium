@@ -18,7 +18,6 @@
 
 #include "HipOnlineQuery.hpp"
 
-#include "StelUtils.hpp"
 #include "StelTranslator.hpp"
 #include <QNetworkReply>
 #include <QNetworkAccessManager>
@@ -31,18 +30,18 @@ HipOnlineReply::HipOnlineReply(const QString& aurl, QNetworkAccessManager* anetM
 	, currentStatus(HipQueryQuerying)
 {
 	reply = netMgr->get(QNetworkRequest(url));
-	connect(reply, SIGNAL(finished()), this, SLOT(httpQueryFinished()));
+	connect(reply, &QNetworkReply::finished, this, &HipOnlineReply::httpQueryFinished);
 }
 
 HipOnlineReply::~HipOnlineReply()
 {
 	if (reply)
 	{
-		disconnect(reply, SIGNAL(finished()), this, SLOT(httpQueryFinished()));
+		disconnect(reply, &QNetworkReply::finished, this, &HipOnlineReply::httpQueryFinished);
 		reply->abort();
 		//do not use delete here
 		reply->deleteLater();
-		reply = Q_NULLPTR;
+		reply = nullptr;
 	}
 }
 
@@ -51,10 +50,10 @@ void HipOnlineReply::deleteNetworkReply()
 {
 	if(reply)
 	{
-		disconnect(reply, SIGNAL(finished()), this, SLOT(httpQueryFinished()));
+		disconnect(reply, &QNetworkReply::finished, this, &HipOnlineReply::httpQueryFinished);
 		reply->abort();
 		delete reply;
-		reply = Q_NULLPTR;
+		reply = nullptr;
 	}
 }
 
@@ -65,7 +64,7 @@ void HipOnlineReply::httpQueryFinished()
 	{
 		qDebug() << "HipOnlineReply::httpQueryFinished() has errors:" << reply->errorString();
 		currentStatus = HipQueryErrorOccured;
-		errorString = QString("%1: %2").arg(q_("Network error")).arg(reply->errorString());
+		errorString = QString("%1: %2").arg(q_("Network error"), reply->errorString());
 		emit statusChanged();
 		return;
 	}
@@ -96,7 +95,7 @@ QString HipOnlineReply::getCurrentStatusString() const
 	return QString();
 }
 
-HipOnlineQuery::HipOnlineQuery(QString baseURL, QObject* parent) : QObject(parent), baseURL(baseURL)
+HipOnlineQuery::HipOnlineQuery(const QString &baseURL, QObject* parent) : QObject(parent), baseURL(baseURL)
 {
 	networkMgr = new QNetworkAccessManager(this);
 }
@@ -111,7 +110,7 @@ HipOnlineReply* HipOnlineQuery::lookup(const int hipID)
 }
 
 // Lookup in external database for the passed name.
-HipOnlineReply* HipOnlineQuery::lookup(const QString name)
+HipOnlineReply* HipOnlineQuery::lookup(const QString &name)
 {
 	// Create the Starnames query
 	QString url=QString(baseURL).arg(name);
@@ -120,7 +119,7 @@ HipOnlineReply* HipOnlineQuery::lookup(const QString name)
 }
 
 // Lookup in external database for the passed HIP number.
-HipOnlineReply* HipOnlineQuery::lookup(const QString url, const int hipID)
+HipOnlineReply* HipOnlineQuery::lookup(const QString &url, const int hipID)
 {
 	baseURL=url;
 	// Create the Star ID query
@@ -130,7 +129,7 @@ HipOnlineReply* HipOnlineQuery::lookup(const QString url, const int hipID)
 }
 
 // Lookup in external database for the passed name.
-HipOnlineReply* HipOnlineQuery::lookup(const QString url, const QString name)
+HipOnlineReply* HipOnlineQuery::lookup(const QString &url, const QString &name)
 {
 	baseURL=url;
 	// Create the Starnames query

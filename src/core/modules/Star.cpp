@@ -21,7 +21,6 @@
 
 #include "Star.hpp"
 #include "StarMgr.hpp"
-#include "StelUtils.hpp"
 
 #include <QDebug>
 #include <QString>
@@ -30,65 +29,71 @@ const QString STAR_TYPE = QStringLiteral("Star");
 
 QString Star1::getNameI18n(void) const
 {
-	if (getHip())
+	QStringList starNames;
+	StarId star_id = getHip() ? getHip() : 	getGaia();
+	starNames << StarMgr::getCommonNameI18n(star_id) << getDesignation();
+	starNames.removeAll(QString(""));
+	if (starNames.count()>0)
+		return starNames.first();
+	else
+		return QString();
+}
+
+// Return modern name only if Skyculture allows this!
+QString Star1::getScreenNameI18n(const bool withCommonNameI18n) const
+{
+	QStringList starNames;
+	StarId star_id = getHip() ? getHip() : 	getGaia();
+	if (!StarMgr::getDesignationUsage())
 	{
-		const QString commonNameI18 = StarMgr::getCommonName(getHip());
-		if (!commonNameI18.isEmpty()) return commonNameI18;
-		if (StarMgr::getFlagSciNames())
-		{
-			const QStringList sciNames = StarMgr::getSciName(getHip()).split(" - ");
-			if (sciNames.count()>0) return sciNames.first();
-			const QString varSciName = StarMgr::getGcvsName(getHip());
-			if (!varSciName.isEmpty()) return varSciName;
-			return QString("HIP %1").arg(getHip());
-		}
+		const QString culturalLabel=StarMgr::getCulturalScreenLabel(star_id);
+		if (culturalLabel.isEmpty() && withCommonNameI18n)
+			starNames << StarMgr::getCommonNameI18n(star_id);
+		else
+			starNames << culturalLabel;
 	}
-	return QString();
+	if (StarMgr::getFlagSciNames()) // The scientific designations can be used for western sky cultures only
+	{
+		starNames << StarMgr::getSciDesignation(star_id).split(" - ");
+		if (StarMgr::getFlagDblStarsDesignation()) // append the traditional designations of double stars
+			starNames << StarMgr::getSciExtraDesignation(star_id).split(" - ");
+		if (StarMgr::getFlagVarStarsDesignation()) // append the designations of variable stars (from GCVS)
+			starNames << StarMgr::getGcvsDesignation(star_id);
+		if (StarMgr::getFlagHIPDesignation()) // append the HIP numbers of stars
+			starNames << QString("HIP %1").arg(star_id);
+	}
+	starNames.removeDuplicates();
+	starNames.removeAll(QString(""));
+	starNames.removeAll(QString());
+	if (starNames.count()>0)
+		return starNames.first();
+	else
+		return QString();
 }
 
 QString Star1::getDesignation() const
 {
+	QStringList starNames;
+	StarId star_id = getHip() ? getHip() : 	getGaia();
+	starNames << StarMgr::getSciDesignation(star_id).split(" - ");
+	starNames << StarMgr::getSciExtraDesignation(star_id).split(" - ");
+	starNames << StarMgr::getGcvsDesignation(star_id);
 	if (getHip())
-	{
-		const QStringList sciNames = StarMgr::getSciName(getHip()).split(" - ");
-		if (sciNames.count()>0) return sciNames.first();
-		const QString varSciName = StarMgr::getGcvsName(getHip());
-		if (!varSciName.isEmpty()) return varSciName;
-		return QString("HIP %1").arg(getHip());
-	}
-	return QString();
+		starNames << QString("HIP %1").arg(star_id);
+	else
+		starNames << QString("Gaia DR3 %1").arg(star_id);
+	starNames.removeAll(QString(""));
+	starNames.removeAll(QString());
+	if (starNames.count()>0)
+		return starNames.first();
+	else
+		return QString();
 }
 
 int Star1::hasComponentID(void) const
 {
 	if (getComponentIds())
-	{
 		return getComponentIds();
-	}
+
 	return 0;
 }
-
-void Star1::print(void) const
-{
-	qDebug() << "hip: " << getHip()
-		 << ", componentIds: " << getComponentIds()
-		 << ", x0: " << getX0()
-		 << ", x1: " << getX1()
-		 << ", bV: " << (static_cast<unsigned int>(getBV()))
-		 << ", mag: " << (static_cast<unsigned int>(getMag()))
-		 << ", spInt: " << getSpInt()
-		 << ", dx0: " << getDx0()
-		 << ", dx1: " << getDx1()
-		 << ", plx: " << getPlx();
-}
-
-void Star2::print(void) const
-{
-	qDebug() << "x0: " << getX0()
-		 << ", x1: " << getX1()
-		 << ", dx0: " << getDx0()
-		 << ", dx1: " << getDx1()
-		 << ", bV: " << getBV()
-		 << ", mag: " << getMag();
-}
-

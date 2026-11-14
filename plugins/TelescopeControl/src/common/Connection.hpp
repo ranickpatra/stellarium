@@ -2,7 +2,7 @@
 The stellarium telescope library helps building
 telescope server programs, that can communicate with stellarium
 by means of the stellarium TCP telescope protocol.
-It also contains smaple server classes (dummy, Meade LX200).
+It also contains sample server classes (dummy, Meade LX200).
 
 Author and Copyright of this file and of the stellarium telescope library:
 Johannes Gajdosik, 2006
@@ -42,14 +42,14 @@ protected:
 	void performReading(void);
 	//! Sends the contents of the write buffer over a TCP/IP connection.
 	void performWriting(void);
-	void prepareSelectFds(fd_set &read_fds, fd_set &write_fds, int &fd_max);
+	void prepareSelectFds(fd_set &read_fds, fd_set &write_fds, int &fd_max) override;
 	
 private:
 	//! Returns true, as by default Connection implements a TCP/IP connection.
-	virtual bool isTcpConnection(void) const {return true;}
+	bool isTcpConnection(void) const override {return true;}
 	//! Returns false, as by default Connection implements a TCP/IP connection.
 	virtual bool isAsciiConnection(void) const {return false;}
-	void handleSelectFds(const fd_set &read_fds, const fd_set &write_fds);
+	void handleSelectFds(const fd_set &read_fds, const fd_set &write_fds) override;
 	//! Parses the read buffer and handles any messages contained within it.
 	//! If the data contains a Stellarium telescope control command,
 	//! dataReceived() calls the appropriate method of Server.
@@ -58,7 +58,7 @@ private:
 	//! Composes a "MessageCurrentPosition" in the write buffer.
 	//! This is a Stellarium telescope control protocol message containing
 	//! the current right ascension, declination and status of the telescope mount.
-	void sendPosition(unsigned int ra_int, int dec_int, int status);
+	void sendPosition(unsigned int ra_int, int dec_int, int status) override;
 	
 protected:
 	char read_buff[120];

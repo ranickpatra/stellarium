@@ -20,13 +20,6 @@
 #include "TuiNodeBool.hpp"
 #include <QKeyEvent>
 
-
-TuiNodeBool::TuiNodeBool(const QString& text, QObject* receiver, const char* method, bool defValue, TuiNode* parent, TuiNode* prev)
-	: TuiNodeEditable(text, parent, prev), state(defValue)
-{
-	this->connect(this, SIGNAL(setValue(bool)), receiver, method);
-}
-
 TuiNodeResponse TuiNodeBool::handleEditingKey(int key)
 {
 	TuiNodeResponse response;
@@ -36,30 +29,30 @@ TuiNodeResponse TuiNodeBool::handleEditingKey(int key)
 	{
 		editing = false;
 		response.accepted = true;
-		emit(setValue(state));
+		emit setValue(state);
 		return response;
 	}
 	else if (key==Qt::Key_Up || key==Qt::Key_Down || key==Qt::Key_Return)
 	{
 		state = !state;
 		response.accepted = true;
-		emit(setValue(state));
+		emit setValue(state);
 		return response;
 	}
 	else if (key==Qt::Key_1 || key==Qt::Key_Y || key==Qt::Key_T)
 	{
 		state = true;
-		emit(setValue(state));
+		emit setValue(state);
 		response.accepted = true;
-		emit(setValue(state));
+		emit setValue(state);
 		return response;
 	}
 	else if (key==Qt::Key_0 || key==Qt::Key_N || key==Qt::Key_F)
 	{
 		state = false;
-		emit(setValue(state));
+		emit setValue(state);
 		response.accepted = true;
-		emit(setValue(state));
+		emit setValue(state);
 		return response;
 	}
 	return response;

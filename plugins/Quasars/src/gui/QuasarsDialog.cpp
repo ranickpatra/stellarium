@@ -26,17 +26,12 @@
 #include <QColorDialog>
 
 #include "StelApp.hpp"
-#include "StelCore.hpp"
 #include "ui_quasarsDialog.h"
 #include "QuasarsDialog.hpp"
 #include "Quasars.hpp"
 #include "StelModuleMgr.hpp"
-#include "StelObjectMgr.hpp"
-#include "StelMovementMgr.hpp"
 #include "StelStyle.hpp"
 #include "StelGui.hpp"
-#include "StelMainView.hpp"
-#include "StelFileMgr.hpp"
 #include "StelTranslator.hpp"
 
 QuasarsDialog::QuasarsDialog()
@@ -74,38 +69,37 @@ void QuasarsDialog::createDialogContent()
 	qsr = GETSTELMODULE(Quasars);
 	ui->setupUi(dialog);
 	ui->tabs->setCurrentIndex(0);	
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()),
-		this, SLOT(retranslate()));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &QuasarsDialog::retranslate);
 
 	// Settings tab / updates group
 	ui->displayModeCheckBox->setChecked(qsr->getDisplayMode());
-	connect(ui->displayModeCheckBox, SIGNAL(stateChanged(int)), this, SLOT(setDistributionEnabled(int)));
+	connect(ui->displayModeCheckBox, &QCheckBox::stateChanged, this, &QuasarsDialog::setDistributionEnabled);
 	ui->displayAtStartupCheckBox->setChecked(qsr->getEnableAtStartup());
-	connect(ui->displayAtStartupCheckBox, SIGNAL(stateChanged(int)), this, SLOT(setDisplayAtStartupEnabled(int)));
+	connect(ui->displayAtStartupCheckBox, &QCheckBox::stateChanged, this, &QuasarsDialog::setDisplayAtStartupEnabled);
 	ui->displayShowQuasarsButton->setChecked(qsr->getFlagShowQuasarsButton());
-	connect(ui->displayShowQuasarsButton, SIGNAL(stateChanged(int)), this, SLOT(setDisplayShowQuasarsButton(int)));
+	connect(ui->displayShowQuasarsButton, &QCheckBox::stateChanged, this, &QuasarsDialog::setDisplayShowQuasarsButton);
 	ui->displayUseQuasarMarkersButton->setChecked(qsr->getFlagUseQuasarMarkers());
-	connect(ui->displayUseQuasarMarkersButton, SIGNAL(stateChanged(int)), this, SLOT(setDisplayUseQuasarMarkersButton(int)));
-	connect(ui->internetUpdatesCheckbox, SIGNAL(stateChanged(int)), this, SLOT(setUpdatesEnabled(int)));
-	connect(ui->updateButton, SIGNAL(clicked()), this, SLOT(updateJSON()));
-	connect(qsr, SIGNAL(updateStateChanged(Quasars::UpdateState)), this, SLOT(updateStateReceiver(Quasars::UpdateState)));
-	connect(qsr, SIGNAL(jsonUpdateComplete(void)), this, SLOT(updateCompleteReceiver(void)));	
-	connect(ui->updateFrequencySpinBox, SIGNAL(valueChanged(int)), this, SLOT(setUpdateValues(int)));
+	connect(ui->displayUseQuasarMarkersButton, &QCheckBox::stateChanged, this, &QuasarsDialog::setDisplayUseQuasarMarkersButton);
+	connect(ui->internetUpdatesCheckbox, &QCheckBox::stateChanged, this, &QuasarsDialog::setUpdatesEnabled);
+	connect(ui->updateButton, &QPushButton::clicked, this, &QuasarsDialog::updateJSON);
+	connect(qsr, &Quasars::updateStateChanged, this, &QuasarsDialog::updateStateReceiver);
+	connect(qsr, &Quasars::jsonUpdateComplete, this, &QuasarsDialog::updateCompleteReceiver);
+	connect(ui->updateFrequencySpinBox, qOverload<int>(&QSpinBox::valueChanged), this, &QuasarsDialog::setUpdateValues);
 	refreshUpdateValues(); // fetch values for last updated and so on
 	// if the state didn't change, setUpdatesEnabled will not be called, so we force it
 	setUpdatesEnabled(ui->internetUpdatesCheckbox->checkState());
 
-	connectColorButton(ui->quasarMarkerColor, "Quasars.quasarsColor", "Quasars/marker_color");
+	ui->quasarMarkerColor->setup("Quasars.quasarsColor", "Quasars/marker_color");
 
 	updateTimer = new QTimer(this);
-	connect(updateTimer, SIGNAL(timeout()), this, SLOT(refreshUpdateValues()));
+	connect(updateTimer, &QTimer::timeout, this, &QuasarsDialog::refreshUpdateValues);
 	updateTimer->start(7000);
 
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
-	connect(ui->restoreDefaultsButton, SIGNAL(clicked()), this, SLOT(restoreDefaults()));
-	connect(ui->saveSettingsButton, SIGNAL(clicked()), this, SLOT(saveSettings()));
+	connect(ui->restoreDefaultsButton, &QPushButton::clicked, this, &QuasarsDialog::restoreDefaults);
+	connect(ui->saveSettingsButton, &QPushButton::clicked, this, &QuasarsDialog::saveSettings);
 
 	// About tab
 	setAboutHtml();
@@ -118,20 +112,17 @@ void QuasarsDialog::createDialogContent()
 
 void QuasarsDialog::setAboutHtml(void)
 {
-	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
-
 	QString html = "<html><head></head><body>";
-	html += "<h2>" + q_("Quasars Plug-in") + "</h2><table width=\"90%\">";
+	html += "<h2>" + q_("Quasars Plug-in") + "</h2><table class='layout' width=\"90%\">";
 	html += "<tr width=\"30%\"><td><strong>" + q_("Version") + ":</strong></td><td>" + QUASARS_PLUGIN_VERSION + "</td></tr>";
 	html += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + QUASARS_PLUGIN_LICENSE + "</td></tr>";
-	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Alexander Wolf &lt;alex.v.wolf@gmail.com&gt;</td></tr>";
+	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Alexander Wolf</td></tr>";
 	html += "</table>";
 
-	html += QString("<p>%1 (<a href=\"%2\">%3</a>)</p>")
-			.arg(q_("The Quasars plugin provides visualization of some quasars brighter than visual magnitude 18. The catalogue of quasars was compiled from \"Quasars and Active Galactic Nuclei\" (13th Ed.)"))
-			.arg("http://adsabs.harvard.edu/abs/2010A%26A...518A..10V")
-			.arg(q_("Veron+ 2010"));
+	html += QString("<p>%1 (<a href=\"%2\">%3</a>)</p>").arg(
+			q_("The Quasars plugin provides visualization of some quasars brighter than visual magnitude 18. The catalogue of quasars was compiled from \"Quasars and Active Galactic Nuclei\" (13th Ed.)"),
+			"http://adsabs.harvard.edu/abs/2010A%26A...518A..10V",
+			q_("Veron+ 2010"));
 
 	html += "</ul><p>" + q_("The current catalog contains info about %1 quasars.").arg(qsr->getCountQuasars()) + "</p>";
 	html += StelApp::getInstance().getModuleMgr().getStandardSupportLinksInfo("Quasars plugin");
@@ -242,7 +233,7 @@ void QuasarsDialog::updateCompleteReceiver(void)
 	updateTimer->start();
 	ui->lastUpdateDateTimeEdit->setDateTime(qsr->getLastUpdate());
 	QTimer *timer = new QTimer(this);
-	connect(timer, SIGNAL(timeout()), this, SLOT(refreshUpdateValues()));
+	connect(timer, &QTimer::timeout, this, &QuasarsDialog::refreshUpdateValues);
 	setAboutHtml();
 }
 

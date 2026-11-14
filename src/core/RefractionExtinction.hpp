@@ -41,7 +41,8 @@
 //! All the computations should be in effect
 //! (1) only if atmosphere effects are true
 //! (2) only for terrestrial locations, not on Moon/Mars/Saturn etc
-//! config.ini:astro/flag_extinction_below_horizon=true|false controls if extinction kills objects below -2 degrees altitude by setting airmass to 42.
+//! config.ini:astro/extinction_mode_below_horizon=zero|max|mirror controls if extinction kills objects below -2 degrees altitude by setting airmass to 42 (max),
+//! sets it fully transparent (zero, default) or mirrors it to above-horizon values.
 class Extinction
 {
 public:
@@ -101,6 +102,9 @@ public:
 	//! Rozenberg is infinite at Z=92.17 deg, Young at Z=93.6 deg, so this function RETURNS SUBHORIZONTAL_AIRMASS BELOW -2 DEGREES!
 	float airmass(float cosZ, const bool apparent_z=true) const;
 
+	QByteArray getForwardTransformShader() const;
+	void setForwardTransformUniforms(QOpenGLShaderProgram& program) const;
+
 private:
 	//! k, magnitudes/airmass, in [0.00, ... 1.00], (default 0.20).
 	float ext_coeff;
@@ -127,31 +131,36 @@ public:
 	//! Apply refraction.
 	//! @param altAzPos is the geometrical star position vector, to be transformed into apparent position.
 	//! Note that forward/backward are no absolute reverse operations!
-	void forward(Vec3d& altAzPos) const;
+	void forward(Vec3d& altAzPos) const override;
 
 	//! Remove refraction from position ("reduce").
 	//! @param altAzPos is the apparent star position vector, to be transformed into geometrical position.
 	//! Note that forward/backward are no absolute reverse operations!
-	void backward(Vec3d& altAzPos) const;
+	void backward(Vec3d& altAzPos) const override;
 
 	//! Apply refraction.
 	//! @param altAzPos is the geometrical star position vector, to be transformed into apparent position.
 	//! Note that forward/backward are no absolute reverse operations!
-	void forward(Vec3f& altAzPos) const;
+	void forward(Vec3f& altAzPos) const override;
 
 	//! Remove refraction from position ("reduce").
 	//! @param altAzPos is the apparent star position vector, to be transformed into geometrical position.
 	//! Note that forward/backward are no absolute reverse operations!
-	void backward(Vec3f& altAzPos) const;
+	void backward(Vec3f& altAzPos) const override;
 
-	void combine(const Mat4d& m)
+	void combine(const Mat4d& m) override
 	{
 		setPreTransfoMat(preTransfoMat*m);
 	}
 
-	Mat4d getApproximateLinearTransfo() const {return postTransfoMat*preTransfoMat;}
+	Mat4d getApproximateLinearTransfo() const override {return postTransfoMat*preTransfoMat;}
 
-	StelProjector::ModelViewTranformP clone() const {Refraction* refr = new Refraction(); *refr=*this; return StelProjector::ModelViewTranformP(refr);}
+	QByteArray getForwardTransformShader() const override;
+	void setForwardTransformUniforms(QOpenGLShaderProgram& program) const override;
+	QByteArray getBackwardTransformShader() const override;
+	void setBackwardTransformUniforms(QOpenGLShaderProgram& program) const override;
+
+	StelProjector::ModelViewTranformP clone() const override {Refraction* refr = new Refraction(); *refr=*this; return StelProjector::ModelViewTranformP(refr);}
 
 	//! Set surface air pressure (mbars), influences refraction computation.
 	void setPressure(float p_mbar);

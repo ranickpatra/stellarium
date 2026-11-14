@@ -19,24 +19,24 @@
 #ifndef STELLARIUM_SPLASH_SCREEN_HPP
 #define STELLARIUM_SPLASH_SCREEN_HPP
 
+#include <memory>
 #include <QThread>
 #include <QApplication>
 #include <QSplashScreen>
 
+class SplashTextHolder;
+struct SplashScreenTextHorizMetrics
+{
+	int shift;
+	int width;
+};
 class SplashScreen
 {
 	class SplashScreenWidget : public QSplashScreen
 	{
-		bool painted=false;
-		void paintEvent(QPaintEvent* e) override
-		{
-			QSplashScreen::paintEvent(e);
-			painted=true;
-		}
+		QPixmap makePixmap(double sizeRatio);
 	public:
-		SplashScreenWidget(QPixmap const& pixmap)
-			: QSplashScreen(pixmap)
-		{}
+		SplashScreenWidget(double sizeRatio);
 		void ensureFirstPaint() const
 		{
 			while(!painted)
@@ -45,12 +45,27 @@ class SplashScreen
 				qApp->processEvents();
 			}
 		}
+
+	protected:
+		void paintEvent(QPaintEvent*) override;
+
+	private:
+		std::unique_ptr<SplashTextHolder> textHolder;
+		QFont splashFont;
+		QFont titleFont;
+		QFont subtitleFont;
+		QFont versionFont;
+		double sizeRatio = 1;
+		bool painted=false;
+		SplashScreenTextHorizMetrics titleHM;
+		SplashScreenTextHorizMetrics subtitleHM;
+		SplashScreenTextHorizMetrics versionHM;
 	};
 
 	static SplashScreenWidget* instance;
 
 public:
-	static void present();
+	static void present(double sizeRatio);
 	static void finish(QWidget* mainWindow);
 	static void showMessage(QString const& message);
 	static void clearMessage();

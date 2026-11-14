@@ -22,11 +22,10 @@
 #include "ui_pointerCoordinatesWindow.h"
 
 #include "StelApp.hpp"
-#include "StelCore.hpp"
-#include "StelLocaleMgr.hpp"
 #include "StelModule.hpp"
 #include "StelModuleMgr.hpp"
 #include "StelGui.hpp"
+#include "StelTranslator.hpp"
 
 PointerCoordinatesWindow::PointerCoordinatesWindow()
 	: StelDialog("PointerCoordinates")
@@ -56,15 +55,20 @@ void PointerCoordinatesWindow::createDialogContent()
 	coord = GETSTELMODULE(PointerCoordinates);
 	ui->setupUi(dialog);
 
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &PointerCoordinatesWindow::retranslate);
+	connect(&StelApp::getInstance(), &StelApp::flagUsePolarDistanceChanged, this, &PointerCoordinatesWindow::populateCoordinates);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
-	populateValues();
+	usePolarDistance = StelApp::getInstance().getFlagPolarDistanceUsage();
 
-	connect(ui->checkBoxEnableAtStartup, SIGNAL(clicked(bool)), coord, SLOT(setFlagEnableAtStartup(bool)));
-	connect(ui->spinBoxFontSize, SIGNAL(valueChanged(int)), coord, SLOT(setFontSize(int)));
-	connect(ui->checkBoxShowButton, SIGNAL(clicked(bool)), coord, SLOT(setFlagShowCoordinatesButton(bool)));
+	connectBoolProperty(ui->checkBoxEnableAtStartup, "PointerCoordinates.enableAtStartup");
+	connectBoolProperty(ui->checkBoxShowButton,      "PointerCoordinates.showCoordinatesButton");
+	connectBoolProperty(ui->checkBoxConstellation,   "PointerCoordinates.showConstellation");
+	connectBoolProperty(ui->checkBoxCrossedLines,    "PointerCoordinates.showCrossedLines");
+	connectBoolProperty(ui->checkBoxElongation,      "PointerCoordinates.showElongation");
+	connectIntProperty(ui->spinBoxFontSize,          "PointerCoordinates.fontSize");
+	ui->textColorButton->setup("PointerCoordinates.fontColor", "PointerCoordinates/text_color");
 
 	// Place of the string with coordinates
 	populateCoordinatesPlacesList();
@@ -77,7 +81,7 @@ void PointerCoordinatesWindow::createDialogContent()
 	}
 	ui->placeComboBox->setCurrentIndex(idx);
 	setCustomCoordinatesAccess(currentPlaceKey);
-	connect(ui->placeComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(setCoordinatesPlace(int)));
+	connect(ui->placeComboBox, qOverload<int>(&QComboBox::currentIndexChanged), this, &PointerCoordinatesWindow::setCoordinatesPlace);
 
 	populateCoordinateSystemsList();
 	idx = ui->coordinateSystemComboBox->findData(coord->getCurrentCoordinateSystemKey(), Qt::UserRole, Qt::MatchCaseSensitive);
@@ -87,19 +91,14 @@ void PointerCoordinatesWindow::createDialogContent()
 		idx = ui->coordinateSystemComboBox->findData(QVariant("RaDecJ2000"), Qt::UserRole, Qt::MatchCaseSensitive);
 	}
 	ui->coordinateSystemComboBox->setCurrentIndex(idx);
-	connect(ui->coordinateSystemComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(setCoordinateSystem(int)));
+	connect(ui->coordinateSystemComboBox, qOverload<int>(&QComboBox::currentIndexChanged), this, &PointerCoordinatesWindow::setCoordinateSystem);
 
-	ui->checkBoxConstellation->setChecked(coord->getFlagShowConstellation());
-	connect(ui->checkBoxConstellation, SIGNAL(toggled(bool)), coord, SLOT(setFlagShowConstellation(bool)));
+	populateValues();
+	connect(ui->spinBoxX, qOverload<int>(&QSpinBox::valueChanged), this, &PointerCoordinatesWindow::setCustomCoordinatesPlace);
+	connect(ui->spinBoxY, qOverload<int>(&QSpinBox::valueChanged), this, &PointerCoordinatesWindow::setCustomCoordinatesPlace);
 
-	ui->checkBoxCrossedLines->setChecked(coord->getFlagShowCrossedLines());
-	connect(ui->checkBoxCrossedLines, SIGNAL(toggled(bool)), coord, SLOT(setFlagShowCrossedLines(bool)));
-
-	connect(ui->spinBoxX, SIGNAL(valueChanged(int)), this, SLOT(setCustomCoordinatesPlace()));
-	connect(ui->spinBoxY, SIGNAL(valueChanged(int)), this, SLOT(setCustomCoordinatesPlace()));
-
-	connect(ui->pushButtonSave, SIGNAL(clicked()), this, SLOT(saveCoordinatesSettings()));	
-	connect(ui->pushButtonReset, SIGNAL(clicked()), this, SLOT(resetCoordinatesSettings()));
+	connect(ui->pushButtonSave,  &QPushButton::clicked, this, &PointerCoordinatesWindow::saveCoordinatesSettings);
+	connect(ui->pushButtonReset, &QPushButton::clicked, this, &PointerCoordinatesWindow::resetCoordinatesSettings);
 
 	// About tab
 	setAboutHtml();
@@ -110,9 +109,6 @@ void PointerCoordinatesWindow::createDialogContent()
 
 void PointerCoordinatesWindow::populateValues()
 {
-	ui->checkBoxEnableAtStartup->setChecked(coord->getFlagEnableAtStartup());
-	ui->spinBoxFontSize->setValue(coord->getFontSize());
-	ui->checkBoxShowButton->setChecked(coord->getFlagShowCoordinatesButton());
 	QPair<int, int> cc = coord->getCustomCoordinatesPlace();
 	ui->spinBoxX->setValue(cc.first);
 	ui->spinBoxY->setValue(cc.second);
@@ -120,14 +116,11 @@ void PointerCoordinatesWindow::populateValues()
 
 void PointerCoordinatesWindow::setAboutHtml(void)
 {
-	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
-
 	QString html = "<html><head></head><body>";
-	html += "<h2>" + q_("Pointer Coordinates plug-in") + "</h2><table width=\"90%\">";
+	html += "<h2>" + q_("Pointer Coordinates plug-in") + "</h2><table class='layout' width=\"90%\">";
 	html += "<tr width=\"30%\"><td><strong>" + q_("Version") + ":</strong></td><td>" + POINTERCOORDINATES_PLUGIN_VERSION + "</td></tr>";
 	html += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + POINTERCOORDINATES_PLUGIN_LICENSE + "</td></tr>";
-	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Alexander Wolf &lt;alex.v.wolf@gmail.com&gt;</td></tr>";
+	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Alexander Wolf</td></tr>";
 	html += "<tr><td><strong>" + q_("Contributors") + ":</strong></td><td>Georg Zotti</td></tr>";
 	html += "</table>";
 
@@ -189,6 +182,12 @@ void PointerCoordinatesWindow::populateCoordinatesPlacesList()
 	places->blockSignals(false);	
 }
 
+void PointerCoordinatesWindow::populateCoordinates(bool polarDistance)
+{
+	usePolarDistance = polarDistance;
+	populateCoordinateSystemsList();
+}
+
 void PointerCoordinatesWindow::populateCoordinateSystemsList()
 {
 	Q_ASSERT(ui->coordinateSystemComboBox);
@@ -202,8 +201,16 @@ void PointerCoordinatesWindow::populateCoordinateSystemsList()
 	csys->clear();
 	//For each algorithm, display the localized name and store the key as user
 	//data. Unfortunately, there's no other way to do this than with a cycle.
-	csys->addItem(q_("Right ascension/Declination (J2000.0)"), "RaDecJ2000");
-	csys->addItem(q_("Right ascension/Declination"), "RaDec");
+	if (usePolarDistance)
+	{
+		csys->addItem(q_("Right ascension/Polar distance (J2000.0)"), "RaDecJ2000");
+		csys->addItem(q_("Right ascension/Polar distance"), "RaDec");
+	}
+	else
+	{
+		csys->addItem(q_("Right ascension/Declination (J2000.0)"), "RaDecJ2000");
+		csys->addItem(q_("Right ascension/Declination"), "RaDec");
+	}
 	csys->addItem(q_("Hour angle/Declination"), "HourAngle");
 	csys->addItem(q_("Ecliptic Longitude/Latitude"), "Ecliptic");
 	csys->addItem(q_("Ecliptic Longitude/Latitude (J2000.0)"), "EclipticJ2000");
@@ -235,7 +242,7 @@ void PointerCoordinatesWindow::setCustomCoordinatesPlace()
 	coord->setCustomCoordinatesPlace(ui->spinBoxX->value(), ui->spinBoxY->value());
 }
 
-void PointerCoordinatesWindow::setCustomCoordinatesAccess(QString place)
+void PointerCoordinatesWindow::setCustomCoordinatesAccess(const QString &place)
 {
 	if (place.contains("Custom"))
 	{

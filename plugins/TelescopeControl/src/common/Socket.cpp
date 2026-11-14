@@ -2,7 +2,7 @@
 The stellarium telescope library helps building
 telescope server programs, that can communicate with stellarium
 by means of the stellarium TCP telescope protocol.
-It also contains smaple server classes (dummy, Meade LX200).
+It also contains sample server classes (dummy, Meade LX200).
 
 Author and Copyright of this file and of the stellarium telescope library:
 Johannes Gajdosik, 2006
@@ -23,9 +23,7 @@ Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
 */
 
 #include "Socket.hpp"
-#include "StelCore.hpp"
-#include "StelApp.hpp"
-#include "StelUtils.hpp"
+#include "Server.hpp"
 
 #ifdef Q_OS_WIN
   #include <Windows.h> // GetSystemTimeAsFileTime
@@ -36,7 +34,6 @@ Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
 long long int GetNow(void)
 {
 	long long int t;
-	//StelCore *core = StelApp::getInstance().getCore();
 #ifdef Q_OS_WIN
 	union
 	{
@@ -44,14 +41,16 @@ long long int GetNow(void)
 		qint64 t;
 	} tmp;
 	GetSystemTimeAsFileTime(&tmp.file_time);
+	// convert from NT/NTFS time epoch (1601-01-01 0:00:00 UTC) in μs to UNIX epoch (1970-01-01 0:00:00 UTC) in μs. The difference is:
+	// 24 hour/day × 3600 s/hour × 10^6 μs/s × ((369×365+89) day).
+	// Here 369=1970-1601, and 89 is the number of leap years in the interval.
+	// The division by 10 in the minuend is to convert from 100-nanosecond intervals to microseconds.
 	t = (tmp.t/10) - 86400000000LL*(369*365+89);
 #else
 	struct timeval tv;
 	gettimeofday(&tv, 0);
 	t = tv.tv_sec * 1000000LL + tv.tv_usec;
 #endif
-	// GZ JDfix for 0.14 I am 99.9% sure we no longer need the anti-correction
-	//return t - core->getDeltaT(StelUtils::getJDFromSystem())*1000000; // Delta T anti-correction
 	return t;
 }
 
@@ -59,8 +58,21 @@ void Socket::hangup(void)
 {
 	if (!IS_INVALID_SOCKET(fd))
 	{
-		close(fd);
+		closeSocket(fd);
 		fd = INVALID_SOCKET;
 	}
 }
 
+void Socket::closeSocket(SOCKET socket)
+{
+#ifdef Q_OS_WIN
+	closesocket(socket);
+#else
+	close(socket);
+#endif
+}
+
+TelescopeLogPrefix Socket::getLogPrefix() const
+{
+	return TelescopeLogPrefix(server.getLogSlot());
+}

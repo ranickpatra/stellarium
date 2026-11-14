@@ -22,24 +22,25 @@
 #include "ui_archaeoLinesDialogLocations.h"
 
 #include "StelApp.hpp"
-#include "StelLocaleMgr.hpp"
+#include "StelGui.hpp"
 #include "StelLocationMgr.hpp"
 #include "StelModule.hpp"
 #include "StelModuleMgr.hpp"
-//#include "StelMainView.hpp"
-//#include "StelOpenGL.hpp"
 
 ArchaeoLinesDialogLocations::ArchaeoLinesDialogLocations()
 	: StelDialog("ArchaeoLinesLocations")
-	, al(Q_NULLPTR)
+	, al(nullptr)
 	, modalContext(0)
+	, allModel(new QStringListModel(this))
+	, pickedModel(new QStringListModel(this))
+	, proxyModel(nullptr)
 {
 	ui = new Ui_archaeoLinesDialogLocations();
 }
 
 ArchaeoLinesDialogLocations::~ArchaeoLinesDialogLocations()
 {
-	delete ui;          ui=Q_NULLPTR;
+	delete ui;          ui=nullptr;
 }
 
 void ArchaeoLinesDialogLocations::retranslate()
@@ -59,17 +60,15 @@ void ArchaeoLinesDialogLocations::createDialogContent()
 	kineticScrollingList << ui->citiesListView;
 	StelGui* gui= static_cast<StelGui*>(StelApp::getInstance().getGui());
 	enableKineticScrolling(gui->getFlagUseKineticScrolling());
-	connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+	connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &ArchaeoLinesDialogLocations::enableKineticScrolling);
 
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &ArchaeoLinesDialogLocations::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &ArchaeoLinesDialogLocations::handleMovedTo);
 
 	//initialize list model
-	allModel = new QStringListModel(this);
-	pickedModel = new QStringListModel(this);
 	StelLocationMgr *locMgr=&(StelApp::getInstance().getLocationMgr());
-	connect(locMgr, SIGNAL(locationListChanged()), this, SLOT(reloadLocations()));
+	connect(locMgr, &StelLocationMgr::locationListChanged, this, &ArchaeoLinesDialogLocations::reloadLocations);
 	reloadLocations();
 	proxyModel = new QSortFilterProxyModel(ui->citiesListView);
 	proxyModel->setSourceModel(allModel);
@@ -77,8 +76,8 @@ void ArchaeoLinesDialogLocations::createDialogContent()
 	proxyModel->setFilterCaseSensitivity(Qt::CaseInsensitive);
 	ui->citiesListView->setModel(proxyModel);
 
-	connect(ui->citySearchLineEdit, SIGNAL(textChanged(const QString&)), proxyModel, SLOT(setFilterWildcard(const QString&)));
-	connect(ui->citiesListView, SIGNAL(clicked(const QModelIndex&)), this, SLOT(setLocationFromList(const QModelIndex&)));
+	connect(ui->citySearchLineEdit, &QLineEdit::textChanged, proxyModel, &QSortFilterProxyModel::setFilterWildcard);
+	connect(ui->citiesListView,     &QListView::clicked,     this,       &ArchaeoLinesDialogLocations::setLocationFromList);
 }
 
 void ArchaeoLinesDialogLocations::setLocationFromList(const QModelIndex& index)
@@ -87,26 +86,19 @@ void ArchaeoLinesDialogLocations::setLocationFromList(const QModelIndex& index)
 	switch (modalContext)
 	{
 		case 1:
-			al->setGeographicLocation1Latitude(static_cast<double>(loc.latitude));
-			al->setGeographicLocation1Longitude(static_cast<double>(loc.longitude));
-			al->setGeographicLocation1Label(loc.name);
+			al->setGeographicLocation1Latitude(static_cast<double>(loc.getLatitude()));
+			al->setGeographicLocation1Longitude(static_cast<double>(loc.getLongitude()));
+			al->setGeographicLocation1Name(loc.name);
 			break;
 		case 2:
-			al->setGeographicLocation2Latitude(static_cast<double>(loc.latitude));
-			al->setGeographicLocation2Longitude(static_cast<double>(loc.longitude));
-			al->setGeographicLocation2Label(loc.name);
+			al->setGeographicLocation2Latitude(static_cast<double>(loc.getLatitude()));
+			al->setGeographicLocation2Longitude(static_cast<double>(loc.getLongitude()));
+			al->setGeographicLocation2Name(loc.name);
 			break;
 		default:
 			// do nothing
 			break;
 	}
-}
-
-// Connected to the button
-void ArchaeoLinesDialogLocations::setLocationFromList()
-{
-	QModelIndex index=ui->citiesListView->currentIndex();
-	setLocationFromList(index);
 }
 
 void ArchaeoLinesDialogLocations::reloadLocations()

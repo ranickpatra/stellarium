@@ -23,18 +23,19 @@
 #include "Scenery3d.hpp"
 #include "SceneInfo.hpp"
 #include "S3DEnum.hpp"
-#include "StoredViewDialog.hpp"
 
 #include "StelModuleMgr.hpp"
 #include "StelApp.hpp"
 #include "StelGui.hpp"
 #include "StelTranslator.hpp"
+#include "StelActionMgr.hpp"
+#include "ui_scenery3dDialog.h"
 
 #include <QLineEdit>
 #include <QStandardItemModel>
 #include <QTimer>
 
-Scenery3dDialog::Scenery3dDialog(QObject* parent) : StelDialog("Scenery3d", parent), mgr(Q_NULLPTR)
+Scenery3dDialog::Scenery3dDialog(QObject* parent) : StelDialog("Scenery3d", parent), mgr(nullptr)
 {
 	ui = new Ui_scenery3dDialogForm;
 }
@@ -58,10 +59,16 @@ void Scenery3dDialog::retranslate()
 			si = mgr->getCurrentScene(); //the scene that is currently displayed
 		updateTextBrowser(si);
 
-		for (auto* but : shortcutButtons)
+		for (auto* but : std::as_const(shortcutButtons))
 		{
 			//replace stored text with re-translated one
-			but->setProperty("stelOriginalText",but->text());
+			const QString btClassName=but->metaObject()->className();
+			if (btClassName == "QGroupBox")
+				dynamic_cast<QGroupBox*>(but)->setProperty("stelOriginalText",dynamic_cast<QGroupBox*>(but)->title());
+			else if (btClassName == "QCheckBox")
+				dynamic_cast<QCheckBox*>(but)->setProperty("stelOriginalText",dynamic_cast<QCheckBox*>(but)->text());
+			else
+				qCritical() << "Scenery3dDialog: UNKNOWN WIDGET TYPE: " << but->metaObject()->className();
 		}
 
 		updateShortcutStrings();
@@ -88,14 +95,14 @@ void Scenery3dDialog::createDialogContent()
 	ui->comboBoxCubemapMode->setModel(new CubemapModeListModel(ui->comboBoxCubemapMode));
 
 	//connect UI events
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 	connect(ui->scenery3dListWidget, &QListWidget::currentItemChanged, this, &Scenery3dDialog::scenery3dChanged);
 
 	//checkboxes can connect directly to manager
-	//connect(ui->checkBoxEnablePixelLight, SIGNAL(clicked(bool)), mgr, SLOT(setEnablePixelLighting(bool)));
-	//connect(ui->checkBoxEnableShadows,    SIGNAL(clicked(bool)), mgr, SLOT(setEnableShadows(bool)));
-	//connect(ui->checkBoxEnableBump,       SIGNAL(clicked(bool)), mgr, SLOT(setEnableBumps(bool)));
+	//connect(ui->checkBoxEnablePixelLight,   &QCheckBox::clicked, mgr, &Scenery3d::setEnablePixelLighting(bool)));
+	//connect(ui->checkBoxEnableShadows,      &QCheckBox::clicked, mgr, &Scenery3d::setEnableShadows(bool)));
+	//connect(ui->checkBoxEnableBump,         &QCheckBox::clicked, mgr, &Scenery3d::setEnableBumps(bool)));
 	//connect(ui->checkBoxEnableLazyDrawing,  &QCheckBox::clicked, mgr, &Scenery3d::setEnableLazyDrawing);
 	//connect(ui->checkBoxDominantFace,       &QCheckBox::clicked, mgr, &Scenery3d::setOnlyDominantFaceWhenMoving);
 	//connect(ui->checkBoxSecondDominantFace, &QCheckBox::clicked, mgr, &Scenery3d::setSecondDominantFaceWhenMoving);
@@ -103,6 +110,9 @@ void Scenery3dDialog::createDialogContent()
 	//connect(ui->checkBoxSimpleShadows,      &QCheckBox::clicked, mgr, &Scenery3d::setUseSimpleShadows);
 	//connect(ui->checkBoxCubemapShadows,     &QCheckBox::clicked, mgr, &Scenery3d::setUseFullCubemapShadows);
 	//connect(ui->spinLazyDrawingInterval, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged), mgr, &Scenery3d::setLazyDrawingInterval);
+
+
+	connectBoolProperty(ui->ignoreInitialViewCheckBox,         "Scenery3d.ignoreInitialView");
 
 	connectBoolProperty(ui->checkBoxEnablePixelLight,          "Scenery3d.enablePixelLighting");
 	connectBoolProperty(ui->checkBoxEnableShadows,             "Scenery3d.enableShadows");
@@ -132,17 +142,19 @@ void Scenery3dDialog::createDialogContent()
 	ac = acMgr->findAction("actionShow_Scenery3d_locationinfo");
 	if(ac)
 	{
-		ui->checkBoxShowGridCoordinates->setProperty("stelActionKey",ac->getId());
-		ui->checkBoxShowGridCoordinates->setProperty("stelOriginalText",ui->checkBoxShowGridCoordinates->text());
-		ui->checkBoxShowGridCoordinates->setChecked(ac->isChecked());
-		connect(ac,&StelAction::toggled,ui->checkBoxShowGridCoordinates, &QCheckBox::setChecked);
-		connect(ui->checkBoxShowGridCoordinates,&QCheckBox::toggled,ac, &StelAction::setChecked);
+		connectBoolProperty(ui->gridCoordinatesGroupBox, "Scenery3d.enableLocationInfo");
+		ui->gridCoordinatesGroupBox->setProperty("stelActionKey",ac->getId());
+		ui->gridCoordinatesGroupBox->setProperty("stelOriginalText",ui->gridCoordinatesGroupBox->title());
 		connect(ac,&StelAction::changed,this,&Scenery3dDialog::updateShortcutStrings);
-		shortcutButtons.append(ui->checkBoxShowGridCoordinates);
+		shortcutButtons.append(ui->gridCoordinatesGroupBox);
+		ui->radioButton_GCTopRight->setChecked(mgr->getLocationInfoStyle()==S3DRenderer::LocationInfoTopRight);
+		ui->radioButton_GCBottom->setChecked(mgr->getLocationInfoStyle()==S3DRenderer::LocationInfoBottomCenter);
+		connect(ui->radioButton_GCTopRight, &QRadioButton::toggled, this, &Scenery3dDialog::setCoordinateTextStyle);
+		connect(ui->radioButton_GCBottom, &QRadioButton::toggled, this, &Scenery3dDialog::setCoordinateTextStyle);
 	}
 
 	//connectSlotsByName does not work in our case (because this class does not "own" the GUI in the Qt sense)
-	//the "new" syntax is extremly ugly in case signals have overloads
+	//the "new" syntax is extremely ugly in case signals have overloads
 	connect(ui->comboBoxCubemapMode,     static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, &Scenery3dDialog::on_comboBoxCubemapMode_currentIndexChanged);
 	connect(ui->comboBoxShadowFiltering, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, &Scenery3dDialog::on_comboBoxShadowFiltering_currentIndexChanged);
 	connect(ui->comboBoxCubemapSize,     static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, &Scenery3dDialog::on_comboBoxCubemapSize_currentIndexChanged);
@@ -150,6 +162,7 @@ void Scenery3dDialog::createDialogContent()
 
 	connect(ui->sliderTorchStrength,  &QSlider::valueChanged, this, &Scenery3dDialog::on_sliderTorchStrength_valueChanged);
 	connect(ui->sliderTorchRange,     &QSlider::valueChanged, this, &Scenery3dDialog::on_sliderTorchRange_valueChanged);
+	connectDoubleProperty(ui->directionalLightPushSpinBox, "Scenery3d.directionalLightPush");
 	connect(ui->checkBoxDefaultScene, &QCheckBox::stateChanged, this, &Scenery3dDialog::on_checkBoxDefaultScene_stateChanged);
 
 	connect(ui->pushButtonOpenStoredViewDialog, &QPushButton::clicked, mgr, &Scenery3d::showStoredViewDialog);
@@ -250,35 +263,35 @@ void Scenery3dDialog::createUpdateConnections()
 void Scenery3dDialog::updateToolTipStrings()
 {
 	QString toolTipEnablePixelLight = QString("<html><head/><body><p>%1</p><p>%2</p></body></html>")
-			.arg(q_("Provides more accurate lighting by calculating it per-pixel instead of per-vertex."))
-			.arg(q_("Required for bump mapping and shadows!"));
+			.arg(q_("Provides more accurate lighting by calculating it per-pixel instead of per-vertex."),
+			     q_("Required for bump mapping and shadows!"));
 	QString toolTipSimpleShadows = QString("<html><head/><body><p>%1</p><p>%2</p></body></html>")
-			.arg(q_("Uses only a single shadow cascade instead of up to four."))
-			.arg(q_("Provides a speedup in exchange for shadow quality, especially in large scenes."));
+			.arg(q_("Uses only a single shadow cascade instead of up to four."),
+			     q_("Provides a speedup in exchange for shadow quality, especially in large scenes."));
 	QString toolTipShadowFiltering = QString("<html><head/><body><p>%1</p><p>%2</p></body></html>")
-			.arg(q_("Determines how the shadows are filtered, in increasing quality from top to bottom."))
-			.arg(q_("PCSS requires the quality set to LOW or HIGH."));
+			.arg(q_("Determines how the shadows are filtered, in increasing quality from top to bottom."),
+			     q_("PCSS requires the quality set to LOW or HIGH."));
 	QString toolTipPCSS = QString("<html><head/><body><p>%1</p><p>%2</p><p>%3</p></body></html>")
-			.arg(q_("Approximate calculation of shadow penumbras (sharper shadows near contact points, blurred shadows further away)."))
-			.arg(q_("Requires <b>LOW</b> or <b>HIGH</b> shadow filtering (without <b>Hardware</b>)."))
-			.arg(q_("Causes a performance hit."));
+			.arg(q_("Approximate calculation of shadow penumbras (sharper shadows near contact points, blurred shadows further away)."),
+			     q_("Requires <b>LOW</b> or <b>HIGH</b> shadow filtering (without <b>Hardware</b>)."),
+			     q_("Causes a performance hit."));
 	QString toolTipCubemapMode = QString("<html><head/><body><p>%1</p><p>%2</p><p>%3</p><p>%4</p></body></html>")
-			.arg(q_("This determines the way the scene is rendered when Stellarium uses a projection other than &quot;Perspective&quot;. The scene is always rendered onto a cube, and this cube is then warped according to the real projection. The cube is described using an image called &quot;cubemap&quot;."))
-			.arg(q_("<b>6 Textures</b> uses 6 single textures, one for each cube side. This is the most compatible method, but may be slower than the others."))
-			.arg(q_("<b>Cubemap</b> uses a single GL_TEXTURE_CUBEMAP. Recommended for most users."))
-			.arg(q_("<b>Geometry shader</b> uses a modern GPU feature to render all 6 sides of the cube at once. It may be the fastest method depending on the scene and your GPU hardware. If not supported, this cannot be selected."));
+			.arg(q_("This determines the way the scene is rendered when Stellarium uses a projection other than &quot;Perspective&quot;. The scene is always rendered onto a cube, and this cube is then warped according to the real projection. The cube is described using an image called &quot;cubemap&quot;."),
+			     q_("<b>6 Textures</b> uses 6 single textures, one for each cube side. This is the most compatible method, but may be slower than the others."),
+			     q_("<b>Cubemap</b> uses a single GL_TEXTURE_CUBEMAP. Recommended for most users."),
+			     q_("<b>Geometry shader</b> uses a modern GPU feature to render all 6 sides of the cube at once. It may be the fastest method depending on the scene and your GPU hardware. If not supported, this cannot be selected."));
 	QString toolTipCubemapShadows = QString("<html><head/><body><p>%1</p><p>%2</p><p>%3</p></body></html>")
-			.arg(q_("Calculates shadows for each cubemap face separately."))
-			.arg(q_("If disabled, the shadowed area is calculated using a perspective projection, which may cause missing shadows with high FOV values, but is quite a bit faster!"))
-			.arg(q_("This does not work when using the <b>Geometry shader</b> cubemapping mode!"));
+			.arg(q_("Calculates shadows for each cubemap face separately."),
+			     q_("If disabled, the shadowed area is calculated using a perspective projection, which may cause missing shadows with high FOV values, but is quite a bit faster!"),
+			     q_("This does not work when using the <b>Geometry shader</b> cubemapping mode!"));
 	QString toolTipEnableLazyDrawing = QString("<html><head/><body><p>%1<br/>%2</p><p><b>%3</b></p></body></html>")
-			.arg(q_("When checked, the cubemap is only recreated in specific time intervals, instead of each frame."))
-			.arg(q_("Saves energy and may increase subjective application performance."))
-			.arg(q_("Note that the cubemap is always re-rendered when the view position changes."));
+			.arg(q_("When checked, the cubemap is only recreated in specific time intervals, instead of each frame."),
+			     q_("Saves energy and may increase subjective application performance."),
+			     q_("Note that the cubemap is always re-rendered when the view position changes."));
 	QString toolTipDominantFace = QString("<html><head/><body><p>%1</p><p>%2</p><p><b>%3</b></p></body></html>")
-			.arg(q_("When checked, only the face that corresponds to your viewing direction is updated on movement."))
-			.arg(q_("This will speed up rendering, but the appearance will look &quot;broken&quot; until you stop moving."))
-			.arg(q_("This does NOT work with the &quot;Geometry-Shader&quot; cubemapping mode!"));
+			.arg(q_("When checked, only the face that corresponds to your viewing direction is updated on movement."),
+			     q_("This will speed up rendering, but the appearance will look &quot;broken&quot; until you stop moving."),
+			     q_("This does NOT work with the &quot;Geometry-Shader&quot; cubemapping mode!"));
 	QString toolTipSecondDominantFace = QString("<html><head/><body><p>%1</p></body></html>")
 			.arg(q_("This updates a second face, so that the visual appearance seems less &quot;broken&quot;."));
 
@@ -300,6 +313,7 @@ void Scenery3dDialog::updateShortcutStrings()
 
 	for (auto* bt : shortcutButtons)
 	{
+		const QString btClassName=bt->metaObject()->className();
 		QVariant v = bt->property("stelActionKey");
 		QVariant t = bt->property("stelOriginalText");
 		if(v.isValid() && t.isValid())
@@ -309,7 +323,12 @@ void Scenery3dDialog::updateShortcutStrings()
 			StelAction* ac = acMgr->findAction(s);
 			if(ac)
 			{
-				bt->setText(text.arg(ac->getShortcut().toString(QKeySequence::NativeText)));
+				if (btClassName == "QGroupBox")
+					dynamic_cast<QGroupBox*>(bt)->setTitle(text.arg(ac->getShortcut().toString(QKeySequence::NativeText)));
+				else if (btClassName == "QCheckBox")
+					dynamic_cast<QCheckBox*>(bt)->setText(text.arg(ac->getShortcut().toString(QKeySequence::NativeText)));
+				else
+					qCritical() << "Scenery3dDialog: UNKNOWN WIDGET TYPE: " << bt->metaObject()->className();
 			}
 		}
 	}
@@ -320,7 +339,7 @@ void Scenery3dDialog::initResolutionCombobox(QComboBox *cb)
 	bool oldval = cb->blockSignals(true);
 
 	uint maxResolution = mgr->getMaximumFramebufferSize();
-	for(uint i = 256;i<=qMin(4096u,maxResolution);i*=2)
+	for(uint i = 256;i<=qMin(16384u,maxResolution);i*=2)
 	{
 		cb->addItem(QString::number(i),i);
 	}
@@ -330,7 +349,7 @@ void Scenery3dDialog::initResolutionCombobox(QComboBox *cb)
 
 void Scenery3dDialog::on_comboBoxCubemapSize_currentIndexChanged(int index)
 {
-	Q_UNUSED(index);
+	Q_UNUSED(index)
 	bool ok;
 	uint val = ui->comboBoxCubemapSize->currentData().toUInt(&ok);
 	if(ok)
@@ -379,7 +398,7 @@ void Scenery3dDialog::updateCurrentScene(const SceneInfo &sceneInfo)
 	{
 		ui->scenery3dListWidget->blockSignals(true);
 		QList<QListWidgetItem*> currentItems = ui->scenery3dListWidget->findItems(sceneInfo.name, Qt::MatchExactly);
-		if(currentItems.size()>0)
+		if(!currentItems.isEmpty())
 		{
 			ui->scenery3dListWidget->setCurrentItem(currentItems.at(0));
 		}
@@ -568,4 +587,15 @@ void Scenery3dDialog::setToInitialValues()
 		ui->checkBoxCubemapShadows->setVisible(false);
 		ui->checkBoxSimpleShadows->setVisible(false);
 	}
+}
+
+// Connect to the RadioButtons to set coordinate text output
+void Scenery3dDialog::setCoordinateTextStyle()
+{
+	if (ui->radioButton_GCTopRight->isChecked())
+		mgr->setLocationInfoStyle(S3DRenderer::LocationInfoTopRight);
+	else if (ui->radioButton_GCBottom->isChecked())
+		mgr->setLocationInfoStyle(S3DRenderer::LocationInfoBottomCenter);
+	else
+		qCritical() << "Scenery3dDialog: Problem with determining coordinate output!";
 }

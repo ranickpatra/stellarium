@@ -2,7 +2,7 @@
 The stellarium telescope library helps building
 telescope server programs, that can communicate with stellarium
 by means of the stellarium TCP telescope protocol.
-It also contains smaple server classes (dummy, Meade LX200).
+It also contains sample server classes (dummy, Meade LX200).
 
 Author and Copyright of this file and of the stellarium telescope library:
 Johannes Gajdosik, 2006, modified for NexStar telescopes by Michael Heinz.
@@ -25,8 +25,7 @@ Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
 #ifndef NEXSTARCOMMAND_HPP
 #define NEXSTARCOMMAND_HPP
 
-#include <QTextStream>
-using namespace std;
+#include <QDebug>
 
 class Server;
 class TelescopeClientDirectNexStar;
@@ -40,7 +39,7 @@ public:
 	bool hasBeenWrittenToBuffer(void) const { return has_been_written_to_buffer; }
 	virtual int readAnswerFromBuffer(const char *&buff, const char *end) const = 0;
 	virtual bool needsNoAnswer(void) const { return false; }
-	virtual void print(QTextStream &o) const = 0;
+	virtual void print(QDebug &o) const = 0;
 	// returns true when reading is finished
 	
 protected:
@@ -49,7 +48,7 @@ protected:
 	bool has_been_written_to_buffer;
 };
 
-inline QTextStream &operator<<(QTextStream &o, const NexStarCommand &c)
+inline QDebug operator<<(QDebug o, const NexStarCommand &c)
 {
 	c.print(o);
 	return o;
@@ -60,9 +59,9 @@ class NexStarCommandGotoPosition : public NexStarCommand
 {
 public:
 	NexStarCommandGotoPosition(Server &server, unsigned int ra_int, int dec_int);
-	bool writeCommandToBuffer(char *&buff, char *end);
-	int readAnswerFromBuffer(const char *&buff, const char *end) const;
-	void print(QTextStream &o) const;
+	bool writeCommandToBuffer(char *&buff, char *end) override;
+	int readAnswerFromBuffer(const char *&buff, const char *end) const override;
+	void print(QDebug &o) const override;
 	
 private:
 	int ra, dec;
@@ -73,12 +72,22 @@ class NexStarCommandSync : public NexStarCommand
 {
 public:
 	NexStarCommandSync(Server &server, unsigned int ra_int, int dec_int);
-	bool writeCommandToBuffer(char *&buff, char *end);
-	int readAnswerFromBuffer(const char *&buff, const char *end) const;
-	void print(QTextStream &o) const;
+	bool writeCommandToBuffer(char *&buff, char *end) override;
+	int readAnswerFromBuffer(const char *&buff, const char *end) const override;
+	void print(QDebug &o) const override;
 
 private:
 	int ra, dec;
+};
+
+//! Celestron NexStar command: abort a slew.
+class NexStarCommandAbort : public NexStarCommand
+{
+public:
+	NexStarCommandAbort(Server &server) : NexStarCommand(server){};
+	bool writeCommandToBuffer(char *&buff, char *end) override;
+	int readAnswerFromBuffer(const char *&buff, const char *end) const override;
+	void print(QDebug &o) const override;
 };
 
 //! Celestron NexStar command: Get the current position.
@@ -86,9 +95,9 @@ class NexStarCommandGetRaDec : public NexStarCommand
 {
 public:
 	NexStarCommandGetRaDec(Server &server) : NexStarCommand(server) {}
-	bool writeCommandToBuffer(char *&buff, char *end);
-	int readAnswerFromBuffer(const char *&buff, const char *end) const;
-	void print(QTextStream &o) const;
+	bool writeCommandToBuffer(char *&buff, char *end) override;
+	int readAnswerFromBuffer(const char *&buff, const char *end) const override;
+	void print(QDebug &o) const override;
 };
 
 #endif

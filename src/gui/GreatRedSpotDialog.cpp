@@ -50,30 +50,30 @@ void GreatRedSpotDialog::createDialogContent()
 	ui->setupUi(dialog);
 	
 	//Signals and slots
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &GreatRedSpotDialog::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &GreatRedSpotDialog::handleMovedTo);
 
 	SolarSystem* ss = GETSTELMODULE(SolarSystem);
-	connectIntProperty(ui->longitudeSpinBox, "SolarSystem.customGrsLongitude");
-	connectDoubleProperty(ui->driftDoubleSpinBox, "SolarSystem.customGrsDrift");
+	connectIntProperty(ui->longitudeSpinBox, "SolarSystem.grsLongitude");
+	connectDoubleProperty(ui->driftDoubleSpinBox, "SolarSystem.grsDrift");
 
 	const StelLocaleMgr& locmgr = StelApp::getInstance().getLocaleMgr();
 	QString fmt = QString("%1 hh:mm").arg(locmgr.getQtDateFormatStr());
 	ui->jdDateTimeEdit->setDisplayFormat(fmt);
-	ui->jdDateTimeEdit->setDateTime(StelUtils::jdToQDateTime(ss->getCustomGrsJD()));
-	connect(ui->jdDateTimeEdit, SIGNAL(dateTimeChanged(QDateTime)), this, SLOT(setGrsJD(QDateTime)));
+	ui->jdDateTimeEdit->setDateTime(StelUtils::jdToQDateTime(ss->getGrsJD(), Qt::UTC));
+	connect(ui->jdDateTimeEdit, &QDateTimeEdit::dateTimeChanged, this, &GreatRedSpotDialog::setGrsJD);
 
-	connect(ui->recentGrsMeasurementPushButton, SIGNAL(clicked(bool)), this, SLOT(openRecentGrsMeasurement()));
+	connect(ui->recentGrsMeasurementPushButton, &QPushButton::clicked, this, &GreatRedSpotDialog::openRecentGrsMeasurement);
 }
 
 void GreatRedSpotDialog::setGrsJD(QDateTime dt)
 {
-	GETSTELMODULE(SolarSystem)->setCustomGrsJD(StelUtils::qDateTimeToJd(dt));
+	GETSTELMODULE(SolarSystem)->setGrsJD(StelUtils::qDateTimeToJd(dt));
 }
 
 void GreatRedSpotDialog::openRecentGrsMeasurement()
 {
 	QSettings* conf = StelApp::getInstance().getSettings();
-	QDesktopServices::openUrl(QUrl(conf->value("astro/grs_measurements_url", "http://jupos.privat.t-online.de/rGrs.htm").toString()));
+	QDesktopServices::openUrl(QUrl(conf->value("astro/grs_measurements_url", "https://jupos.hier-im-netz.de/rGrs.htm").toString()));
 }

@@ -22,11 +22,11 @@
 #include "StelCore.hpp"
 #include "StelUtils.hpp"
 #include "StelTranslator.hpp"
-#include "StelModuleMgr.hpp"
+//#include "StelModuleMgr.hpp"
 #include "StelSkyDrawer.hpp"
-#include "StarMgr.hpp"
 #include "StelLocaleMgr.hpp"
 #include "StelPainter.hpp"
+#include "Planet.hpp"
 
 #include <QTextStream>
 #include <QDebug>
@@ -34,8 +34,10 @@
 #include <QVariantMap>
 #include <QVariant>
 #include <QList>
+#include <QRegularExpression>
 
 const QString Nova::NOVA_TYPE = QStringLiteral("Nova");
+bool Nova::syncShowLabels = true;
 
 Nova::Nova(const QVariantMap& map)
 	: initialized(false)
@@ -112,10 +114,11 @@ QString Nova::getNameI18n() const
 {
 	const StelTranslator& trans = StelApp::getInstance().getLocaleMgr().getSkyTranslator();
 	// Parse the nova name to get parts to translation
-	QRegExp nn("^Nova\\s+(\\w+|\\w+\\s+\\w+)\\s+(\\d+|\\d+\\s+#\\d+)$");
+	QRegularExpression nn("^Nova\\s+(\\w+|\\w+\\s+\\w+)\\s+(\\d+|\\d+\\s+#\\d+)$");
+	QRegularExpressionMatch nnMatch=nn.match(novaName);
 	QString nameI18n = novaName;
-	if (nn.exactMatch(novaName))
-		nameI18n = QString("%1 %2 %3").arg(trans.qtranslate("Nova", "Nova template"), trans.qtranslate(nn.cap(1).trimmed(), "Genitive name of constellation"), nn.cap(2).trimmed());
+	if (nnMatch.hasMatch())
+		nameI18n = QString("%1 %2 %3").arg(trans.qtranslate("Nova", "Nova template"), trans.qtranslate(nnMatch.captured(1).trimmed(), "Genitive name of constellation"), nnMatch.captured(2).trimmed());
 	else
 		nameI18n = trans.qtranslate(novaName);
 
@@ -127,9 +130,9 @@ QString Nova::getDesignation() const
 	return designation;
 }
 
-QString Nova::getMaxBrightnessDate(const double JD) const
+QString Nova::getMaxBrightnessDate(const StelCore *core, const double JD) const
 {
-	return StelApp::getInstance().getLocaleMgr().getPrintableDateLocal(JD);
+	return StelApp::getInstance().getLocaleMgr().getPrintableDateLocal(JD, core->getUTCOffset(JD));
 }
 
 QString Nova::getInfoString(const StelCore* core, const InfoStringGroup& flags) const
@@ -139,12 +142,12 @@ QString Nova::getInfoString(const StelCore* core, const InfoStringGroup& flags) 
 
 	if (flags&Name)
 	{
-		QString name = novaName.isEmpty() ? QString("<h2>%1</h2>").arg(designation) : QString("<h2>%1 (%2)</h2>").arg(getNameI18n()).arg(designation);
+		QString name = novaName.isEmpty() ? QString("<h2>%1</h2>").arg(designation) : QString("<h2>%1 (%2)</h2>").arg(getNameI18n(), designation);
 		oss << name;
 	}
 
 	if (flags&ObjectType)
-		oss << QString("%1: <b>%2</b> (%3)").arg(q_("Type"), q_("nova"), novaType) << "<br />";
+		oss << QString("%1: <b>%2</b> (%3)").arg(q_("Type"), getObjectTypeI18n(), novaType) << "<br />";
 
 	if (flags&Magnitude)
 		oss << getMagnitudeInfoString(core, flags, 2);
@@ -154,7 +157,7 @@ QString Nova::getInfoString(const StelCore* core, const InfoStringGroup& flags) 
 
 	if (flags&Extra)
 	{
-		oss << QString("%1: %2").arg(q_("Maximum brightness"), getMaxBrightnessDate(peakJD)) << "<br />";
+		oss << QString("%1: %2").arg(q_("Maximum brightness"), getMaxBrightnessDate(core, peakJD)) << "<br />";
 		if (distance>0)
 		{
 			//TRANSLATORS: Unit of measure for distance - Light Years
@@ -163,6 +166,7 @@ QString Nova::getInfoString(const StelCore* core, const InfoStringGroup& flags) 
 		}
 	}
 
+	oss << getSolarLunarInfoString(core, flags);
 	postProcessInfoString(str, flags);
 	return str;
 }
@@ -184,11 +188,6 @@ QVariantMap Nova::getInfoMap(const StelCore *core) const
 	map["distance"] = distance;
 
 	return map;
-}
-
-Vec3f Nova::getInfoColor(void) const
-{
-	return Vec3f(1.f, 1.f, 1.f);
 }
 
 float Nova::getVMagnitude(const StelCore* core) const
@@ -261,7 +260,8 @@ float Nova::getVMagnitude(const StelCore* core) const
 		float step;
 		float d2 = maxMagnitude+2.f;
 		float d3 = maxMagnitude+3.f;
-		float d6 = maxMagnitude+6.f;		
+		float d6 = maxMagnitude+6.f;
+		float d9 = maxMagnitude+9.f;
 
 		if (deltaJD>0 && deltaJD<=t2)
 		{
@@ -271,24 +271,27 @@ float Nova::getVMagnitude(const StelCore* core) const
 
 		if (deltaJD>t2 && deltaJD<=t3)
 		{
-			step = 3.f/t3;
+			step = 1.f/(t3-t2);
 			vmag = d2 + step*(deltaJD-t2);
 		}
 
 		if (deltaJD>t3 && deltaJD<=t6)
 		{
-			step = 6.f/t6;
+			step = 3.f/(t6-t3);
 			vmag = d3 + step*(deltaJD-t3);
 		}
 
 		if (deltaJD>t6 && deltaJD<=t9)
 		{
-			step = 9.f/t9;
+			step = 3.f/(t9-t6);
 			vmag = d6 + step*(deltaJD-t6);
 		}
 
 		if (deltaJD>t9)
-			vmag = minMagnitude;
+		{
+			step = 9.f/t9;
+			vmag = d9 + step*(deltaJD-t9);
+		}
 	}
 	else
 	{
@@ -306,26 +309,17 @@ float Nova::getVMagnitude(const StelCore* core) const
 	return vmag;
 }
 
-double Nova::getAngularSize(const StelCore*) const
-{
-	return 0.00001;
-}
-
-void Nova::update(double deltaTime)
-{
-	labelsFader.update(static_cast<int>(deltaTime*1000));
-}
-
 void Nova::draw(StelCore* core, StelPainter* painter)
 {
 	StelSkyDrawer* sd = core->getSkyDrawer();
 	const float mlimit = sd->getLimitMagnitude();
 	float mag = getVMagnitudeWithExtinction(core);
+	const float shift = 8.f;
 
 	if (mag <= mlimit)
 	{
 		const Vec3f color(1.f);
-		Vec3f vf(XYZ.toVec3f());
+		Vec3f vf(getJ2000EquatorialPos(core).toVec3f());
 		Vec3f altAz(vf);
 		altAz.normalize();
 		core->j2000ToAltAzInPlaceNoRefraction(&altAz);
@@ -333,16 +327,28 @@ void Nova::draw(StelCore* core, StelPainter* painter)
 		sd->computeRCMag(mag, &rcMag);
 		sd->preDrawPointSource(painter);
 		// allow height-dependent twinkle and suppress twinkling in higher altitudes. Keep 0.1 twinkle amount in zenith.
-		sd->drawPointSource(painter, vf, rcMag, color, true, qMin(1.0f, 1.0f-0.9f*altAz[2]));
+		sd->drawPointSource(painter, vf.toVec3d(), rcMag, color, true, qMin(1.0f, 1.0f-0.9f*altAz[2]));
 		sd->postDrawPointSource(painter);
 		painter->setColor(color, 1.f);
-		float size = getAngularSize(Q_NULLPTR)*M_PI_180f*painter->getProjector()->getPixelPerRadAtCenter();
-		float shift = 6.f + size/1.8f;
-		StarMgr* smgr = GETSTELMODULE(StarMgr); // It's need for checking displaying of labels for stars
-		if (labelsFader.getInterstate()<=0.f && (mag+5.f)<mlimit && smgr->getFlagLabels())
+		if ((mag+5.f)<mlimit && syncShowLabels)
 		{
 			QString name = novaName.isEmpty() ? designation : novaName;
-			painter->drawText(XYZ, name, 0, shift, shift, false);
+			painter->drawText(getJ2000EquatorialPos(core), name, 0, shift, shift, false);
 		}
+	}
+}
+
+Vec3d Nova::getJ2000EquatorialPos(const StelCore* core) const
+{
+	if ((core) && (core->getUseAberration()) && (core->getCurrentPlanet()))
+	{
+		const Vec3d vel = core->getAberrationVec(core->getJDE());
+		Vec3d pos=XYZ+vel;
+		pos.normalize();
+		return pos;
+	}
+	else
+	{
+		return XYZ;
 	}
 }

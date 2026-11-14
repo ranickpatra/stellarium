@@ -17,6 +17,8 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <QRegularExpression>
+
 #include "ArchaeoLines.hpp"
 #include "ArchaeoLinesDialog.hpp"
 #include "ui_archaeoLinesDialog.h"
@@ -24,16 +26,16 @@
 #include "ArchaeoLinesDialogLocations.hpp"
 
 #include "StelApp.hpp"
-#include "StelLocaleMgr.hpp"
+#include "StelGui.hpp"
 #include "StelModule.hpp"
 #include "StelModuleMgr.hpp"
-#include "StelMainView.hpp"
-#include "StelOpenGL.hpp"
+#include "StelTranslator.hpp"
 #include "AngleSpinBox.hpp"
+#include "StelUtils.hpp"
 
 ArchaeoLinesDialog::ArchaeoLinesDialog()
 	: StelDialog("ArchaeoLines")
-	, al(Q_NULLPTR)
+	, al(nullptr)
 {
 	ui = new Ui_archaeoLinesDialog();
 	locationsDialog = new ArchaeoLinesDialogLocations();
@@ -41,8 +43,8 @@ ArchaeoLinesDialog::ArchaeoLinesDialog()
 
 ArchaeoLinesDialog::~ArchaeoLinesDialog()
 {
-	delete locationsDialog; locationsDialog=Q_NULLPTR;
-	delete ui;              ui=Q_NULLPTR;
+	delete locationsDialog; locationsDialog=nullptr;
+	delete ui;              ui=nullptr;
 }
 
 void ArchaeoLinesDialog::retranslate()
@@ -63,11 +65,11 @@ void ArchaeoLinesDialog::createDialogContent()
 	kineticScrollingList << ui->aboutTextBrowser;
 	StelGui* gui= static_cast<StelGui*>(StelApp::getInstance().getGui());
 	enableKineticScrolling(gui->getFlagUseKineticScrolling());
-	connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+	connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &ArchaeoLinesDialog::enableKineticScrolling);
 
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &ArchaeoLinesDialog::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &ArchaeoLinesDialog::handleMovedTo);
 
 	connectIntProperty(ui->lineWidthSpinBox, "ArchaeoLines.lineWidth");
 
@@ -129,11 +131,11 @@ void ArchaeoLinesDialog::createDialogContent()
 	ui->customDeclination2DoubleSpinBox->setWrapping(false);
 
 	// TBD: Store a decimal/DMS selection property separately?
-	setDisplayFormatForSpins(StelApp::getInstance().getFlagShowDecimalDegrees());
-	connect(&StelApp::getInstance(), SIGNAL(flagShowDecimalDegreesChanged(bool)), this, SLOT(setDisplayFormatForSpins(bool)));
+	setDisplayFormatForSpins(StelApp::getInstance().getFlagUseDecDegreesCoords());
+	connect(&StelApp::getInstance(), &StelApp::flagUseDecDegreesCoordsChanged, this, &ArchaeoLinesDialog::setDisplayFormatForSpins);
 
-	connect(ui->geographicLocation1PickPushButton, &QPushButton::clicked, [=](){locationsDialog->setVisible(true); locationsDialog->setModalContext(1);});
-	connect(ui->geographicLocation2PickPushButton, &QPushButton::clicked, [=](){locationsDialog->setVisible(true); locationsDialog->setModalContext(2);});
+	connect(ui->geographicLocation1PickPushButton, &QPushButton::clicked, this, [=](){locationsDialog->setVisible(true); locationsDialog->setModalContext(1);});
+	connect(ui->geographicLocation2PickPushButton, &QPushButton::clicked, this, [=](){locationsDialog->setVisible(true); locationsDialog->setModalContext(2);});
 
 	connectBoolProperty(ui->geographicLocation1CheckBox,                 "ArchaeoLines.flagShowGeographicLocation1");
 	connectBoolProperty(ui->geographicLocation2CheckBox,                 "ArchaeoLines.flagShowGeographicLocation2");
@@ -141,8 +143,8 @@ void ArchaeoLinesDialog::createDialogContent()
 	connectDoubleProperty(ui->geographicLocation1LatitudeDoubleSpinBox,  "ArchaeoLines.geographicLocation1Latitude");
 	connectDoubleProperty(ui->geographicLocation2LongitudeDoubleSpinBox, "ArchaeoLines.geographicLocation2Longitude");
 	connectDoubleProperty(ui->geographicLocation2LatitudeDoubleSpinBox,  "ArchaeoLines.geographicLocation2Latitude");
-	connectStringProperty(ui->geographicLocation1LineEdit,               "ArchaeoLines.geographicLocation1Label");
-	connectStringProperty(ui->geographicLocation2LineEdit,               "ArchaeoLines.geographicLocation2Label");
+	connectStringProperty(ui->geographicLocation1LineEdit,               "ArchaeoLines.geographicLocation1Name");
+	connectStringProperty(ui->geographicLocation2LineEdit,               "ArchaeoLines.geographicLocation2Name");
 
 	connectBoolProperty(ui->customAzimuth1CheckBox,        "ArchaeoLines.flagShowCustomAzimuth1");
 	connectBoolProperty(ui->customAzimuth2CheckBox,        "ArchaeoLines.flagShowCustomAzimuth2");
@@ -165,38 +167,38 @@ void ArchaeoLinesDialog::createDialogContent()
 	connectStringProperty(ui->customDeclination1LineEdit,      "ArchaeoLines.customDeclination1Label");
 	connectStringProperty(ui->customDeclination2LineEdit,      "ArchaeoLines.customDeclination2Label");
 
-	connectColorButton(ui->equinoxColorToolButton,                 "ArchaeoLines.equinoxColor",                 "ArchaeoLines/color_equinox");
-	connectColorButton(ui->solsticesColorToolButton,               "ArchaeoLines.solsticesColor",               "ArchaeoLines/color_solstices");
-	connectColorButton(ui->crossquarterColorToolButton,            "ArchaeoLines.crossquartersColor",           "ArchaeoLines/color_crossquarters");
-	connectColorButton(ui->majorStandstillColorToolButton,         "ArchaeoLines.majorStandstillColor",         "ArchaeoLines/color_major_standstill");
-	connectColorButton(ui->minorStandstillColorToolButton,         "ArchaeoLines.minorStandstillColor",         "ArchaeoLines/color_minor_standstill");
-	connectColorButton(ui->polarCirclesColorToolButton,            "ArchaeoLines.polarCirclesColor",            "ArchaeoLines/color_polar_circles");
-	connectColorButton(ui->zenithPassageColorToolButton,           "ArchaeoLines.zenithPassageColor",           "ArchaeoLines/color_zenith_passage");
-	connectColorButton(ui->nadirPassageColorToolButton,            "ArchaeoLines.nadirPassageColor",            "ArchaeoLines/color_nadir_passage");
-	connectColorButton(ui->selectedObjectColorToolButton,          "ArchaeoLines.selectedObjectColor",          "ArchaeoLines/color_selected_object");
-	connectColorButton(ui->selectedObjectAzimuthColorToolButton,   "ArchaeoLines.selectedObjectAzimuthColor",   "ArchaeoLines/color_selected_object_azimuth");
-	connectColorButton(ui->selectedObjectHourAngleColorToolButton, "ArchaeoLines.selectedObjectHourAngleColor", "ArchaeoLines/color_selected_object_hour_angle");
-	connectColorButton(ui->currentSunColorToolButton,              "ArchaeoLines.currentSunColor",              "ArchaeoLines/color_current_sun");
-	connectColorButton(ui->currentMoonColorToolButton,             "ArchaeoLines.currentMoonColor",             "ArchaeoLines/color_current_moon");
-	connectColorButton(ui->currentPlanetColorToolButton,           "ArchaeoLines.currentPlanetColor",           "ArchaeoLines/color_current_planet");
-	connectColorButton(ui->geographicLocation1ColorToolButton,     "ArchaeoLines.geographicLocation1Color",     "ArchaeoLines/color_geographic_location_1");
-	connectColorButton(ui->geographicLocation2ColorToolButton,     "ArchaeoLines.geographicLocation2Color",     "ArchaeoLines/color_geographic_location_2");
-	connectColorButton(ui->customAzimuth1ColorToolButton,          "ArchaeoLines.customAzimuth1Color",          "ArchaeoLines/color_custom_azimuth_1");
-	connectColorButton(ui->customAzimuth2ColorToolButton,          "ArchaeoLines.customAzimuth2Color",          "ArchaeoLines/color_custom_azimuth_2");
-	connectColorButton(ui->customAltitude1ColorToolButton,         "ArchaeoLines.customAltitude1Color",         "ArchaeoLines/color_custom_altitude_1");
-	connectColorButton(ui->customAltitude2ColorToolButton,         "ArchaeoLines.customAltitude2Color",         "ArchaeoLines/color_custom_altitude_2");
-	connectColorButton(ui->customDeclination1ColorToolButton,      "ArchaeoLines.customDeclination1Color",      "ArchaeoLines/color_custom_declination_1");
-	connectColorButton(ui->customDeclination2ColorToolButton,      "ArchaeoLines.customDeclination2Color",      "ArchaeoLines/color_custom_declination_2");
+	ui->equinoxColorToolButton                ->setup("ArchaeoLines.equinoxColor",                 "ArchaeoLines/color_equinox");
+	ui->solsticesColorToolButton              ->setup("ArchaeoLines.solsticesColor",               "ArchaeoLines/color_solstices");
+	ui->crossquarterColorToolButton           ->setup("ArchaeoLines.crossquartersColor",           "ArchaeoLines/color_crossquarters");
+	ui->majorStandstillColorToolButton        ->setup("ArchaeoLines.majorStandstillColor",         "ArchaeoLines/color_major_standstill");
+	ui->minorStandstillColorToolButton        ->setup("ArchaeoLines.minorStandstillColor",         "ArchaeoLines/color_minor_standstill");
+	ui->polarCirclesColorToolButton           ->setup("ArchaeoLines.polarCirclesColor",            "ArchaeoLines/color_polar_circles");
+	ui->zenithPassageColorToolButton          ->setup("ArchaeoLines.zenithPassageColor",           "ArchaeoLines/color_zenith_passage");
+	ui->nadirPassageColorToolButton           ->setup("ArchaeoLines.nadirPassageColor",            "ArchaeoLines/color_nadir_passage");
+	ui->selectedObjectColorToolButton         ->setup("ArchaeoLines.selectedObjectColor",          "ArchaeoLines/color_selected_object");
+	ui->selectedObjectAzimuthColorToolButton  ->setup("ArchaeoLines.selectedObjectAzimuthColor",   "ArchaeoLines/color_selected_object_azimuth");
+	ui->selectedObjectHourAngleColorToolButton->setup("ArchaeoLines.selectedObjectHourAngleColor", "ArchaeoLines/color_selected_object_hour_angle");
+	ui->currentSunColorToolButton             ->setup("ArchaeoLines.currentSunColor",              "ArchaeoLines/color_current_sun");
+	ui->currentMoonColorToolButton            ->setup("ArchaeoLines.currentMoonColor",             "ArchaeoLines/color_current_moon");
+	ui->currentPlanetColorToolButton          ->setup("ArchaeoLines.currentPlanetColor",           "ArchaeoLines/color_current_planet");
+	ui->geographicLocation1ColorToolButton    ->setup("ArchaeoLines.geographicLocation1Color",     "ArchaeoLines/color_geographic_location_1");
+	ui->geographicLocation2ColorToolButton    ->setup("ArchaeoLines.geographicLocation2Color",     "ArchaeoLines/color_geographic_location_2");
+	ui->customAzimuth1ColorToolButton         ->setup("ArchaeoLines.customAzimuth1Color",          "ArchaeoLines/color_custom_azimuth_1");
+	ui->customAzimuth2ColorToolButton         ->setup("ArchaeoLines.customAzimuth2Color",          "ArchaeoLines/color_custom_azimuth_2");
+	ui->customAltitude1ColorToolButton        ->setup("ArchaeoLines.customAltitude1Color",         "ArchaeoLines/color_custom_altitude_1");
+	ui->customAltitude2ColorToolButton        ->setup("ArchaeoLines.customAltitude2Color",         "ArchaeoLines/color_custom_altitude_2");
+	ui->customDeclination1ColorToolButton     ->setup("ArchaeoLines.customDeclination1Color",      "ArchaeoLines/color_custom_declination_1");
+	ui->customDeclination2ColorToolButton     ->setup("ArchaeoLines.customDeclination2Color",      "ArchaeoLines/color_custom_declination_2");
 
-	connect(ui->customAzimuth1PushButton,     SIGNAL(clicked()), this, SLOT(assignCustomAzimuth1FromSelection()));
-	connect(ui->customAzimuth2PushButton,     SIGNAL(clicked()), this, SLOT(assignCustomAzimuth2FromSelection()));
-	connect(ui->customAltitude1PushButton,    SIGNAL(clicked()), this, SLOT(assignCustomAltitude1FromSelection()));
-	connect(ui->customAltitude2PushButton,    SIGNAL(clicked()), this, SLOT(assignCustomAltitude2FromSelection()));
-	connect(ui->customDeclination1PushButton, SIGNAL(clicked()), this, SLOT(assignCustomDeclination1FromSelection()));
-	connect(ui->customDeclination2PushButton, SIGNAL(clicked()), this, SLOT(assignCustomDeclination2FromSelection()));
+	connect(ui->customAzimuth1PushButton,     &QPushButton::clicked, this, &ArchaeoLinesDialog::assignCustomAzimuth1FromSelection);
+	connect(ui->customAzimuth2PushButton,     &QPushButton::clicked, this, &ArchaeoLinesDialog::assignCustomAzimuth2FromSelection);
+	connect(ui->customAltitude1PushButton,    &QPushButton::clicked, this, &ArchaeoLinesDialog::assignCustomAltitude1FromSelection);
+	connect(ui->customAltitude2PushButton,    &QPushButton::clicked, this, &ArchaeoLinesDialog::assignCustomAltitude2FromSelection);
+	connect(ui->customDeclination1PushButton, &QPushButton::clicked, this, &ArchaeoLinesDialog::assignCustomDeclination1FromSelection);
+	connect(ui->customDeclination2PushButton, &QPushButton::clicked, this, &ArchaeoLinesDialog::assignCustomDeclination2FromSelection);
 
-	connect(ui->restoreDefaultsButton,   SIGNAL(clicked()), this, SLOT(resetArchaeoLinesSettings()));
-	connect(ui->restoreDefaultsButtonCL, SIGNAL(clicked()), this, SLOT(resetArchaeoLinesSettings()));
+	connect(ui->restoreDefaultsButton,   &QPushButton::clicked, this, &ArchaeoLinesDialog::resetArchaeoLinesSettings);
+	connect(ui->restoreDefaultsButtonCL, &QPushButton::clicked, this, &ArchaeoLinesDialog::resetArchaeoLinesSettings);
 
 	setAboutHtml();
 }
@@ -204,10 +206,10 @@ void ArchaeoLinesDialog::createDialogContent()
 void ArchaeoLinesDialog::setAboutHtml(void)
 {
 	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
+	QRegularExpression a_rx("[{]([^{]*)[}]");
 
 	QString html = "<html><head></head><body>";
-	html += "<h2>" + q_("ArchaeoLines Plug-in") + "</h2><table width=\"90%\">";
+	html += "<h2>" + q_("ArchaeoLines Plug-in") + "</h2><table class='layout' width=\"90%\">";
 	html += "<tr width=\"30%\"><td><strong>" + q_("Version") + ":</strong></td><td>" + ARCHAEOLINES_PLUGIN_VERSION + "</td></tr>";
 	html += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + ARCHAEOLINES_PLUGIN_LICENSE + "</td></tr>";
 	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Georg Zotti</td></tr>";
@@ -240,17 +242,19 @@ void ArchaeoLinesDialog::setAboutHtml(void)
 
 	html += "<h3>" + q_("Publications") + "</h3>";
 	html += "<p>"  + q_("If you use this plugin in your publications, please cite:") + "</p>";
-	html += "<p><ul>";
+	html += "<ul>";
 	html += "<li>" + QString("{Georg Zotti: Open Source Virtual Archaeoastronomy}. Mediterranean Archaeology and Archaeometry, Vol. 16, No 4 (2016), pp. 17-24.")
 			.toHtmlEscaped().replace(a_rx, "<a href=\"http://maajournal.com/Issues/2016/Vol16-4/Full3.pdf\">\\1</a>") + "</li>";
-	html += "</ul></p>";
+	html += "<li>" + QString("{Georg Zotti, Susanne M. Hoffmann, Alexander Wolf, Fabien Chéreau, Guillaume Chéreau: The simulated sky: Stellarium for cultural astronomy research.} Journal for Skyscape Archaeology, 6.2, 2021, pp. 221-258.")
+			     .toHtmlEscaped().replace(a_rx, "<a href=\"https://doi.org/10.1558/jsa.17822\">\\1</a>") + "</li>";
+	html += "</ul>";
 
 	html += StelApp::getInstance().getModuleMgr().getStandardSupportLinksInfo("ArchaeoLines plugin");
 
 	html += "</body></html>";
 
 	StelGui* gui = dynamic_cast<StelGui*>(StelApp::getInstance().getGui());
-	if(gui!=Q_NULLPTR)
+	if(gui!=nullptr)
 	{
 		QString htmlStyleSheet(gui->getStelStyle().htmlStyleSheet);
 		ui->aboutTextBrowser->document()->setDefaultStyleSheet(htmlStyleSheet);

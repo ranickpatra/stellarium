@@ -23,7 +23,6 @@
 #include "StelCore.hpp"
 #include "StelGui.hpp"
 #include "StelGuiItems.hpp"
-#include "StelLocaleMgr.hpp"
 #include "StelModuleMgr.hpp"
 #include "StelObjectMgr.hpp"
 #include "StelTextureMgr.hpp"
@@ -43,6 +42,7 @@
 #include <QDebug>
 #include <QFileInfo>
 #include <QFile>
+#include <QFont>
 #include <QTimer>
 #include <QVariantMap>
 #include <QVariant>
@@ -102,10 +102,12 @@ Quasars::Quasars()
 
 {
 	setObjectName("Quasars");
+#ifndef NO_GUI
 	configDialog = new QuasarsDialog();
+#endif
 	conf = StelApp::getInstance().getSettings();
 	setFontSize(StelApp::getInstance().getScreenFontSize());
-	connect(&StelApp::getInstance(), SIGNAL(screenFontSizeChanged(int)), this, SLOT(setFontSize(int)));
+	connect(&StelApp::getInstance(), &StelApp::screenFontSizeChanged, this, &Quasars::setFontSize);
 }
 
 /*
@@ -113,7 +115,9 @@ Quasars::Quasars()
 */
 Quasars::~Quasars()
 {
+#ifndef NO_GUI
 	delete configDialog;
+#endif
 
 	if (GlowIcon)
 		delete GlowIcon;
@@ -169,8 +173,14 @@ void Quasars::init()
 		Quasar::markerTexture = StelApp::getInstance().getTextureManager().createTexture(":/Quasars/quasar.png");
 
 		// key bindings and other actions
-		addAction("actionShow_Quasars", N_("Quasars"), N_("Show quasars"), "quasarsVisible", "Ctrl+Alt+Q");
-		addAction("actionShow_Quasars_ConfigDialog", N_("Quasars"), N_("Quasars configuration window"), configDialog, "visible", ""); // Allow assign shortkey
+		QString section = N_("Quasars");
+		addAction("actionShow_Quasars", section, N_("Show quasars"), "quasarsVisible", "Ctrl+Alt+Q");
+#ifndef NO_GUI
+		addAction("actionShow_Quasars_dialog", section, N_("Show settings dialog"), configDialog, "visible", ""); // Allow assign shortkey
+#endif
+		// no default hotkeys
+		addAction("actionShow_Quasars_Distribution", section, N_("Enable display of distribution for quasars"), "flagDisplayMode");
+		addAction("actionShow_Quasars_Markers", section, N_("Use markers for quasars"), "flagMarkersMode");
 
 		GlowIcon = new QPixmap(":/graphicGui/miscGlow32x32.png");
 		OnIcon = new QPixmap(":/Quasars/btQuasars-on.png");
@@ -186,7 +196,7 @@ void Quasars::init()
 	}
 
 	// If the json file does not already exist, create it from the resource in the Qt resource
-	if(QFileInfo(catalogJsonPath).exists())
+	if(QFileInfo::exists(catalogJsonPath))
 	{
 		if (!checkJsonFileFormat() || getJsonFileFormatVersion()<CATALOG_FORMAT_VERSION)
 		{
@@ -195,25 +205,26 @@ void Quasars::init()
 	}
 	else
 	{
-		qDebug() << "[Quasars] quasars.json does not exist - copying default file to" << QDir::toNativeSeparators(catalogJsonPath);
+		qInfo().noquote() << "[Quasars] quasars.json does not exist - copying default file to" << QDir::toNativeSeparators(catalogJsonPath);
 		restoreDefaultJsonFile();
 	}
 
-	qDebug() << "[Quasars] Loading catalog file:" << QDir::toNativeSeparators(catalogJsonPath);
+	qInfo().noquote() << "[Quasars] Loading catalog file:" << QDir::toNativeSeparators(catalogJsonPath);
 
 	readJsonFile();
 
 	// Set up download manager and the update schedule
-	networkManager = StelApp::getInstance().getNetworkAccessManager();
+	//networkManager = StelApp::getInstance().getNetworkAccessManager();
+	networkManager = new QNetworkAccessManager(this);;
 	updateState = CompleteNoUpdates;
 	updateTimer = new QTimer(this);
 	updateTimer->setSingleShot(false);   // recurring check for update
 	updateTimer->setInterval(13000);     // check once every 13 seconds to see if it is time for an update
-	connect(updateTimer, SIGNAL(timeout()), this, SLOT(checkForUpdate()));
+	connect(updateTimer, &QTimer::timeout, this, &Quasars::checkForUpdate);
 	updateTimer->start();
 
-	connect(this, SIGNAL(jsonUpdateComplete(void)), this, SLOT(reloadCatalog()));
-	connect(StelApp::getInstance().getCore(), SIGNAL(configurationDataSaved()), this, SLOT(saveSettings()));
+	connect(this, &Quasars::jsonUpdateComplete, this, &Quasars::reloadCatalog);
+	connect(StelApp::getInstance().getCore(), &StelCore::configurationDataSaved, this, &Quasars::saveSettings);
 
 	GETSTELMODULE(StelObjectMgr)->registerStelObjectMgr(this);
 }
@@ -223,14 +234,19 @@ void Quasars::init()
 */
 void Quasars::draw(StelCore* core)
 {
+	if (!core->getFlagClearSky())
+		return;
+
 	if (!flagShowQuasars)
 		return;
 
 	StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
 	StelPainter painter(prj);
+	QFont font=QGuiApplication::font();
+	font.setPixelSize(fontSize);
 	painter.setFont(font);
 
-	for (const auto& quasar : QSO)
+	for (const auto& quasar : std::as_const(QSO))
 	{
 		if (quasar && quasar->initialized)
 			quasar->draw(core, painter);
@@ -250,13 +266,12 @@ void Quasars::drawPointer(StelCore* core, StelPainter& painter)
 		const StelObjectP obj = newSelected[0];
 		Vec3d pos=obj->getJ2000EquatorialPos(core);
 
-		Vec3d screenpos;
+		Vec3f screenpos;
 		// Compute 2D pos and return if outside screen
-		if (!painter.getProjector()->project(pos, screenpos))
+		if (!painter.getProjector()->project(pos.toVec3f(), screenpos))
 			return;
 
-		const Vec3f& c(obj->getInfoColor());
-		painter.setColor(c[0],c[1],c[2]);
+		painter.setColor(obj->getInfoColor());
 		texPointer->bind();
 		painter.setBlending(true);
 		painter.drawSprite2dMode(screenpos[0], screenpos[1], 13.f, StelApp::getInstance().getTotalRunTime()*40.);
@@ -319,18 +334,18 @@ StelObjectP Quasars::searchByNameI18n(const QString& nameI18n) const
 	return Q_NULLPTR;
 }
 
-QStringList Quasars::listMatchingObjects(const QString& objPrefix, int maxNbItem, bool useStartOfWords) const
+QVector<QPair<QString,StelObjectP>> Quasars::listMatchingObjects(const QString& objPrefix, int maxNbItem, bool useStartOfWords) const
 {
-	QStringList result;
+	QVector<QPair<QString,StelObjectP>> result;
 	if (flagShowQuasars)
 		result = StelObjectModule::listMatchingObjects(objPrefix, maxNbItem, useStartOfWords);
 	return result;
 }
 
 
-QStringList Quasars::listAllObjects(bool inEnglish) const
+QVector<QPair<QString,StelObjectP>> Quasars::listAllObjects(bool inEnglish) const
 {
-	QStringList result;
+	QVector<QPair<QString,StelObjectP>> result;
 	if (!flagShowQuasars)
 		return result;
 
@@ -338,14 +353,14 @@ QStringList Quasars::listAllObjects(bool inEnglish) const
 	{
 		for (const auto& quasar : QSO)
 		{
-			result << quasar->getEnglishName();
+			result.append({quasar->getEnglishName(), StelObjectP(quasar)});
 		}
 	}
 	else
 	{
 		for (const auto& quasar : QSO)
 		{
-			result << quasar->getNameI18n();
+			result.append({quasar->getNameI18n(), StelObjectP(quasar)});
 		}
 	}
 	return result;
@@ -356,7 +371,7 @@ QStringList Quasars::listAllObjects(bool inEnglish) const
 */
 void Quasars::restoreDefaultJsonFile(void)
 {
-	if (QFileInfo(catalogJsonPath).exists())
+	if (QFileInfo::exists(catalogJsonPath))
 		backupJsonFile(true);
 
 	QFile src(":/Quasars/quasars.json");
@@ -393,7 +408,7 @@ bool Quasars::backupJsonFile(bool deleteOriginal)
 	}
 
 	QString backupPath = catalogJsonPath + ".old";
-	if (QFileInfo(backupPath).exists())
+	if (QFileInfo::exists(backupPath))
 		QFile(backupPath).remove();
 
 	if (old.copy(backupPath))
@@ -402,14 +417,14 @@ bool Quasars::backupJsonFile(bool deleteOriginal)
 		{
 			if (!old.remove())
 			{
-				qWarning() << "[Quasars] WARNING - could not remove old quasars.json file";
+				qWarning() << "[Quasars] Could not remove old quasars.json file";
 				return false;
 			}
 		}
 	}
 	else
 	{
-		qWarning() << "[Quasars] WARNING - failed to copy quasars.json to quasars.json.old";
+		qWarning() << "[Quasars] Failed to copy quasars.json to quasars.json.old";
 		return false;
 	}
 
@@ -459,8 +474,8 @@ void Quasars::setQSOMap(const QVariantMap& map)
 {
 	QSO.clear();
 	QsrCount = 0;
-	QVariantMap qsoMap = map.value("quasars").toMap();
-	for (auto qsoKey : qsoMap.keys())
+	const QVariantMap qsoMap = map.value("quasars").toMap();
+	for (auto &qsoKey : qsoMap.keys())
 	{
 		QVariantMap qsoData = qsoMap.value(qsoKey).toMap();
 		qsoData["designation"] = qsoKey;
@@ -498,7 +513,7 @@ int Quasars::getJsonFileFormatVersion(void)
 	{
 		jsonVersion = map.value("version").toInt();
 	}
-	qDebug() << "[Quasars] Version of the format of the catalog:" << jsonVersion;
+	qInfo().noquote() << "[Quasars] Version of the format of the catalog:" << jsonVersion;
 	return jsonVersion;
 }
 
@@ -538,9 +553,13 @@ QuasarP Quasars::getByID(const QString& id) const
 
 bool Quasars::configureGui(bool show)
 {
+#ifdef NO_GUI
+	return false;
+#else
 	if (show)
 		configDialog->setVisible(true);
 	return true;
+#endif
 }
 
 void Quasars::restoreDefaults(void)
@@ -604,12 +623,16 @@ void Quasars::saveSettingsToConfig(void)
 int Quasars::getSecondsToUpdate(void)
 {
 	QDateTime nextUpdate = lastUpdate.addSecs(updateFrequencyDays * 3600 * 24);
-	return QDateTime::currentDateTime().secsTo(nextUpdate);
+	return static_cast<int>(QDateTime::currentDateTime().secsTo(nextUpdate));
 }
 
 void Quasars::checkForUpdate(void)
 {
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+	if (updatesEnabled && lastUpdate.addSecs(updateFrequencyDays * 3600 * 24) <= QDateTime::currentDateTime())
+#else
 	if (updatesEnabled && lastUpdate.addSecs(updateFrequencyDays * 3600 * 24) <= QDateTime::currentDateTime() && networkManager->networkAccessible()==QNetworkAccessManager::Accessible)
+#endif
 		updateJSON();
 }
 
@@ -627,8 +650,6 @@ void Quasars::updateJSON(void)
 
 void Quasars::deleteDownloadProgressBar()
 {
-	disconnect(this, SLOT(updateDownloadProgress(qint64,qint64)));
-
 	if (progressBar)
 	{
 		StelApp::getInstance().removeProgressBar(progressBar);
@@ -636,7 +657,7 @@ void Quasars::deleteDownloadProgressBar()
 	}
 }
 
-void Quasars::startDownload(QString urlString)
+void Quasars::startDownload(const QString &urlString)
 {
 	QUrl url(urlString);
 	if (!url.isValid() || url.isRelative() || !url.scheme().startsWith("http", Qt::CaseInsensitive))
@@ -650,16 +671,18 @@ void Quasars::startDownload(QString urlString)
 	progressBar->setValue(0);
 	progressBar->setRange(0, 0);
 
-	connect(networkManager, SIGNAL(finished(QNetworkReply*)), this, SLOT(downloadComplete(QNetworkReply*)));
+	connect(networkManager, &QNetworkAccessManager::finished, this, &Quasars::downloadComplete);
 	QNetworkRequest request;
 	request.setUrl(QUrl(updateUrl));
 	request.setRawHeader("User-Agent", StelUtils::getUserAgentString().toUtf8());
-	request.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
+#if (QT_VERSION<QT_VERSION_CHECK(6,0,0))
+	request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, true);
+#endif
 	downloadReply = networkManager->get(request);
-	connect(downloadReply, SIGNAL(downloadProgress(qint64,qint64)), this, SLOT(updateDownloadProgress(qint64,qint64)));
+	connect(downloadReply, &QNetworkReply::downloadProgress, this, &Quasars::updateDownloadProgress);
 
 	updateState = Quasars::Updating;
-	emit(updateStateChanged(updateState));
+	emit updateStateChanged(updateState);
 }
 
 void Quasars::updateDownloadProgress(qint64 bytesReceived, qint64 bytesTotal)
@@ -675,11 +698,11 @@ void Quasars::updateDownloadProgress(qint64 bytesReceived, qint64 bytesTotal)
 		//Round to the greatest possible derived unit
 		while (bytesTotal > 1024)
 		{
-			bytesReceived = std::floor(bytesReceived / 1024.);
-			bytesTotal    = std::floor(bytesTotal / 1024.);
+			bytesReceived = static_cast<long long>(std::floor(static_cast<double>(bytesReceived) / 1024.));
+			bytesTotal    = static_cast<long long>(std::floor(static_cast<double>(bytesTotal) / 1024.));
 		}
-		currentValue = bytesReceived;
-		endValue = bytesTotal;
+		currentValue = static_cast<int>(bytesReceived);
+		endValue     = static_cast<int>(bytesTotal);
 	}
 
 	progressBar->setValue(currentValue);
@@ -691,14 +714,14 @@ void Quasars::downloadComplete(QNetworkReply *reply)
 	if (reply == Q_NULLPTR)
 		return;
 
-	disconnect(networkManager, SIGNAL(finished(QNetworkReply*)), this, SLOT(downloadComplete(QNetworkReply*)));
+	disconnect(networkManager, &QNetworkAccessManager::finished, this, &Quasars::downloadComplete);
 	deleteDownloadProgressBar();
 
 	if (reply->error() || reply->bytesAvailable()==0)
 	{
 		qWarning() << "[Quasars] Download error: While trying to access"
 			   << reply->url().toString()
-			   << "the following error occured:"
+			   << "the following error occurred:"
 			   << reply->errorString();
 
 		reply->deleteLater();
@@ -731,16 +754,17 @@ void Quasars::downloadComplete(QNetworkReply *reply)
 		updateState = Quasars::DownloadError;
 	}
 
-	emit(updateStateChanged(updateState));
-	emit(jsonUpdateComplete());
+	emit updateStateChanged(updateState);
+	emit jsonUpdateComplete();
 
 	reply->deleteLater();
 	downloadReply = Q_NULLPTR;
 
-	readJsonFile();
+	qDebug() << "[Quasars] Updating quasars catalog is complete...";
+	//readJsonFile();
 }
 
-void Quasars::displayMessage(const QString& message, const QString hexColor)
+void Quasars::displayMessage(const QString& message, const QString &hexColor)
 {
 	messageIDs << GETSTELMODULE(LabelMgr)->labelScreen(message, 30, 30 + (20*messageIDs.count()), true, 16, hexColor, false, 9000);
 }
@@ -760,19 +784,21 @@ void Quasars::upgradeConfigIni(void)
 // Define whether the button toggling quasars should be visible
 void Quasars::setFlagShowQuasarsButton(bool b)
 {
+#ifndef NO_GUI
 	StelGui* gui = dynamic_cast<StelGui*>(StelApp::getInstance().getGui());
 	if (gui!=Q_NULLPTR)
 	{
 		if (b==true) {
 			if (toolbarButton==Q_NULLPTR) {
 				// Create the quasars button
-				toolbarButton = new StelButton(Q_NULLPTR, *OnIcon, *OffIcon, *GlowIcon, "actionShow_Quasars");
+				toolbarButton = new StelButton(Q_NULLPTR, *OnIcon, *OffIcon, *GlowIcon, "actionShow_Quasars", false, "actionShow_Quasars_dialog");
 			}
 			gui->getButtonBar()->addButton(toolbarButton, "065-pluginsGroup");
 		} else {
 			gui->getButtonBar()->hideButton("actionShow_Quasars");
 		}
 	}
+#endif
 	flagShowQuasarsButton = b;
 }
 
@@ -784,6 +810,7 @@ bool Quasars::getDisplayMode()
 void Quasars::setDisplayMode(bool b)
 {
 	Quasar::distributionMode=b;
+	emit displayModeChanged(b);
 }
 
 bool Quasars::getFlagUseQuasarMarkers()
@@ -794,6 +821,7 @@ bool Quasars::getFlagUseQuasarMarkers()
 void Quasars::setFlagUseQuasarMarkers(bool b)
 {
 	Quasar::useMarkers = b;
+	emit markersModeChanged(b);
 }
 
 Vec3f Quasars::getMarkerColor()
@@ -825,7 +853,8 @@ void Quasars::reloadCatalog(void)
 	if (hasSelection)
 	{
 		// Restore selection...
-		objMgr->setSelectedObject(selectedObject);
+		StelObjectP obj = selectedObject[0];
+		objMgr->findAndSelect(obj->getEnglishName(), obj->getType());
 	}
 }
 

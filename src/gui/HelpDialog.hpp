@@ -46,17 +46,17 @@ public:
 	};
 
 	HelpDialog(QObject* parent);
-	~HelpDialog() Q_DECL_OVERRIDE;
+	~HelpDialog() override;
 
-	//! Notify that the application style changed
-	virtual void styleChanged() Q_DECL_OVERRIDE;
 
 public slots:
-	virtual void retranslate() Q_DECL_OVERRIDE;
+	//! Apply application style change
+	void styleChanged(const QString &style) override;
+	void retranslate() override;
 
 protected:
 	//! Initialize the dialog widgets and connect the signals/slots
-	virtual void createDialogContent() Q_DECL_OVERRIDE;
+	void createDialogContent() override;
 
 	Ui_helpDialogForm* ui;
 
@@ -67,6 +67,9 @@ private:
 	QNetworkReply * downloadReply;
 
 	QString hotkeyTextWrapper(const QString hotkey) const;
+	//! Make sure that no tabs icons are outside of the viewport.
+	//! @todo Limit the width to the width of the screen *available to the window*.
+	void updateTabBarListWidgetWidth();
 
 signals:
 	void checkUpdatesComplete(void);
@@ -78,6 +81,9 @@ private slots:
 	//! On tab change, if the Log tab is selected, call refreshLog().
 	void updateLog(int);
 
+	//! On tab change, if the Config tab is selected, call refreshConfig().
+	void updateConfig(int);
+
 	//! Updated text in Help tab.
 	void updateHelpText(void) const;
 
@@ -86,6 +92,9 @@ private slots:
 
 	//! Sync the displayed log.
 	void refreshLog() const;
+
+	//! Sync the displayed config.
+	void refreshConfig() const;
 
 	void changePage(QListWidgetItem *current, QListWidgetItem *previous);
 

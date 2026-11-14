@@ -21,6 +21,10 @@
 
 #include "JulianCalendar.hpp"
 
+//! @class GregorianCalendar
+//! @brief Functions for the Gregorian calendar
+//! @author Georg Zotti
+//! @ingroup calendars
 //! Stellarium uses Julian Day numbers internally, and the conventional approach of using the Gregorian calendar for dates after 1582-10-15.
 //! For dates before that, the Julian calendar is used, in the form finalized by Augustus and running unchanged since 8AD.
 //! Some European countries, especially the Protestant countries, delayed the calendar switch well into the 18th century.
@@ -35,31 +39,29 @@ class GregorianCalendar : public JulianCalendar
 public:
 	GregorianCalendar(double jd);
 
-	virtual ~GregorianCalendar() Q_DECL_OVERRIDE {}
+	~GregorianCalendar() override {}
 
 public slots:
 	//! Set a calendar date from the Julian day number
-	virtual void setJD(double JD) Q_DECL_OVERRIDE;
+	void setJD(double JD) override;
 
 	//! set date from a vector of calendar date elements sorted from the largest to the smallest.
 	//! Year-Month[1...12]-Day[1...31]
-	virtual void setDate(QVector<int> parts) Q_DECL_OVERRIDE;
+	void setDate(const QVector<int> &parts) override;
 
 	//! get a stringlist of calendar date elements sorted from the largest to the smallest.
 	//! Year, Month, MonthName, Day, DayName
-	virtual QStringList getDateStrings() const Q_DECL_OVERRIDE;
+	QStringList getDateStrings() const override;
 
 	//! get a formatted complete string for a date
-	virtual QString getFormattedDateString() const Q_DECL_OVERRIDE;
+	QString getFormattedDateString() const override;
 
-public:
 	//! returns true for leap years
 	static bool isLeap(int year);
 
-	constexpr static const int gregorianEpoch=1;  //! RD of January 1, AD1.
 	//! auxiliary functions from CC.UE ch2.5
 	//! Return R.D. of date in the Gregorian calendar.
-	static int fixedFromGregorian(QVector<int> gregorian);
+	static int fixedFromGregorian(const QVector<int> &gregorian);
 
 	//! Orthodox Easter sunday (RD) from chapter 9.1
 	static int orthodoxEaster(int gYear);
@@ -70,15 +72,23 @@ public:
 	//! Return RD of Pentecost in Gregorian calendar.
 	static int pentecost(int gYear) { return easter(gYear)+49; }
 
-
-protected:
+	//! @return RD of Gregorian new year
 	static int gregorianNewYear(int year) {return fixedFromGregorian({year, january, 1});}
+	//! @return RD of December 31 of gYear
+	static int gregorianYearEnd(int gYear){return fixedFromGregorian({gYear, december, 31});}
+	//! @return a QVector<int> with two elements: RD of Jan 1 and December 31 of gYear
+	static QVector<int> gregorianYearRange(int gYear){return {fixedFromGregorian({gYear, january, 1}), fixedFromGregorian({gYear, december, 31})};}
+
 	static int gregorianYearFromFixed(int rd);
 	//! return year-month-day for RD date
 	static QVector<int> gregorianFromFixed(int rd);
 
 	//! @return RD date of the n-th k-day
 	static int nthKday(const int n, const Calendar::Day k, const int gYear, const int gMonth, const int gDay);
+
+
+public:
+	constexpr static const int gregorianEpoch=1;  //! RD of January 1, AD1 (greg).
 };
 
 #endif

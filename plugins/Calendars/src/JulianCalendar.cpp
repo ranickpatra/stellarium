@@ -86,18 +86,18 @@ QString JulianCalendar::getFormattedDateString() const
 {
 	QStringList str=getDateStrings();
 	// TODO: Maybe use QDate with user's localisation here? Weekday has to be taken from our results, though.
-	return QString("%1, %2 - %3 (%4) - %5")
-			.arg(str.at(3)) // weekday
-			.arg(str.at(2)) // day
-			.arg(str.at(1)) // month, numerical
-			.arg(monthNames.value(parts.at(1))) // month, name
-			.arg(str.at(0));// year
+	return QString("%1, %2 - %3 (%4) - %5").arg(
+			str.at(3), // weekday
+			str.at(2), // day
+			str.at(1), // month, numerical
+			monthNames.value(parts.at(1)), // month, name
+			str.at(0));// year
 }
 
 // set date from a vector of calendar date elements sorted from the largest to the smallest.
 // Year-Month[1...12]-Day[1...31]
 // Time is not changed!
-void JulianCalendar::setDate(QVector<int> parts)
+void JulianCalendar::setDate(const QVector<int> &parts)
 {
 	//qDebug() << "JulianCalendar::setDate:" << parts;
 	this->parts=parts;
@@ -125,11 +125,11 @@ QString JulianCalendar::weekday(double jd)
 	return weekDayNames.value(dow);
 }
 
-int JulianCalendar::fixedFromJulian(QVector<int> julian)
+int JulianCalendar::fixedFromJulian(const QVector<int> &julian)
 {
-	const int year=julian.at(0);
-	const int month=julian.at(1);
-	const int day=julian.at(2);
+	const int year =julian.value(0);
+	const int month=julian.value(1);
+	const int day  =julian.value(2);
 	const int y=(year<0 ? year+1 : year);
 
 	int ret=julianEpoch-1+365*(y-1)+StelUtils::intFloorDiv(y-1, 4)

@@ -31,7 +31,7 @@ class StelGuiBase
 {
 public:
 	StelGuiBase();
-	virtual ~StelGuiBase() {;}
+	virtual ~StelGuiBase() {}
 
 	virtual void init(QGraphicsWidget *atopLevelGraphicsWidget);
 
@@ -42,14 +42,14 @@ public:
 	virtual void setInfoTextFilters(const StelObject::InfoStringGroup& aflags) =0;
 	virtual const StelObject::InfoStringGroup& getInfoTextFilters() const =0;
 
-	virtual void forceRefreshGui() {;}
+	virtual void forceRefreshGui() {}
 
 	//! Show whether the GUI is visible.
 	//! @param b when true, GUI will be shown, else it will be hidden.
 	virtual void setVisible(bool b) =0;
 	//! Get the current visible status of the GUI.
 	virtual bool getVisible() const =0;
-	//! Show wether the Gui is currently used.
+	//! Show whether the Gui is currently used.
 	//! This can then be used to optimize the rendering to increase reactivity.
 	virtual bool isCurrentlyUsed() const =0;
 };

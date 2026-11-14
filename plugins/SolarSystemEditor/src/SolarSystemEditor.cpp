@@ -23,15 +23,11 @@
 
 #include "StelUtils.hpp"
 #include "StelApp.hpp"
-#include "StelGui.hpp"
-#include "StelGuiItems.hpp"
 #include "StelFileMgr.hpp"
 #include "StelIniParser.hpp"
-#include "StelLocaleMgr.hpp"
 #include "StelModuleMgr.hpp"
 #include "StelObjectMgr.hpp"
 #include "SolarSystem.hpp"
-#include "Orbit.hpp"
 
 #include <QDate>
 #include <QDebug>
@@ -39,6 +35,11 @@
 #include <QFile>
 #include <QSettings>
 #include <QString>
+#include <QBuffer>
+#include <QRegularExpression>
+#if (QT_VERSION < QT_VERSION_CHECK(6,0,0))
+#include <QTextCodec>
+#endif
 
 #include <cmath>
 #include <stdexcept>
@@ -51,7 +52,8 @@ StelModule* SolarSystemEditorStelPluginInterface::getStelModule() const
 
 StelPluginInfo SolarSystemEditorStelPluginInterface::getPluginInfo() const
 {
-	//Q_INIT_RESOURCE(solarSystemEditor);
+	// Allow to load the resources when used as a static plugin
+	Q_INIT_RESOURCE(SolarSystemEditor);
 	
 	StelPluginInfo info;
 	info.id = "SolarSystemEditor";
@@ -66,8 +68,8 @@ StelPluginInfo SolarSystemEditorStelPluginInterface::getPluginInfo() const
 
 SolarSystemEditor::SolarSystemEditor():
 	isInitialized(false),
-	mainWindow(Q_NULLPTR),
-	solarSystemConfigurationFile(Q_NULLPTR)
+	mainWindow(nullptr),
+	solarSystemConfigurationFile(nullptr)
 {
 	setObjectName("SolarSystemEditor");
 	solarSystem = GETSTELMODULE(SolarSystem);
@@ -81,7 +83,7 @@ SolarSystemEditor::SolarSystemEditor():
 
 SolarSystemEditor::~SolarSystemEditor()
 {
-	if (solarSystemConfigurationFile != Q_NULLPTR)
+	if (solarSystemConfigurationFile != nullptr)
 	{
 		delete solarSystemConfigurationFile;
 	}
@@ -132,17 +134,27 @@ void SolarSystemEditor::init()
 		return;
 	}
 
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(updateI18n()));
+	// { Asteroid Number, "Periodic Comet Number"}
+	cometLikeAsteroids = {
+	        {   2060,  "95P" }, {   4015, "107P" }, {   7968, "133P" }, {  60558, "174P" },
+	        { 118401, "176P" }, { 248370, "433P" }, { 300163, "288P" }, { 323137, "282P" },
+	        { 457175, "362P" }
+	};
+
+	initMinorPlanetData();
+	initCometCrossref();
+
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &SolarSystemEditor::updateI18n);
 	isInitialized = true;
 
 	// key bindings and other actions
 	addAction("actionShow_MPC_Import", N_("Solar System Editor"), N_("Import orbital elements in MPC format..."), mainWindow, "newImportMPC()", "Ctrl+Alt+S");
 }
 
-double SolarSystemEditor::getCallOrder(StelModuleActionName) const// actionName
-{
-	return 0.;
-}
+//double SolarSystemEditor::getCallOrder(StelModuleActionName) const// actionName
+//{
+//	return 0.;
+//}
 
 bool SolarSystemEditor::configureGui(bool show)
 {
@@ -208,19 +220,19 @@ bool SolarSystemEditor::cloneSolarSystemConfigurationFile() const
 	}
 	if (!userDataDirectory.exists("data") && !userDataDirectory.mkdir("data"))
 	{
-		qDebug() << "Unable to create a \"data\" subdirectory in" << QDir::toNativeSeparators(userDataDirectory.absolutePath());
+		qWarning() << "Unable to create a \"data\" subdirectory in" << QDir::toNativeSeparators(userDataDirectory.absolutePath());
 		return false;
 	}
 
 	if (QFile::exists(customSolarSystemFilePath))
 	{
-		qDebug() << "Using the ssystem_minor.ini file that already exists in the user directory...";
+		qInfo() << "Using the ssystem_minor.ini file that already exists in the user directory...";
 		return true;
 	}
 
 	if (QFile::exists(defaultSolarSystemFilePath))
 	{
-		qDebug() << "Trying to copy ssystem_minor.ini to" << QDir::toNativeSeparators(customSolarSystemFilePath);
+		qInfo() << "Trying to copy ssystem_minor.ini to" << QDir::toNativeSeparators(customSolarSystemFilePath);
 		return QFile::copy(defaultSolarSystemFilePath, customSolarSystemFilePath);
 	}
 	else
@@ -263,7 +275,7 @@ void SolarSystemEditor::resetSolarSystemToDefault()
 	}
 }
 
-bool SolarSystemEditor::copySolarSystemConfigurationFileTo(QString filePath)
+bool SolarSystemEditor::copySolarSystemConfigurationFileTo(const QString &filePath)
 {
 	if (QFile::exists(customSolarSystemFilePath))
 	{
@@ -276,13 +288,52 @@ bool SolarSystemEditor::copySolarSystemConfigurationFileTo(QString filePath)
 	}
 }
 
-bool SolarSystemEditor::replaceSolarSystemConfigurationFileWith(QString filePath)
+bool SolarSystemEditor::isFileEncodingValid(const QString &filePath) const
+{
+	QFile checkFile(filePath);
+	if (!checkFile.open(QIODevice::ReadOnly))
+	{
+		qWarning() << "[Solar System Editor] Cannot open " << QDir::toNativeSeparators(filePath);
+		return false;
+	}
+	else
+	{
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+		QTextStream in(&checkFile);
+		in.setEncoding(QStringConverter::Utf8);
+		in.readAll();
+		checkFile.close();
+
+		if (in.status()!=QTextStream::Ok)
+#else
+		QByteArray byteArray = checkFile.readAll();
+		checkFile.close();
+
+		QTextCodec::ConverterState state;
+		QTextCodec *codec = QTextCodec::codecForName("UTF-8");
+		const QString text = codec->toUnicode(byteArray.constData(), byteArray.size(), &state);
+		Q_UNUSED(text)
+		if (state.invalidChars > 0)
+#endif
+		{
+			qCritical() << "[Solar System Editor] Not a valid UTF-8 sequence in file " << filePath;
+			return false;
+		}
+		else
+			return true;
+	}
+}
+
+bool SolarSystemEditor::replaceSolarSystemConfigurationFileWith(const QString &filePath)
 {
 	if (!QFile::exists(filePath))
 	{
 		qCritical() << "SolarSystemEditor: Cannot replace, file not found: " << filePath;
 		return false;
 	}
+
+	if (!isFileEncodingValid(filePath))
+		return false;
 
 	//Is it a valid configuration file?
 	QSettings settings(filePath, StelIniFormat);
@@ -327,13 +378,16 @@ bool SolarSystemEditor::replaceSolarSystemConfigurationFileWith(QString filePath
 	}
 }
 
-bool SolarSystemEditor::addFromSolarSystemConfigurationFile(QString filePath)
+bool SolarSystemEditor::addFromSolarSystemConfigurationFile(const QString &filePath)
 {
 	if (!QFile::exists(filePath))
 	{
 		qCritical() << "SolarSystemEditor: Cannot add data from file, file" << filePath << "not found.";
 		return false;
 	}
+
+	if (!isFileEncodingValid(filePath))
+		return false;
 
 	//Is it a valid configuration file?
 	QSettings newData(filePath, StelIniFormat);
@@ -350,23 +404,22 @@ bool SolarSystemEditor::addFromSolarSystemConfigurationFile(QString filePath)
 
 		// add and overwrite existing data in the user's ssystem_minor.ini by the data in the new file.
 		qDebug() << "ADD OBJECTS: Data for " << newData.childGroups().count() << "objects to minor file with " << minorBodies.childGroups().count() << "entries";
-		for (auto group : newData.childGroups())
+		for (QString &group : newData.childGroups())
 		{
 			QString fixedGroupName = fixGroupName(group);
 			newData.beginGroup(group);
 			qDebug() << "  Group: " << group << "for object " << newData.value("name");
-			qDebug() << "   ";
 			QStringList minorChildGroups = minorBodies.childGroups();
 			if (minorChildGroups.contains(fixedGroupName))
 			{
-				qDebug() << "This group " << fixedGroupName << "already exists. Updating values";
+				qDebug() << "   This group " << fixedGroupName << "already exists. Updating values";
 			}
 			else
-				qDebug() << "This group " << fixedGroupName << "does not yet exist. Adding values";
+				qDebug() << "   This group " << fixedGroupName << "does not yet exist. Adding values";
 
 			minorBodies.beginGroup(fixedGroupName);
 			QStringList newKeys = newData.allKeys(); // limited to the group!
-			for (auto key : newKeys)
+			for (const auto &key : std::as_const(newKeys))
 			{
 				minorBodies.setValue(key, newData.value(key));
 			}
@@ -375,13 +428,13 @@ bool SolarSystemEditor::addFromSolarSystemConfigurationFile(QString filePath)
 		}
 		minorBodies.sync();
 		qDebug() << "Minor groups now: " << minorBodies.childGroups();
-		qDebug() << "Checking for stupid General group.";
 		// There may be a generic group "General" in the updated file, created from comments. We must remove it.
 		if (minorBodies.childGroups().contains("General"))
 		{
+			qDebug() << "Removing unwanted General group.";
 			minorBodies.remove("General");
+			qDebug() << "Minor groups after fix now: " << minorBodies.childGroups();
 		}
-		qDebug() << "Minor groups after fix now: " << minorBodies.childGroups();
 		minorBodies.sync();
 
 		solarSystem->reloadPlanets();
@@ -395,7 +448,7 @@ bool SolarSystemEditor::addFromSolarSystemConfigurationFile(QString filePath)
 	}
 }
 
-QHash<QString,QString> SolarSystemEditor::listAllLoadedObjectsInFile(QString filePath) const
+QHash<QString,QString> SolarSystemEditor::listAllLoadedObjectsInFile(const QString &filePath) const
 {
 	if (!QFile::exists(filePath))
 		return QHash<QString,QString>();
@@ -405,17 +458,131 @@ QHash<QString,QString> SolarSystemEditor::listAllLoadedObjectsInFile(QString fil
 		return QHash<QString,QString>();
 
 	QStringList groups = solarSystemIni.childGroups();
-	QStringList minorBodies = solarSystem->getAllMinorPlanetCommonEnglishNames();
+	QStringList minorBodies = solarSystem->getAllMinorPlanetEnglishNames();
 	QHash<QString,QString> loadedObjects;
-	for (auto group : groups)
+	for (const auto &group : std::as_const(groups))
 	{
 		QString name = solarSystemIni.value(group + "/name").toString();
-		if (minorBodies.contains(name))
+		if (!minorBodies.filter(name).isEmpty())
 		{
 			loadedObjects.insert(name, group);
 		}
 	}
 	return loadedObjects;
+}
+
+void SolarSystemEditor::initCometCrossref()
+{
+	Q_ASSERT(cometCrossref.isEmpty());
+
+	QFile cdata(":/SolarSystemEditor/comet_discovery.fab");
+	if(cdata.open(QFile::ReadOnly | QFile::Text))
+	{
+		// regular expression to find the comments and empty lines
+		static const QRegularExpression commentRx("^(\\s*#.*|\\s*)$");
+		unsigned int numLines = 0;
+
+		while(!cdata.atEnd())
+		{
+			QString line = QString::fromUtf8(cdata.readLine());
+
+			// Skip comments
+			if (commentRx.match(line).hasMatch() || line.startsWith("//"))
+				continue;
+
+			// Find data
+			if (!line.isEmpty())
+			{
+				numLines++;
+				CometDiscoveryData comet;
+				QStringList columns = line.split("|");
+				// New IAU Designation ("1994 V1", "1995 Q3", etc.)
+				//    A year followed by an upper-case letter indicating the half-month of discovery,
+				//    followed by a number indicating the order of discovery. This may, in turn, be
+				//    followed by a dash and another capital letter indicating one part of a fragmented comet.
+				// Old IAU Permanent Designation ("1378","1759 I", "1993 XIII", ...)
+				//    A year usually followed by a Roman numeral (which must be in upper-case) indicating
+				//    the order of perihelion passage of the comet in that year. When there was only one
+				//    comet passing perihelion in a year, then just the year number is used for this designation.
+				// Old IAU Provisional Designation ("1982i", "1887a", "1991a1" ...)
+				//    A year followed by a single lower-case letter, optionally followed by a single digit.
+				// Periodic Comet Number ("1P", "2P", ... )
+				//    1-3 digits followed by an upper-case "P", indicating one of the multiple-apparition
+				//    objects in the file. This is part of the new designation system.
+				//
+				// Source: https://pds-smallbodies.astro.umd.edu/data_sb/resources/designation_formats.shtml
+				//
+				// Equivalences in ssystem_minor.ini:
+				// New (1994) IAU Designation      is equal to date_code, or a number like 33P or 3D for periodic or defunct comets, resp.
+				// Old IAU Permanent Designation   is equal to perihelion_code
+				// Old IAU Provisional Designation is equal to discovery_code
+				// number                          is equal to comet_number
+
+				// [1] IAU designation or standard designation (Periodic Comet Number) for periodic comets
+				QString designation = columns.at(0).trimmed();
+				// [2] IAU designation or date code for comets
+				comet.date_code       = columns.at(1).simplified(); // remove extra internal spaces
+				// [3] perihelion code for comets
+				comet.perihelion_code = columns.at(2).simplified(); // remove extra internal spaces
+				// [4] discovery code for comets
+				comet.discovery_code  = columns.at(3).trimmed();
+				// [5] discovery date for comets
+				comet.discovery_date  = columns.at(4).trimmed();
+				// [6] discoverer of comets
+				comet.discoverer      = columns.at(5).trimmed();
+
+				if (cometCrossref.contains(designation))
+					qWarning() << "SSE: Comet cross-index data: Overwriting entry for" << designation;
+				cometCrossref.insert(designation, comet);
+			}
+		}
+		cdata.close();
+		qInfo().noquote() << "Loaded" << numLines << "discovery circumstances records for comets...";
+	}
+}
+
+void SolarSystemEditor::initMinorPlanetData()
+{
+	Q_ASSERT(numberedMinorPlanets.isEmpty());
+
+	QFile dcdata(":/SolarSystemEditor/discovery_circumstances.dat");
+	// Open file
+	if (dcdata.open(QIODevice::ReadOnly))
+	{
+		QByteArray data = StelUtils::uncompress(dcdata);
+		dcdata.close();
+
+		//check if decompressing was successful
+		if(data.isEmpty())
+			return;
+
+		//create and open a QBuffer for reading
+		QBuffer buf(&data);
+		buf.open(QIODevice::ReadOnly);
+		unsigned int numLines = 0;
+
+		// regular expression to find the comments and empty lines
+		static const QRegularExpression commentRx("^(\\s*#.*|\\s*)$");
+
+		while (!buf.atEnd())
+		{
+			QString line = QString::fromUtf8(buf.readLine());
+
+			// Skip comments
+			if (commentRx.match(line).hasMatch() || line.startsWith("//"))
+				continue;
+
+			numLines++;
+			QStringList list=line.split("\t");
+			int number = list.at(0).trimmed().toInt();
+			// The first entry is the date of discovery, the second is the name of discoverer
+			DiscoveryCircumstances discovery(list.at(1).trimmed(), list.at(2).trimmed());
+
+			numberedMinorPlanets.insert(number, discovery);
+		}
+		buf.close();
+		qInfo().noquote() << "Loaded" << numLines << "discovery circumstances records for minor planets...";
+	}
 }
 
 QHash<QString,QString> SolarSystemEditor::listAllLoadedSsoIdentifiers() const
@@ -431,7 +598,7 @@ QHash<QString,QString> SolarSystemEditor::listAllLoadedSsoIdentifiers() const
 	}
 }
 
-bool SolarSystemEditor::removeSsoWithName(QString name)
+bool SolarSystemEditor::removeSsoWithName(const QString &name)
 {
 	if (name.isEmpty())
 		return false;
@@ -460,9 +627,9 @@ bool SolarSystemEditor::removeSsoWithName(QString name)
 	}
 
 	//Remove the section
-	for (auto group : settings.childGroups())
+	for (const QString &group : settings.childGroups())
 	{
-		if (settings.value(group + "/name").toString() == name)
+		if (settings.value(group + "/name").toString() == name || settings.value(group + "/iau_designation").toString() == name)
 		{
 			settings.remove(group);
 			settings.sync();
@@ -495,102 +662,238 @@ bool SolarSystemEditor::removeSsoWithName(QString name)
   "0128P      b  2007 06 13.8064  3.062504  0.320891  210.3319  214.3583    4.3606  20100723   8.5  4.0  128P/Shoemaker-Holt                                      MPC 51822" -> fragment, fixed
   "0141P      d  2010 05 29.7106  0.757809  0.749215  149.3298  246.0849   12.8032  20100723  12.0 12.0  141P/Machholz                                            MPC 59599" -> fragment, fixed
 */
-SsoElements SolarSystemEditor::readMpcOneLineCometElements(QString oneLineElements) const
+SsoElements SolarSystemEditor::readMpcOneLineCometElements(const QString &oneLineElements) const
 {
+	static const QRegularExpression leadingZerosExpr("^0*");
 	SsoElements result;
-	//qDebug() << "readMpcOneLineCometElements started...";
+	// New and exact definition, directly from https://minorplanetcenter.net/iau/info/CometOrbitFormat.html
+	// We parse by documented columns and process extracted strings later.
+	/*
+	 * Wrong regexp; GH: #2281
+	QRegularExpression mpcParser("^([[:print:]]{4})"      //    1 -   4  i4     1. Periodic comet number
+				    "([CPDIA])"               //    5        a1     2. Orbit type (generally `C', `P' or `D') -- A=reclassified as Asteroid? I=Interstellar.
+				    "([[:print:]]{7}).{2}"    //    6 -  12  a7     3. IAU designation (in packed form)
+				    "([[:print:]]{4})."       //   15 -  18  i4     4. Year of perihelion passage
+				    "([[:print:]]{2})."       //   20 -  21  i2     5. Month of perihelion passage
+				    "([[:print:]]{7})."       //   23 -  29  f7.4   6. Day of perihelion passage (TT)
+				    "([[:print:]]{9}).{2}"    //   31 -  39  f9.6   7. Perihelion distance (AU)
+				    "([[:print:]]{8}).{2}"    //   42 -  49  f8.6   8. Orbital eccentricity
+				    "([[:print:]]{8}).{2}"    //   52 -  59  f8.4   9. Argument of perihelion, J2000.0 (degrees)
+				    "([[:print:]]{8}).{2}"    //   62 -  69  f8.4  10. Longitude of the ascending node, J2000.0 (degrees)
+				    "([[:print:]]{8}).{2}"    //   72 -  79  f8.4  11. Inclination in degrees, J2000.0 (degrees)
+				    "([[:print:]]{4})"        //   82 -  85  i4    12. Year of epoch for perturbed solutions
+				    "([[:print:]]{2})"        //   86 -  87  i2    13. Month of epoch for perturbed solutions
+				    "([[:print:]]{2})\\s{2}"  //   88 -  89  i2    14. Day of epoch for perturbed solutions
+				    "([[:print:]]{4})\\s"     //   92 -  95  f4.1  15. Absolute magnitude
+				    "([[:print:]]{4})\\s{2}"  //   97 - 100  f4.0  16. Slope parameter
+				    "([[:print:]]{56})\\s"    //  103 - 158  a56   17. Designation and Name
+				    "([[:print:]]{1,9}).*$"   //  160 - 168  a9    18. Reference
+	    );
+	*/
 
-	QRegExp mpcParser("^\\s*(\\d{4})?([A-Z])((?:\\w{6}|\\s{6})?[0a-zA-Z])?\\s+(\\d{4})\\s+(\\d{2})\\s+(\\d{1,2}\\.\\d{3,4})\\s+(\\d{1,2}\\.\\d{5,6})\\s+(\\d\\.\\d{5,6})\\s+(\\d{1,3}\\.\\d{3,4})\\s+(\\d{1,3}\\.\\d{3,4})\\s+(\\d{1,3}\\.\\d{3,4})\\s+(?:(\\d{4})(\\d\\d)(\\d\\d))?\\s+(\\-?\\d{1,2}\\.\\d)\\s+(\\d{1,2}\\.\\d)\\s+(\\S.{1,54}\\S)(?:\\s+(\\S.*))?$");//
-
-	int match = mpcParser.indexIn(oneLineElements);
-	//qDebug() << "RegExp captured:" << match << mpcParser.capturedTexts();
-
-	if (match < 0)
+	static const QRegularExpression mpcParser("^\\s*(\\d{4})?"                                 //    1 -   4  i4     1. Periodic comet number
+						  "([CPDIA])"                                      //    5        a1     2. Orbit type (generally `C', `P' or `D') -- A=reclassified as Asteroid? I=Interstellar.
+						  "((?:\\w|\\s|\\.|/)(?:\\w{4,5}|\\s{4,5})?[0a-zA-Z]{1,2})?\\s+"    //    6 -  12  a7     3. IAU designation (in packed form) [last group is 2 long if first is 4 long.]
+						  "(\\d{4}|\\*{4})\\s+"                            //   15 -  18  i4     4. Year of perihelion passage (or **** for negative years!)
+						  "(\\d{2})\\s+"                                   //   20 -  21  i2     5. Month of perihelion passage
+						  "(\\d{1,2}(?:\\.\\d{1,4})?)\\s+"                 //   23 -  29  f7.4   6. Day of perihelion passage (TT)
+						  "(\\d{1,2}\\.\\d{2,6})\\s+"                      //   31 -  39  f9.6   7. Perihelion distance (AU)
+						  "(\\d{1,2}\\.\\d{2,6})\\s+"                      //   42 -  49  f8.6   8. Orbital eccentricity
+						  "(\\d{1,3}(?:\\.\\d{1,4})?)\\s+"                 //   52 -  59  f8.4   9. Argument of perihelion, J2000.0 (degrees)
+						  "(\\d{1,3}(?:\\.\\d{1,4})?)\\s+"                 //   62 -  69  f8.4  10. Longitude of the ascending node, J2000.0 (degrees)
+						  "(\\d{1,3}(?:\\.\\d{1,4})?)\\s+"                 //   72 -  79  f8.4  11. Inclination in degrees, J2000.0 (degrees)
+						  "(?:(\\d{4})"                                    //   82 -  85  i4    12. Year of epoch for perturbed solutions
+						  "(\\d\\d)"                                       //   86 -  87  i2    13. Month of epoch for perturbed solutions
+						  "(\\d\\d))?\\s+"                                 //   88 -  89  i2    14. Day of epoch for perturbed solutions
+						  "(\\-?\\d{1,2}\\.\\d)\\s+"                       //   92 -  95  f4.1  15. Absolute magnitude
+						  "(\\d{1,2}\\.\\d)\\s+"                           //   97 - 100  f4.0  16. Slope parameter
+						  "(\\S.{1,54}\\S)"                                //  103 - 158  a56   17. Designation and Name
+						  "(?:\\s+(\\S.*))?$");                            //  160 - 168  a9    18. Reference
+	if (!mpcParser.isValid())
+	{
+		qCritical() << "Bad Regular Expression:" << mpcParser.errorString();
+		qCritical() << "Error offset:" << mpcParser.patternErrorOffset();
+	}
+	QRegularExpressionMatch mpcMatch=mpcParser.match(oneLineElements);
+	//qDebug() << "RegExp captured:" << mpcMatch.capturedTexts();
+	if (!mpcMatch.hasMatch())
 	{
 		qWarning() << "No match for" << oneLineElements;
 		return result;
 	}
 
-	QString numberString = mpcParser.cap(1).trimmed();
-	//QChar cometType = mpcParser.cap(2).at(0);
-	QString provisionalDesignation = mpcParser.cap(3).trimmed();
-
-	if (numberString.isEmpty() && provisionalDesignation.isEmpty())
+	QString periodicNumberString = mpcMatch.captured(1).trimmed();
+	periodicNumberString.remove(leadingZerosExpr);
+	QChar orbitType = mpcMatch.captured(2).at(0);
+	QString packedIauDesignation = mpcMatch.captured(3).trimmed(); // packed IAU designation, or a fragment code
+	QString iauDesignation; // This either remains empty (for periodical comets) or receives something like P/2023 T2-B
+	QString fragment; // periodic comets may have fragments with several letters!
+	if (packedIauDesignation.length()==7)
 	{
-		qWarning() << "Comet is missing both comet number AND provisional designation.";
+		iauDesignation=QString("%1/%2").arg(orbitType, unpackCometIAUDesignation(packedIauDesignation)); // like "P/2023 T2-B"
+	}
+	else
+	{
+		Q_ASSERT(packedIauDesignation.isLower());
+		fragment=packedIauDesignation.toUpper();
+	}
+
+	const QString mpcName = mpcMatch.captured(17).trimmed(); // From MPC file, name format is either "332P-C/Ikeya-Murakami" or "C/2023 P1 (Nishimura)".
+	// Now, split this and separate out the parts!
+
+	if (periodicNumberString.isEmpty() && packedIauDesignation.isEmpty())
+	{
+		qWarning() << "Comet" << mpcName << "is missing both comet number AND IAU designation. Skipping.";
+		return result;
+	}
+	if (mpcName.isEmpty())
+	{
+		qWarning() << "Comet element line cannot be decoded. Skipping " << oneLineElements;
 		return result;
 	}
 
-	QString name = mpcParser.cap(17).trimmed();
+	// Sanity check: Make sure a numbered periodic name has the same number.
+	if ((periodicNumberString.length()) && (!mpcName.startsWith(periodicNumberString)))
+			qCritical() << "Parsed number '" << periodicNumberString << "' does not fit number in name! Line " << oneLineElements;
 
-	//Fragment suffix
-	if (provisionalDesignation.length() == 1)
+
+	// Derive name: Just use MPC name as-is for unnumbered comets, or add perihel year in brackets to numbered ones.
+	QString name;
+	if (mpcName.contains("(")) // "C/2023 P1 (Nishimura)" style
 	{
-		QChar fragmentIndex = provisionalDesignation.at(0);
-		name.append(' ');
-		name.append(fragmentIndex.toUpper());
+		// Sanity check: Just make sure it matches!
+		if ((!iauDesignation.isEmpty()) && (!mpcName.startsWith(iauDesignation)))
+			qCritical() << "Parsed designation '" << iauDesignation <<  "' does not fit number in name! Line " << oneLineElements;
+		name=mpcName;
+	}
+	else if (mpcName.length()==9 && !mpcName.startsWith("A/") && periodicNumberString.isEmpty()) // anonymous?
+	{
+		QStringList nameList=mpcName.split('/');
+		name=QString("%1/%2 (%3)").arg(orbitType, nameList.at(1).trimmed(), q_("Anonymous")); // "C/1500 H1 (Anonymous)"
+	}
+	else // "332P-C/Ikeya-Murakami" style
+	{
+		QStringList nameList=mpcName.split('/');
+		QString fragmentPostfix;
+		if (!fragment.isEmpty())
+			fragmentPostfix=QString("-%1").arg(fragment);
+		if (nameList.count()!=2)
+		{
+			qInfo() << "Odd name (no error, but no proper name for periodic comet) given in line " << oneLineElements;
+			name=nameList.at(0);
+		}
+		else
+			name=QString("%1%2%3/%4").arg(periodicNumberString, orbitType, fragmentPostfix, nameList.at(1).trimmed()); // "332P-C/Ikeya-Murakami"
+
+		// Sanity check: Make sure this is identical to the mpcName...
+		if (name!=mpcName)
+			qWarning() << "Some mismatch in names: constructed " << name << "vs. directly read" << mpcName;
+		name.append(QString(" (%1)").arg(mpcMatch.captured(4).toInt())); // "332P-C/Ikeya-Murakami (2021)"
 	}
 
-	if (name.isEmpty())
-	{
-		return SsoElements();
-	}
 	result.insert("name", name);
+	if (!iauDesignation.isEmpty())
+		result.insert("iau_designation", iauDesignation);
+
+	// Now fill in missing data which we have in our file database (cometsData)
+
+	QString key;
+	static const QRegularExpression periodicRe("^([1-9][0-9]*[PD](-\\w+)?)"); // No "/" at end, there are nameless numbered comets! (e.g. 362, 396)
+	QRegularExpressionMatch periodMatch=periodicRe.match(name);
+	if (periodMatch.hasMatch())
+		key=periodMatch.captured(1);
+	else
+		key = name.split("(").at(0).trimmed(); // IAU 1994 date style
+
+	if (cometCrossref.contains(key))
+	{
+		qDebug() << "Filling extra data for " << name << "with key" << key;
+		const CometDiscoveryData comet = cometCrossref.value(key);
+		// It is still possible that we match one nnP entry with data from a different apparition. The additional IDs should be limited to the right perihelion date.
+		// add IAU designation in addition to the old-style designation
+		if (!comet.date_code.isEmpty() && !result.contains("iau_designation"))
+			result.insert("iau_designation", comet.date_code);
+
+		// The data parsed from MPC may contain a makeshift perihelion code that only has a year. Only overwrite if we are in the same year!
+		if (!comet.perihelion_code.isEmpty() &&
+				(!result.contains("perihelion_code") ||
+				 ((result.value("perihelion_code").toString().length()==4) && comet.perihelion_code.contains(result.value("perihelion_code").toString()))))
+		{
+			result.insert("perihelion_code", comet.perihelion_code);
+			if (!comet.discovery_code.isEmpty() && result.contains("discovery_code") && (comet.discovery_code!=result.value("discovery_code")))
+				qWarning() << "DIFFERENT COMET. Won't update " << comet.discovery_code << "for " << name;
+			else if (!comet.discovery_code.isEmpty() && !result.contains("discovery_code"))
+				result.insert("discovery_code", comet.discovery_code);
+		}
+		if (!comet.discovery_date.isEmpty())
+			result.insert("discovery", comet.discovery_date);
+		if (!comet.discoverer.isEmpty())
+			result.insert("discoverer", comet.discoverer);
+	}
 
 	QString sectionName = convertToGroupName(name);
 	if (sectionName.isEmpty())
 	{
+		qWarning() << "Cannot derive a comet section name from" << name << ". Skipping.";
 		return SsoElements();
 	}
 	result.insert("section_name", sectionName);
 
 	//After a name has been determined, insert the essential keys
+	result.insert("type", orbitType == 'I' ? "interstellar object" : "comet"); // GZ: One could expect A=reclassified as asteroid, but eccentricity can be >1, so we leave A as comets.
 	//result.insert("parent", "Sun"); // 0.16: omit obvious default.
-	result.insert("type", "comet");
-	//"kepler_orbit" is used for all cases:
+	//"kepler_orbit" could be used for all cases:
 	//"ell_orbit" interprets distances as kilometers, not AUs
 	// result.insert("coord_func", "kepler_orbit"); // 0.20: omit default
-	result.insert("coord_func", "comet_orbit"); // 0.20: add this default for compatibility with earlier versions!
-	// GZ: moved next line below!
-	//result.insert("orbit_good", 1000); // default validity for osculating elements, days
-
+	//result.insert("coord_func", "comet_orbit"); // 0.20: add this default for compatibility with earlier versions! TBD: remove for 1.0
 	//result.insert("color", "1.0, 1.0, 1.0");  // 0.16: omit obvious default.
 	//result.insert("tex_map", "nomap.png");    // 0.16: omit obvious default.
 
-	bool ok = false;
-	//TODO: Use this for VALIDATION!
+	bool ok1=false, ok2=false, ok3=false, ok4=false, ok5=false;
 
-	int year	= mpcParser.cap(4).toInt();
-	int month	= mpcParser.cap(5).toInt();
-	double dayFraction	= mpcParser.cap(6).toDouble(&ok);
-	int day = static_cast<int>(dayFraction);
-	QDate datePerihelionPassage(year, month, day);
-	int fraction = static_cast<int>((dayFraction - day) * 24 * 60 * 60);
-	int seconds = fraction % 60; fraction /= 60;
-	int minutes = fraction % 60; fraction /= 60;
-	int hours = fraction % 24;
-	//qDebug() << hours << minutes << seconds << fraction;
-	QTime timePerihelionPassage(hours, minutes, seconds, 0);
-	QDateTime dtPerihelionPassage(datePerihelionPassage, timePerihelionPassage, Qt::UTC);
-	double jdPerihelionPassage = StelUtils::qDateTimeToJd(dtPerihelionPassage);
-	result.insert("orbit_TimeAtPericenter", jdPerihelionPassage);
+	int year	= mpcMatch.captured(4).toInt(&ok1);
+	if (!ok1) // seen "****"?
+	{
+		QString iauStr=unpackCometIAUDesignation(packedIauDesignation);
+		year=iauStr.split(' ').at(0).toInt(&ok1);
+	}
+	int month	= mpcMatch.captured(5).toInt(&ok2);
+	double dayFraction	= mpcMatch.captured(6).toDouble(&ok3);
 
-	double perihelionDistance = mpcParser.cap(7).toDouble(&ok);//AU
-	result.insert("orbit_PericenterDistance", perihelionDistance);
+	if (ok1 && ok2 && ok3)
+	{
+		double jde;
+		StelUtils::getJDFromDate(&jde, year, month, 0, 0, 0, 0.f);
+		jde+=dayFraction;
+		result.insert("orbit_TimeAtPericenter", jde);
+	}
+	else
+	{
+		qWarning() << "Cannot read perihelion date for comet " << name;
+		return SsoElements();
+	}
 
-	double eccentricity = mpcParser.cap(8).toDouble(&ok);//NOT degrees, but without dimension.
-	result.insert("orbit_Eccentricity", eccentricity);
+	double perihelionDistance = mpcMatch.captured(7).toDouble(&ok1); //AU
+	double eccentricity = mpcMatch.captured(8).toDouble(&ok2); //NOT degrees, but without dimension.
+	double argumentOfPerihelion = mpcMatch.captured(9).toDouble(&ok3);//J2000.0, degrees
+	double longitudeOfAscendingNode = mpcMatch.captured(10).toDouble(&ok4);//J2000.0, degrees
+	double inclination = mpcMatch.captured(11).toDouble(&ok5);
+	if (ok1 && ok2 && ok3 && ok4 && ok5)
+	{
+		result.insert("orbit_PericenterDistance", perihelionDistance);
+		result.insert("orbit_Eccentricity", eccentricity);
+		result.insert("orbit_ArgOfPericenter", argumentOfPerihelion);
+		result.insert("orbit_AscendingNode", longitudeOfAscendingNode);
+		result.insert("orbit_Inclination", inclination);
+	}
+	else
+	{
+		qWarning() << "Cannot read main elements for comet " << name;
+		return SsoElements();
+	}
 
-	double argumentOfPerihelion = mpcParser.cap(9).toDouble(&ok);//J2000.0, degrees
-	result.insert("orbit_ArgOfPericenter", argumentOfPerihelion);
-
-	double longitudeOfTheAscendingNode = mpcParser.cap(10).toDouble(&ok);//J2000.0, degrees
-	result.insert("orbit_AscendingNode", longitudeOfTheAscendingNode);
-
-	double inclination = mpcParser.cap(11).toDouble(&ok);
-	result.insert("orbit_Inclination", inclination);
-
-	// GZ: We should reduce orbit_good for elliptical orbits to one half period before/after perihel!
+	// We should reduce orbit_good for elliptical orbits to one half period before/after epoch!
+	// TBD: Can be removed in 1.0, relegating to handling by the loader.
 	if (eccentricity < 1.0)
 	{
 		// Heafner, Fundamental Ephemeris Computations, p.71
@@ -598,28 +901,53 @@ SsoElements SolarSystemEditor::readMpcOneLineCometElements(QString oneLineElemen
 		const double a=perihelionDistance/(1.-eccentricity); // semimajor axis.
 		const double meanMotion=std::sqrt(mu/(a*a*a)); // radians/day
 		double period=M_PI*2.0 / meanMotion; // period, days
-		result.insert("orbit_good", qMin(1000, static_cast<int>(floor(0.5*period)))); // validity for elliptical osculating elements, days. Goes from aphel to next aphel or max 1000 days.		
+		result.insert("orbit_good", qMin(1000, static_cast<int>(std::floor(0.5*period)))); // validity for elliptical osculating elements, days. Goes from aphel to next aphel or max 1000 days.
 	}
 	else
 		result.insert("orbit_good", 1000); // default validity for osculating elements, days
 
-	double absoluteMagnitude = mpcParser.cap(15).toDouble(&ok);
-	result.insert("absolute_magnitude", absoluteMagnitude);
+	// Epoch
+	year    = mpcMatch.captured(12).toInt(&ok1);
+	month   = mpcMatch.captured(13).toInt(&ok2);
+	int day = mpcMatch.captured(14).toInt(&ok3);
+	if (ok1 && ok2 && ok3)
+	{
+		double jde;
+		StelUtils::getJDFromDate(&jde, year, month, day, 0, 0, 0.f);
+		result.insert("orbit_Epoch", jde);
+	}
+	else
+	{
+		qWarning() << "Cannot read element epoch date for comet " << name << ". Will use T_perihel at load time.";
+	}
 
-	//This is not the same "slope parameter" as used in asteroids. Better name?
-	double slopeParameter = mpcParser.cap(16).toDouble(&ok);
-	result.insert("slope_parameter", slopeParameter);
+	double absoluteMagnitude = mpcMatch.captured(15).toDouble(&ok1);
+	if (ok1)
+		result.insert("absolute_magnitude", absoluteMagnitude);
+	double slopeParameter = mpcMatch.captured(16).toDouble(&ok2);
+	if (ok2)
+		result.insert("slope_parameter", slopeParameter);
+	if (!(ok1 && ok2))
+	{
+		qWarning() << "Problem reading magnitude parameters for comet " << name;
+	}
 
-	result.insert("radius", 5); //Fictitious default assumption
-	result.insert("albedo", 0.1); // GZ 2014-01-10: Comets are very dark, should even be 0.03!
-	result.insert("dust_lengthfactor", 0.4); // dust tail length w.r.t. gas tail length
-	result.insert("dust_brightnessfactor", 1.5); // dust tail brightness w.r.t. gas tail.
-	result.insert("dust_widthfactor", 1.5); // opening w.r.t. gas tail opening width.
+	result.insert("ref", mpcMatch.captured(18).simplified());
+	if (orbitType=='A')
+	{
+		//result.insert("radius", 5); //Fictitious default assumption. Use default of 1 instead.
+		//result.insert("albedo", 0.1); // asteroid default
+		result.insert("dust_lengthfactor", 0.0); // dust tail length w.r.t. gas tail length
+		result.insert("dust_brightnessfactor", 0.0); // dust tail brightness w.r.t. gas tail.
+		result.insert("dust_widthfactor", 0.0); // opening w.r.t. gas tail opening width.
+		result.insert("outgas_intensity",0.0); // These are inactive objects!
+		result.insert("outgas_falloff", 0.0);
+	}
 	//qDebug() << "readMpcOneLineCometElements done\n";
 	return result;
 }
 
-SsoElements SolarSystemEditor::readMpcOneLineMinorPlanetElements(QString oneLineElements) const
+SsoElements SolarSystemEditor::readMpcOneLineMinorPlanetElements(const QString &oneLineElements) const
 {
 	SsoElements result;
 
@@ -640,29 +968,45 @@ SsoElements SolarSystemEditor::readMpcOneLineMinorPlanetElements(QString oneLine
 	bool ok = false;
 	//bool isLongForm = (oneLineElements.length() > 160) ? true : false;
 
-	//Minor planet number or provisional designation
+	//Minor planet number or IAU designation
 	column = oneLineElements.mid(0, 7).trimmed();
 	if (column.isEmpty())
 	{
 		return result;
 	}
 	int minorPlanetNumber = 0;
-	QString provisionalDesignation;
+	QString iauDesignation;
 	QString name;
 	if (column.toInt(&ok) || ok)
 	{
 		minorPlanetNumber = column.toInt();
 	}
+	else if (column[0]==QChar('~'))
+	{
+		// permanent number >= 620000. https://minorplanetcenter.net/iau/info/PackedDes.html
+		static const QString base62("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+		const int q4 = base62.indexOf(column[1]);
+		const int q3 = base62.indexOf(column[2]);
+		const int q2 = base62.indexOf(column[3]);
+		const int q1 = base62.indexOf(column[4]);
+		if (QList<int>({q4, q3, q2, q1}).contains(-1))
+		{
+			qCritical() << "Error in MPC large number decoding of " << column;
+			return result;
+		}
+		minorPlanetNumber=((q4*62 + q3)*62 + q2)*62 + q1 + 620000;
+	}
 	else
 	{
 		//See if it is a number, but packed
 		//I hope the format is right (I've seen prefixes only between A and P)
-		QRegExp packedMinorPlanetNumber("^([A-Za-z])(\\d+)$");
-		if (packedMinorPlanetNumber.indexIn(column) == 0)
+		static const QRegularExpression packedMinorPlanetNumber("^([A-Za-z])(\\d+)$");
+		QRegularExpressionMatch mpMatch;
+		if (column.indexOf(packedMinorPlanetNumber, 0, &mpMatch) == 0)
 		{
-			minorPlanetNumber = packedMinorPlanetNumber.cap(2).toInt(&ok);
+			minorPlanetNumber = mpMatch.captured(2).toInt(&ok);
 			//TODO: Validation
-			QChar prefix = packedMinorPlanetNumber.cap(1).at(0);
+			QChar prefix = mpMatch.captured(1).at(0);
 			if (prefix.isUpper())
 			{
 				minorPlanetNumber += ((10 + prefix.toLatin1() - 'A') * 10000);
@@ -674,7 +1018,7 @@ SsoElements SolarSystemEditor::readMpcOneLineMinorPlanetElements(QString oneLine
 		}
 		else
 		{
-			provisionalDesignation = unpackMinorPlanetProvisionalDesignation(column);
+			iauDesignation = unpackMinorPlanetIAUDesignation(column);
 		}
 	}
 
@@ -682,28 +1026,31 @@ SsoElements SolarSystemEditor::readMpcOneLineMinorPlanetElements(QString oneLine
 	{
 		name = QString::number(minorPlanetNumber);
 	}
-	else if(provisionalDesignation.isEmpty())
+	else if(iauDesignation.isEmpty())
 	{
 		qDebug() << "readMpcOneLineMinorPlanetElements():"
 		         << column
-		         << "is not a valid number or packed provisional designation";
+			 << "is not a valid number or packed IAU designation";
 		return SsoElements();
 	}
 	else
 	{
-		name = provisionalDesignation;
+		name = iauDesignation;
 	}
 
 	//In case the longer format is used, extract the human-readable name
-	column = oneLineElements.mid(166, 28).trimmed();
+	column = oneLineElements.mid(166).trimmed();
 	if (!column.isEmpty())
 	{
 		if (minorPlanetNumber)
 		{
-			QRegExp asteroidName("^\\((\\d+)\\)\\s+(\\S.+)$");
-			if (asteroidName.indexIn(column) == 0)
+			static const QRegularExpression asteroidName("^\\((\\d+)\\)\\s+(\\S.+)$");
+			static const QRegularExpression asteroidDate("\\d+");
+			QRegularExpressionMatch astMatch;
+			if (column.indexOf(asteroidName, 0, &astMatch) == 0)
 			{
-				name = asteroidName.cap(2);
+				name = astMatch.captured(2).trimmed();
+				name.replace(asteroidDate, ""); // remove date
 				result.insert("minor_planet_number", minorPlanetNumber);
 			}
 			else
@@ -711,13 +1058,21 @@ SsoElements SolarSystemEditor::readMpcOneLineMinorPlanetElements(QString oneLine
 				//Use the whole string, just in case
 				name = column;
 			}
+			// Add Periodic Comet Number for comet-like asteroids
+			QString dateCode = cometLikeAsteroids.value(minorPlanetNumber, "");
+			if (!dateCode.isEmpty())
+			{
+				if (name==QString("(%1)").arg(QString::number(minorPlanetNumber)))
+					result.insert("date_code", QString("%1/%2").arg(dateCode, name));
+				else
+					result.insert("date_code", QString("%1/(%2) %3").arg(dateCode, QString::number(minorPlanetNumber), name));
+			}
 		}
-		//In the other case, the name is already the provisional designation
+		//In the other case, the name is already the IAU designation
 	}
 	if (name.isEmpty())
-	{
 		return SsoElements();
-	}
+
 	result.insert("name", name);
 
 	//Section name
@@ -733,7 +1088,7 @@ SsoElements SolarSystemEditor::readMpcOneLineMinorPlanetElements(QString oneLine
 	//"kepler_orbit" is used for all cases:
 	//"ell_orbit" interprets distances as kilometers, not AUs
 	//result.insert("coord_func","kepler_orbit"); // 0.20: omit default
-	result.insert("coord_func", "comet_orbit"); // 0.20: add this default for compatibility with earlier versions!
+	//result.insert("coord_func", "comet_orbit"); // 0.20: add this default for compatibility with earlier versions!
 
 	//result.insert("color", "1.0, 1.0, 1.0"); // 0.16: omit obvious default.
 	//result.insert("tex_map", "nomap.png");   // 0.16: omit obvious default.
@@ -788,28 +1143,17 @@ SsoElements SolarSystemEditor::readMpcOneLineMinorPlanetElements(QString oneLine
 	result.insert("orbit_SemiMajorAxis", semiMajorAxis);
 
 	column = oneLineElements.mid(20, 5).trimmed();//Epoch, in packed form
-	QRegExp packedDateFormat("^([IJK])(\\d\\d)([1-9A-C])([1-9A-V])$");
-	if (packedDateFormat.indexIn(column) != 0)
+	static const QRegularExpression packedDateFormat("^([IJK])(\\d\\d)([1-9A-C])([1-9A-V])$");
+	QRegularExpressionMatch dateMatch;
+	if (column.indexOf(packedDateFormat, 0, &dateMatch) != 0)
 	{
 		qWarning() << "readMpcOneLineMinorPlanetElements():"
 		         << column << "is not a date in packed format";
 		return SsoElements();
 	}
-	int year = packedDateFormat.cap(2).toInt();
-	switch (packedDateFormat.cap(1).at(0).toLatin1())
-	{
-		case 'I':
-			year += 1800;
-			break;
-		case 'J':
-			year += 1900;
-			break;
-		case 'K':
-		default:
-			year += 2000;
-	}
-	int month = unpackDayOrMonthNumber(packedDateFormat.cap(3).at(0));
-	int day   = unpackDayOrMonthNumber(packedDateFormat.cap(4).at(0));
+	int year  = unpackYearNumber(dateMatch.captured(1).at(0).toLatin1(), dateMatch.captured(2).toInt());
+	int month = unpackDayOrMonthNumber(dateMatch.captured(3).at(0));
+	int day   = unpackDayOrMonthNumber(dateMatch.captured(4).at(0));
 	//qDebug() << column << year << month << day;
 	QDate epochDate(year, month, day);
 	if (!epochDate.isValid())
@@ -821,19 +1165,24 @@ SsoElements SolarSystemEditor::readMpcOneLineMinorPlanetElements(QString oneLine
 		return SsoElements();
 	}
 	//Epoch is at .0 TT, i.e. midnight
-	double epochJD;
-	StelUtils::getJDFromDate(&epochJD, year, month, day, 0, 0, 0);
-	result.insert("orbit_Epoch", epochJD);
+	double epochJDE;
+	StelUtils::getJDFromDate(&epochJDE, year, month, day, 0, 0, 0);
+	result.insert("orbit_Epoch", epochJDE);
 
 	column = oneLineElements.mid(26, 9).trimmed();
 	double meanAnomalyAtEpoch = column.toDouble(&ok);//degrees
 	if (!ok)
 		return SsoElements();
 	result.insert("orbit_MeanAnomaly", meanAnomalyAtEpoch);
-
-	// add period for visualization of orbit
-	if (semiMajorAxis>0)
-		result.insert("orbit_visualization_period", KeplerOrbit::calculateSiderealPeriod(semiMajorAxis, 1.));
+	// We assume from now on that orbit_good is 1/2 orbital duration for elliptical orbits if not given explicitly.
+	// This allows following full ellipses. However, elsewhere we should signal to users when
+	// it should be assumed that elements are outdated and thus positions wrong. (Let's take "1000 earth days" for that.)
+	if (eccentricity >=1.)
+	{
+	    // This should actually never happen for minor planets!
+	    qWarning() << "Strange eccentricity for " << name << ":" << eccentricity;
+	    result.insert("orbit_good", 1000); // default validity for osculating elements for parabolic/hyperbolic comets, days
+	}
 
 	// 2:3 resonance to Neptune [https://en.wikipedia.org/wiki/Plutino]
 	if (static_cast<int>(semiMajorAxis) == 39)
@@ -854,19 +1203,21 @@ SsoElements SolarSystemEditor::readMpcOneLineMinorPlanetElements(QString oneLine
 	if (q > 30 && semiMajorAxis > 250)
 		objectType = "sednoid";
 
-	//Radius and albedo
-	//Assume albedo of 0.15 and calculate a radius based on the absolute magnitude
-	//as described here: http://www.physics.sfasu.edu/astro/asteroids/sizemagnitude.html
-	double albedo = 0.15; //Assumed
-	double radius = std::ceil(0.5*(1329 / std::sqrt(albedo)) * std::pow(10, -0.2 * absoluteMagnitude)); // Original formula is for diameter!
-	result.insert("albedo", albedo);
-	result.insert("radius", radius);
+	// Loader will estimate albedo and radius
+
+	DiscoveryCircumstances dc = numberedMinorPlanets.value(minorPlanetNumber, DiscoveryCircumstances("",""));
+	if (!dc.first.isEmpty())
+	{
+		result.insert("discovery", dc.first);
+		result.insert("discoverer", dc.second);
+	}
+
 	result.insert("type", objectType);
 
 	return result;
 }
 
-QList<SsoElements> SolarSystemEditor::readMpcOneLineCometElementsFromFile(QString filePath) const
+QList<SsoElements> SolarSystemEditor::readMpcOneLineCometElementsFromFile(const QString &filePath) const
 {
 	QList<SsoElements> objectList;
 
@@ -918,7 +1269,7 @@ QList<SsoElements> SolarSystemEditor::readMpcOneLineCometElementsFromFile(QStrin
 	}
 }
 
-QList<SsoElements> SolarSystemEditor::readMpcOneLineMinorPlanetElementsFromFile(QString filePath) const
+QList<SsoElements> SolarSystemEditor::readMpcOneLineMinorPlanetElementsFromFile(const QString &filePath) const
 {
 	QList<SsoElements> objectList;
 
@@ -970,7 +1321,7 @@ QList<SsoElements> SolarSystemEditor::readMpcOneLineMinorPlanetElementsFromFile(
 	}
 }
 
-bool SolarSystemEditor::appendToSolarSystemConfigurationFile(QList<SsoElements> objectList)
+bool SolarSystemEditor::appendToSolarSystemConfigurationFile(const QList<SsoElements> &objectList)
 {
 	qDebug() << "appendToSolarSystemConfigurationFile begin ... ";
 	if (objectList.isEmpty())
@@ -996,7 +1347,7 @@ bool SolarSystemEditor::appendToSolarSystemConfigurationFile(QList<SsoElements> 
 	}
 
 	//Remove loaded objects (identified by name, not by section name) that are also in the proposed objectList
-	for (auto object : objectList)
+	for (const auto &object : objectList)
 	{
 		QString name = object.value("name").toString();
 		if (name.isEmpty())
@@ -1019,7 +1370,10 @@ bool SolarSystemEditor::appendToSolarSystemConfigurationFile(QList<SsoElements> 
 	}
 	solarSystemSettings->sync();
 	delete solarSystemSettings;
-	solarSystemSettings = Q_NULLPTR;
+	solarSystemSettings = nullptr;
+
+	const int width = -30;
+	QList<DiscoveryCircumstances> extraData;
 
 	//Write to file. (Handle as regular text file, not QSettings.)
 	//TODO: The usual validation
@@ -1044,11 +1398,58 @@ bool SolarSystemEditor::appendToSolarSystemConfigurationFile(QList<SsoElements> 
 			if (name.isEmpty())
 				continue;
 
-			output << StelUtils::getEndLineChar() << QString("[%1]").arg(sectionName) << StelUtils::getEndLineChar();
-			for (auto key : object.keys())
+			output << StelUtils::getEndLineChar() << QString("[%1]").arg(sectionName) << "\n"; // << StelUtils::getEndLineChar();
+			QHash<QString, QVariant>::const_iterator i=object.cbegin();
+			while (i != object.cend())
 			{
-				output << QString("%1 = %2").arg(key).arg(object.value(key).toString()) << StelUtils::getEndLineChar();
+				// formatting strings
+				output << QString("%1 = %2").arg(i.key(), width).arg(i.value().toString()) << "\n"; // << StelUtils::getEndLineChar();
+				++i;
 			}
+
+			extraData.clear();
+			const int mpn = object.value("minor_planet_number").toInt();
+			if (mpn==0)
+			{
+				// this is a minor planet
+				DiscoveryCircumstances dc = numberedMinorPlanets.value(mpn, DiscoveryCircumstances("",""));
+				if (!dc.first.isEmpty())
+				{
+					extraData.append(DiscoveryCircumstances("discovery", dc.first));
+					extraData.append(DiscoveryCircumstances("discoverer", dc.second));
+				}
+			}
+			else
+			{
+				// this is a comet
+				QString ckey = name.split("/").at(0).trimmed();
+				CometDiscoveryData comet;
+				if (cometCrossref.contains(ckey))
+				{
+					// standard designation [1P]
+					comet = cometCrossref.value(ckey);
+					// add IAU designation in addition to the old-style designation
+					if (!comet.date_code.isEmpty())
+						extraData.append(DiscoveryCircumstances("iau_designation", comet.date_code));
+				}
+				else
+					comet = cometCrossref.value(name.split("(").at(0).trimmed()); // IAU designation [P/1682 Q1]
+
+				if (!comet.perihelion_code.isEmpty())
+					extraData.append(DiscoveryCircumstances("perihelion_code", comet.perihelion_code));
+				if (!comet.discovery_code.isEmpty())
+					extraData.append(DiscoveryCircumstances("discovery_code", comet.discovery_code));
+				if (!comet.discovery_date.isEmpty())
+					extraData.append(DiscoveryCircumstances("discovery", comet.discovery_date));
+				if (!comet.discoverer.isEmpty())
+					extraData.append(DiscoveryCircumstances("discoverer", comet.discoverer));
+			}
+			for (const auto &ed : extraData)
+			{
+				// formatting strings
+				output << QString("%1 = %2").arg(ed.first, width).arg(ed.second); // << StelUtils::getEndLineChar();
+			}
+
 			output.flush();
 			qDebug() << "Appended successfully" << sectionName;
 			appendedAtLeastOne = true;
@@ -1066,7 +1467,7 @@ bool SolarSystemEditor::appendToSolarSystemConfigurationFile(QList<SsoElements> 
 	}
 }
 
-bool SolarSystemEditor::appendToSolarSystemConfigurationFile(SsoElements object)
+bool SolarSystemEditor::appendToSolarSystemConfigurationFile(const SsoElements &object)
 {
 	if (!object.contains("section_name") || object.value("section_name").toString().isEmpty())
 	{
@@ -1079,7 +1480,7 @@ bool SolarSystemEditor::appendToSolarSystemConfigurationFile(SsoElements object)
 	return appendToSolarSystemConfigurationFile(list);
 }
 
-bool SolarSystemEditor::updateSolarSystemConfigurationFile(QList<SsoElements> objectList, UpdateFlags flags)
+bool SolarSystemEditor::updateSolarSystemConfigurationFile(const QList<SsoElements> &objectList, UpdateFlags flags)
 {
 	if (objectList.isEmpty())
 	{
@@ -1156,9 +1557,11 @@ bool SolarSystemEditor::updateSolarSystemConfigurationFile(QList<SsoElements> ob
 					if (!existingSections.contains(sectionName))
 					{
 						solarSystem.beginGroup(sectionName);
-						for (auto property : object.keys())
+						QHash<QString, QVariant>::const_iterator i=object.cbegin();
+						while (i != object.cend())
 						{
-							solarSystem.setValue(property, object.value(property));
+							solarSystem.setValue(i.key(), i.value());
+							++i;
 						}
 						solarSystem.endGroup();
 					}
@@ -1182,6 +1585,14 @@ bool SolarSystemEditor::updateSolarSystemConfigurationFile(QList<SsoElements> ob
 		{
 			updateSsoProperty(solarSystem, object, "name");
 			updateSsoProperty(solarSystem, object, "minor_planet_number");
+			updateSsoProperty(solarSystem, object, "iau_designation");
+			// Comet codes
+			updateSsoProperty(solarSystem, object, "date_code");
+			updateSsoProperty(solarSystem, object, "perihelion_code");
+			updateSsoProperty(solarSystem, object, "discovery_code");
+			// Discovery Circumstances
+			updateSsoProperty(solarSystem, object, "discovery");
+			updateSsoProperty(solarSystem, object, "discoverer");
 		}
 
 		if (flags.testFlag(UpdateType))
@@ -1194,12 +1605,12 @@ bool SolarSystemEditor::updateSolarSystemConfigurationFile(QList<SsoElements> ob
 			//Remove all orbital elements first, in case
 			//the new ones use another coordinate function
 			// GZ This seems completely useless now. Type of orbit will not change as it is always kepler_orbit.
-			for (auto key : orbitalElementsKeys)
-			{
-				solarSystem.remove(key);
-			}
+			//for (const auto &key : orbitalElementsKeys)
+			//{
+			//	solarSystem.remove(key);
+			//}
 
-			for (auto key : orbitalElementsKeys)
+			for (const auto &key : orbitalElementsKeys)
 			{
 				updateSsoProperty(solarSystem, object, key);
 			}
@@ -1229,7 +1640,7 @@ bool SolarSystemEditor::updateSolarSystemConfigurationFile(QList<SsoElements> ob
 	return true;
 }
 
-void SolarSystemEditor::updateSsoProperty(QSettings & settings, SsoElements & properties, QString key)
+void SolarSystemEditor::updateSsoProperty(QSettings & settings, const SsoElements & properties, const QString &key)
 {
 	if (properties.contains(key))
 	{
@@ -1237,7 +1648,7 @@ void SolarSystemEditor::updateSsoProperty(QSettings & settings, SsoElements & pr
 	}
 }
 
-QString SolarSystemEditor::convertToGroupName(QString &name, int minorPlanetNumber)
+QString SolarSystemEditor::convertToGroupName(const QString &name, int minorPlanetNumber)
 {
 	//TODO: Should I remove all non-alphanumeric, or only the obviously problematic?
 	QString groupName(name);
@@ -1259,7 +1670,7 @@ QString SolarSystemEditor::convertToGroupName(QString &name, int minorPlanetNumb
 	return groupName;
 }
 
-QString SolarSystemEditor::fixGroupName(QString &name)
+QString SolarSystemEditor::fixGroupName(const QString &name)
 {
 	QString groupName(name);
 	groupName.replace("%25", "%");
@@ -1279,7 +1690,7 @@ int SolarSystemEditor::unpackDayOrMonthNumber(QChar digit)
 	if (digit.isUpper())
 	{
 		char letter = digit.toLatin1();
-		if (letter < 'A' || letter > 'V')
+		if ((letter < 'A') || (letter > 'V'))
 			return 0;
 		return (10 + (letter - 'A'));
 	}
@@ -1291,17 +1702,26 @@ int SolarSystemEditor::unpackDayOrMonthNumber(QChar digit)
 
 int SolarSystemEditor::unpackYearNumber (QChar prefix, int lastTwoDigits)
 {
-	int year = lastTwoDigits;
-	if (prefix == 'I')
-		year += 1800;
-	else if (prefix == 'J')
-		year += 1900;
-	else if (prefix == 'K')
-		year += 2000;
-	else
-		year = 0; //Error
-
-	return year;
+	// Prefix codes as used in https://www.minorplanetcenter.net/iau/MPCORB/AllCometEls.txt
+	static const QMap<QChar, int>centuryMap={
+		{'.', -2},
+		{'/', -1},
+		{'A', 10},
+		{'B', 11},
+		{'C', 12},
+		{'D', 13},
+		{'E', 14},
+		{'F', 15},
+		{'G', 16},
+		{'H', 17},
+		{'I', 18},
+		{'J', 19},
+		{'K', 20},
+		{'L', 21},
+		{'M', 22}
+	};
+	int century=centuryMap.value(prefix, prefix.digitValue()); // CAVEAT: May return -1 for unknown prefix code!
+	return 100*century+lastTwoDigits;
 }
 
 //Can be used both for minor planets and comets with no additional modification,
@@ -1321,59 +1741,82 @@ int SolarSystemEditor::unpackAlphanumericNumber (QChar prefix, int lastDigit)
 	return cycleCount;
 }
 
-QString SolarSystemEditor::unpackMinorPlanetProvisionalDesignation (QString packedDesignation)
+QString SolarSystemEditor::unpackMinorPlanetIAUDesignation (const QString &packedDesignation)
 {
-	QRegExp packedFormat("^([IJK])(\\d\\d)([A-Z])([\\dA-Za-z])(\\d)([A-Z])$");
-	if (packedFormat.indexIn(packedDesignation) != 0)
+	static const QRegularExpression packedFormat("^([IJK])(\\d\\d)([A-Z])([\\dA-Za-z])(\\d)([A-Z])$");
+	QRegularExpressionMatch pfMatch;
+	if (packedDesignation.indexOf(packedFormat, 0, &pfMatch) != 0)
 	{
-		QRegExp packedSurveyDesignation("^(PL|T1|T2|T3)S(\\d+)$");
-		if (packedSurveyDesignation.indexIn(packedDesignation) == 0)
+		static const QRegularExpression packedSurveyDesignation("^(PL|T1|T2|T3)S(\\d+)$");
+		QRegularExpressionMatch psMatch = packedSurveyDesignation.match(packedDesignation);
+		if (psMatch.hasMatch())
 		{
-			int number = packedSurveyDesignation.cap(2).toInt();
-			if (packedSurveyDesignation.cap(1) == "PL")
-			{
+			int number = psMatch.captured(2).toInt();
+			if (psMatch.captured(1) == "PL")
 				return QString("%1 P-L").arg(number);
-			}
-			else if (packedSurveyDesignation.cap(1) == "T1")
-			{
+			else if (psMatch.captured(1) == "T1")
 				return QString("%1 T-1").arg(number);
-			}
-			else if (packedSurveyDesignation.cap(1) == "T2")
-			{
+			else if (psMatch.captured(1) == "T2")
 				return QString("%1 T-2").arg(number);
-			}
 			else
-			{
 				return QString("%1 T-3").arg(number);
-			}
 			//TODO: Are there any other surveys?
 		}
 		else
-		{
 			return QString();
-		}
 	}
 
 	//Year
-	QChar yearPrefix = packedFormat.cap(1).at(0);
-	int yearLastTwoDigits = packedFormat.cap(2).toInt();
+	QChar yearPrefix = pfMatch.captured(1).at(0);
+	int yearLastTwoDigits = pfMatch.captured(2).toInt();
 	int year = unpackYearNumber(yearPrefix, yearLastTwoDigits);
 
 	//Letters
-	QString halfMonthLetter = packedFormat.cap(3);
-	QString secondLetter = packedFormat.cap(6);
+	QString halfMonthLetter = pfMatch.captured(3);
+	QString secondLetter = pfMatch.captured(6);
 
 	//Second letter cycle count
-	QChar cycleCountPrefix = packedFormat.cap(4).at(0);
-	int cycleCountLastDigit = packedFormat.cap(5).toInt();
+	QChar cycleCountPrefix = pfMatch.captured(4).at(0);
+	int cycleCountLastDigit = pfMatch.captured(5).toInt();
 	int cycleCount = unpackAlphanumericNumber(cycleCountPrefix, cycleCountLastDigit);
 
-	//Assemble the unpacked provisional designation
-	QString result = QString("%1 %2%3").arg(year).arg(halfMonthLetter).arg(secondLetter);
+	//Assemble the unpacked IAU designation
+	QString result = QString("%1 %2%3").arg(year).arg(halfMonthLetter, secondLetter);
 	if (cycleCount != 0)
 	{
 		result.append(QString::number(cycleCount));
 	}
 
+	return result;
+}
+
+// Should be complete as of 08/2023.
+QString SolarSystemEditor::unpackCometIAUDesignation (const QString &packedDesignation)
+{
+	Q_ASSERT(packedDesignation.length()==7);
+	static const QRegularExpression packedFormat("^([0-9A-M/.])(\\d\\d)([A-Z])([\\dA-Za-z])(\\d)([A-Za-z0])$");
+	QRegularExpressionMatch pfMatch = packedFormat.match(packedDesignation);
+
+	//Year
+	const QChar yearPrefix = pfMatch.captured(1).at(0);
+	const int yearLastTwoDigits = pfMatch.captured(2).toInt();
+	const int year = unpackYearNumber(yearPrefix, yearLastTwoDigits);
+
+	//Letters
+	QString halfMonthLetter = pfMatch.captured(3);
+	QString fragmentLetter = pfMatch.captured(6); // this is either lowercase for a fragment, or a second character for the week code.
+	if (fragmentLetter != "0" && fragmentLetter.isUpper())
+		halfMonthLetter.append(fragmentLetter); // in this case there are two letters. Presumably a renamed preliminary asteroid code?
+
+	int cycleCount = unpackAlphanumericNumber(pfMatch.captured(4).at(0), pfMatch.captured(5).toInt());
+
+	//Assemble the unpacked IAU designation
+	QString result = QString("%1 %2%3").arg(QString::number(year), halfMonthLetter, cycleCount>0 ? QString::number(cycleCount) : "");
+	if (fragmentLetter != "0" && fragmentLetter.isLower())
+	{
+		result.append(QString("-%1").arg(fragmentLetter.toUpper()));
+	}
+
+	//qDebug() << "Decoded" << packedDesignation << "as" << result;
 	return result;
 }

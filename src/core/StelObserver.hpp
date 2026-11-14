@@ -67,7 +67,7 @@ public:
 
 	virtual const QSharedPointer<Planet> getHomePlanet(void) const;
 
-	//! Get the informations on the current location
+	//! Get the information on the current location
 	virtual const StelLocation& getCurrentLocation() const {return currentLocation;}
 
 	//! Get whether the life of this observer is over, and therefore that it should be changed to the next one
@@ -92,14 +92,14 @@ class SpaceShipObserver : public StelObserver
 	Q_OBJECT
 public:
 	SpaceShipObserver(const StelLocation& startLoc, const StelLocation& target, double transitSeconds=1., double timeToGo=-1.0);
-	~SpaceShipObserver();
+	~SpaceShipObserver() override;
 
-	//! Update StelObserver info if needed. Default implementation does nothing.
-	virtual bool update(double deltaTime);
-	virtual const QSharedPointer<Planet> getHomePlanet() const;
-	virtual bool isObserverLifeOver() const {return timeToGo <= 0.;}
-	virtual bool isTraveling() const {return !isObserverLifeOver();}
-	virtual StelObserver* getNextObserver() const {return new StelObserver(moveTargetLocation);}
+	//! Update StelObserver info. This advances the position in "flight" (simple transition) towards target
+	bool update(double deltaTime) override;
+	const QSharedPointer<Planet> getHomePlanet() const override;
+	bool isObserverLifeOver() const override {return timeToGo <= 0.;}
+	bool isTraveling() const override {return !isObserverLifeOver();}
+	StelObserver* getNextObserver() const override {return new StelObserver(moveTargetLocation);}
 
 	//! Returns the target location
 	StelLocation getTargetLocation() const { return moveTargetLocation; }

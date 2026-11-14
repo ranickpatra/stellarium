@@ -20,8 +20,9 @@
 #ifndef MSCONFIGDIALOG_HPP
 #define MSCONFIGDIALOG_HPP
 
-#include "MeteorShowers.hpp"
+#include "MeteorShowersMgr.hpp"
 #include "StelDialog.hpp"
+#include <QTimer>
 
 class Ui_MSConfigDialog;
 
@@ -38,41 +39,33 @@ public:
 	MSConfigDialog(MeteorShowersMgr *mgr);
 
 	//! Destructor
-	~MSConfigDialog();
+	~MSConfigDialog() override;
 
 	//! Initializes the components based on the current settings
 	void init();
 
 protected:
 	//! Initializes the dialog and connect the signals/slots
-	void createDialogContent();
+	void createDialogContent() override;
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 
 private slots:
 	//! Refresh details about the last update
 	void refreshUpdateTab();
 
-	//! Refresh the color of all markers
-	void refreshMarkersColor();
-
-	//! Sets the color of the active radiant based on confirmed data.
-	void setColorARC();
-
-	//! Sets the color of the active radiant based on generic data.
-	void setColorARG();
-
-	//! Sets the color of the inactive radiant.
-	void setColorIR();
+	void updateStateReceiver(MeteorShowersMgr::UpdateState state);
+	void updateCompleteReceiver();
 
 	void restoreDefaults();
 
 private:
 	MeteorShowersMgr* m_mgr;
 	Ui_MSConfigDialog* m_ui;
-
+	QTimer* m_updateTimer;
 	void setAboutHtml();
+	void updateGuiFromSettings(void);
 };
 
 #endif // MSCONFIGDIALOG_HPP

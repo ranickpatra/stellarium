@@ -141,7 +141,7 @@ void APIController::service(HttpRequest &request, HttpResponse &response)
 		{
 			response.setStatus(405,"Method Not allowed");
 			QString str(QStringLiteral("Method %1 not allowed for service %2"));
-			response.write(str.arg(QString::fromLatin1(request.getMethod())).arg(QString::fromUtf8(pathWithoutPrefix)).toUtf8(),true);
+			response.write(str.arg(QString::fromLatin1(request.getMethod()), QString::fromUtf8(pathWithoutPrefix)).toUtf8(),true);
 		}
 	}
 	else
@@ -165,7 +165,12 @@ void APIController::applyAPIResponse(const APIServiceResponse &apiresponse, Http
 	}
 
 	//apply headers
-	httpresponse.getHeaders().unite(apiresponse.headers);
+	QMapIterator<QByteArray,QByteArray> i(apiresponse.headers);
+	while (i.hasNext())
+	{
+		i.next();
+		httpresponse.getHeaders().insert(i.key(), i.value());
+	}
 
 	//send response data, if any
 	if(apiresponse.responseData.isEmpty())

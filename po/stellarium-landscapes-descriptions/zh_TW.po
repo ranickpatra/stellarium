@@ -1,19 +1,20 @@
 # SOME DESCRIPTIVE TITLE
-# Copyright (C) YEAR Free Software Foundation, Inc.
+# Copyright (C) YEAR Stellarium's team
 # This file is distributed under the same license as the PACKAGE package.
 # FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
 # 
 # Translators:
-# freemanli <freeman.tam@gmail.com>, 2020
+# freemanli <freeman.tam@gmail.com>, 2023
 # 
 #, fuzzy
 msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
-"POT-Creation-Date: 2020-01-15 12:50+0700\n"
-"PO-Revision-Date: 2020-01-06 16:36+0000\n"
-"Last-Translator: freemanli <freeman.tam@gmail.com>, 2020\n"
-"Language-Team: Chinese (Taiwan) (https://www.transifex.com/stellarium/teams/80998/zh_TW/)\n"
+"Report-Msgid-Bugs-To: stellarium@googlegroups.com\n"
+"POT-Creation-Date: 2023-11-28 13:04+0700\n"
+"PO-Revision-Date: 2022-10-05 17:02+0000\n"
+"Last-Translator: freemanli <freeman.tam@gmail.com>, 2023\n"
+"Language-Team: Chinese (Taiwan) (https://app.transifex.com/stellarium/teams/80998/zh_TW/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -23,7 +24,7 @@ msgstr ""
 #. type: Content of: <h2>
 #: ../../landscapes/garching/description.en.utf8:1
 msgid "Garching"
-msgstr "加興"
+msgstr "加興 Garching"
 
 #. type: Content of: <p>
 #: ../../landscapes/garching/description.en.utf8:2
@@ -33,7 +34,7 @@ msgstr "從位於德國慕尼黑附近加興的歐洲南方天文台 ESO 總部�
 #. type: Content of: <h2>
 #: ../../landscapes/geneva/description.en.utf8:1
 msgid "Geneva"
-msgstr "日內瓦"
+msgstr "日內瓦 Geneva"
 
 #. type: Content of: <p>
 #: ../../landscapes/geneva/description.en.utf8:2
@@ -43,14 +44,14 @@ msgid ""
 " with permission from <a "
 "href=\"http://sourceforge.net/p/skychart/code/HEAD/tree/trunk/tools/data/horizon/horizon_Geneve.txt\">here</a>."
 msgstr ""
-"日內瓦的地平線。顯示相容於 <a href=\"http://www.ap-i.net/skychart/en/start\">Cartes du "
-"Ciel</a>所使用的檔案格式的樣品，從 <a "
-"href=\"http://sourceforge.net/p/skychart/code/HEAD/tree/trunk/tools/data/horizon/horizon_Geneve.txt\">該處</a>取得授權。"
+"日內瓦的地平線。此地景檔案相容於 <a href=\"http://www.ap-i.net/skychart/en/start\">Cartes du"
+" Ciel</a>軟體所使用的檔案格式，從 <a "
+"href=\"http://sourceforge.net/p/skychart/code/HEAD/tree/trunk/tools/data/horizon/horizon_Geneve.txt\">此處</a>取得授權。"
 
 #. type: Content of: <h2>
 #: ../../landscapes/grossmugl/description.en.utf8:1
 msgid "Grossmugl"
-msgstr "大穆格爾"
+msgstr "大穆格爾 Grossmugl"
 
 #. type: Content of: <p>
 #: ../../landscapes/grossmugl/description.en.utf8:2
@@ -61,20 +62,21 @@ msgid ""
 msgstr "在下奧地利州格羅斯穆格的李伯格山（哈爾施塔特時代的巨型古墓，長16m）旁邊，是維也納附近格羅斯穆格星光綠洲的主要觀測點。"
 
 #. type: Content of: <p>
-#: ../../landscapes/grossmugl/description.en.utf8:2
+#: ../../landscapes/grossmugl/description.en.utf8:3
 msgid ""
 "Despite its vicinity to a large city, light pollution is concentrated mostly"
 " on the southern horizon, and the Milky Way is well visible if a bit higher "
-"in the sky. In the eastern horizon, red lights indicate a wind park also at "
-"night.  <a href=\"http://starlightoasis.org\">http://starlightoasis.org</a>."
+"in the sky.  In the eastern horizon, red lights indicate a wind park also at"
+" night.  <a "
+"href=\"https://starlightoasis.org\">https://starlightoasis.org</a>."
 msgstr ""
-"儘管它靠近一個大城市，但光污染主要集中在南部地平線上，如果銀河位於天空更高一點地方，也清晰可見。 在東部地平線上，紅燈表示風電場，夜晚也可見。 <a "
-"href=\"http://starlightoasis.org\">http://starlightoasis.org</a>."
+"儘管它靠近一個大城市，但光污染主要集中在南部地平線上，如果銀河位於天空更高一點地方，也清晰可見。 在東部地平線上，紅燈表示風電場，夜晚也可見。  <a "
+"href=\"https://starlightoasis.org\">https://starlightoasis.org</a>."
 
 #. type: Content of: <h2>
 #: ../../landscapes/guereins/description.en.utf8:1
 msgid "Guéreins"
-msgstr "蓋蘭"
+msgstr "蓋蘭 Guéreins"
 
 #. type: Content of: <p>
 #: ../../landscapes/guereins/description.en.utf8:2
@@ -84,13 +86,13 @@ msgid ""
 "where the famous wine is produced. It is also the town where Stellarium was "
 "born :)"
 msgstr ""
-"蓋蘭 Guéreins 是位於里昂以北50公里處索恩河谷的一個法國小村莊。 西邊是“薄酒萊”的小山脈，該處出產著名的葡萄酒。 這也是本軟體 "
-"Stellarium 誕生的小鎮 :)"
+"蓋蘭 Guéreins 是位於里昂以北50公里處索恩河谷的一個法國小村莊。 西邊是“薄酒萊 Beaujolais”的小山脈，該處出產著名的葡萄酒。 "
+"也是本軟體 Stellarium 誕生的小鎮 :)"
 
 #. type: Content of: <h2>
 #: ../../landscapes/hurricane/description.en.utf8:1
 msgid "Hurricane"
-msgstr "颶風嶺"
+msgstr "颶風嶺 Hurricane"
 
 #. type: Content of: <p>
 #: ../../landscapes/hurricane/description.en.utf8:2

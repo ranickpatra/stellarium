@@ -37,9 +37,9 @@ public:
 	//! and an APIController.
 	//!
 	//! To see the default services that are registered here, see \ref rcApiReference.
-	RequestHandler(const StaticFileControllerSettings& settings, QObject* parent = Q_NULLPTR);
+	RequestHandler(const StaticFileControllerSettings& settings, QObject* parent = nullptr);
 	//! The internal APIController, and all registered services are deleted
-	virtual ~RequestHandler();
+	~RequestHandler() override;
 
 	//! Called in the main thread each frame, only passed on to APIController::update
 	void update(double deltaTime);
@@ -56,10 +56,10 @@ public:
 	//!  - Otherwise, it is passed to a StaticFileController that has been set up for the \c data/webroot folder.
 	//!
 	//! @note This method runs in an HTTP worker thread, not in the Stellarium main thread, so take caution.
-	virtual void service(HttpRequest& request, HttpResponse& response);
+	void service(HttpRequest& request, HttpResponse& response) override;
 
 public slots:
-	//! Sets wether a password set with setPassword() is required by all requests.
+	//! Sets whether a password set with setPassword() is required by all requests.
 	//! It uses HTTP Basic authorization, with an empty username.
 	//! @warning Make sure to only call this only when the server is offline because they are not synchronized
 	void setUsePassword(bool v);
@@ -68,7 +68,7 @@ public slots:
 	//! @warning Make sure to only call this only when the server is offline because they are not synchronized
 	void setPassword(const QString& pw);
 
-	//! Sets wether CORS is enabled.
+	//! Sets whether CORS is enabled.
 	//! @warning Make sure to only call this only when the server is offline because they are not synchronized
 	void setEnableCors(bool v);
 	//! Returns if CORS is enabled
@@ -96,7 +96,11 @@ private:
 	QByteArray passwordReply;
 	APIController* apiController;
 	StaticFileController* staticFiles;
+#if (QT_VERSION>=QT_VERSION_CHECK(5,14,0))
+	QRecursiveMutex templateMutex;
+#else
 	QMutex templateMutex;
+#endif
 
 	static const QByteArray AUTH_REALM;
 

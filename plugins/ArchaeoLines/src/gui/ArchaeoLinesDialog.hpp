@@ -21,8 +21,6 @@
 #define ARCHAEOLINESDIALOG_HPP
 
 #include "StelDialog.hpp"
-#include "StelGui.hpp"
-#include "StelTranslator.hpp"
 
 #include <QString>
 #include <QColor>
@@ -40,13 +38,13 @@ class ArchaeoLinesDialog : public StelDialog
 
 public:
 	ArchaeoLinesDialog();
-	~ArchaeoLinesDialog();
+	~ArchaeoLinesDialog() override;
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 
 protected:
-	void createDialogContent();
+	void createDialogContent() override;
 
 private:
 	Ui_archaeoLinesDialog* ui;

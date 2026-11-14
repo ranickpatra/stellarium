@@ -19,12 +19,68 @@
 #ifndef SIMBADSEARCHER_HPP
 #define SIMBADSEARCHER_HPP
 
+#include <set>
+#include <tuple>
 #include "VecMath.hpp"
 #include <QObject>
 #include <QMap>
 
 class QNetworkReply;
 class QNetworkAccessManager;
+class SimbadLookupReply;
+
+//! @class SimbadSearcher
+//! Provides lookup features into the online Simbad service from CDS.
+//! See https://simbad.cds.unistra.fr/ for more info.
+class SimbadSearcher : public QObject
+{
+	Q_OBJECT
+
+public:
+	SimbadSearcher(QObject* parent = Q_NULLPTR);
+
+	//! Lookup in Simbad for object which have a name starting with @em objectName.
+	//! @param serverUrl URL of the SIMBAD mirror server.
+	//! @param objectName the possibly truncated object name.
+	//! @param maxNbResult the maximum number of returned result.
+	//! @param delayMs a delay in ms to wait for before actually triggering the lookup.
+	//! This used to group requests, e.g. send only one request when a used types a word instead of one per letter.
+	//! @return a new SimbadLookupReply which is owned by the caller.
+	SimbadLookupReply* lookup(const QString& serverUrl, const QString& objectName, int maxNbResult=1, int delayMs=500);
+	//! Lookup in Simbad for objects which have a position coordsJ2000
+	//! @param serverUrl URL of the SIMBAD mirror server.
+	//! @param objectName the possibly truncated object name.
+	//! @param maxNbResult the maximum number of returned result.
+	//! @param delayMs a delay in ms to wait for before actually triggering the lookup.
+	//! @param radius search radius, arcseconds
+	//! @param IDs retrieve lists of all IDs in addition to the primary ID
+	//! @param types retrieve type information
+	//! @param spectrum retrieve spectral class (if available)
+	//! @param morpho retrieve morphological information (if available)
+	//! @param dim retrieve dimensions (if available)
+	//! @return a new SimbadLookupReply which is owned by the caller.
+	//! The returned information is a raw query answer. Depending on object, the spectrum, morpho or dim information may be useless.
+	SimbadLookupReply* lookupCoords(const QString& serverUrl, const Vec3d coordsJ2000, int maxNbResult=1, int delayMs=500,
+					int radius=30, bool IDs=false, bool types=false, bool spectrum=false, bool morpho=false, bool dim=false);
+
+	struct Result
+	{
+		QString name;   //!< Object name
+		Vec3d position; //!< Object position in ICRS
+		QString type;   //!< Object type
+
+		bool operator<(const Result& rhs) const
+		{
+		return std::tie(name, type, position[0], position[1], position[2])
+		                                                  <
+		       std::tie(rhs.name, rhs.type, rhs.position[0], rhs.position[1], rhs.position[2]);
+		}
+	};
+
+private:
+	//! The network manager used query simbad
+	QNetworkAccessManager* networkMgr;
+};
 
 //! @class SimbadLookupReply
 //! Contains all the information about a current simbad lookup query.
@@ -32,7 +88,6 @@ class QNetworkAccessManager;
 class SimbadLookupReply : public QObject
 {
 	Q_OBJECT
-	Q_ENUMS(SimbadLookupStatus)
 
 	friend class SimbadSearcher;
 
@@ -41,15 +96,16 @@ public:
 	enum SimbadLookupStatus
 	{
 		SimbadLookupQuerying,		//!< Simbad is still being queried.
-		SimbadLookupErrorOccured,	//!< An error occured while looking up Simbad. Call getErrorString() for a description of the error.
+		SimbadLookupErrorOccured,	//!< An error occurred while looking up Simbad. Call getErrorString() for a description of the error.
 		SimbadLookupFinished,		//!< The query is over. The reply can be deleted.
 		SimbadCoordinateLookupFinished  //!< A coordinate lookup is finished. The reply can be deleted.
 	};
+	Q_ENUM(SimbadLookupStatus)
 
-	~SimbadLookupReply();
+	~SimbadLookupReply() override;
 
-	//! Get the result list of matching objectName/position.
-	QMap<QString, Vec3d> getResults() const {return resultPositions;}
+	//! Get the result list of matching objects.
+	const std::set<SimbadSearcher::Result>& getResults() const {return results;}
 	//! Get the raw result string from position-based search
 	QString getResult() const {return cooResult;}
 
@@ -59,7 +115,7 @@ public:
 	//! Get a I18n string describing the current status. It can be used e.g for reporting in widgets.
 	QString getCurrentStatusString() const;
 
-	//! Get the error description string. Return empty string if no error occured.
+	//! Get the error description string. Return empty string if no error occurred.
 	QString getErrorString() const {return errorString;}
 
 	//! Explicitly delete the internal QNetworkReply. Must not be called from a QNetworkReply signal.
@@ -83,56 +139,16 @@ private:
 	QNetworkReply* reply;
 	QNetworkAccessManager* netMgr;
 
-	//! The list of resulting objectNames/Position in ICRS.
-	QMap<QString, Vec3d> resultPositions;
+	//! The list of results.
+	std::set<SimbadSearcher::Result> results;
 	//! The text result of a coordinate query.
 	QString cooResult;
 
 	//! Current lookup status.
 	SimbadLookupStatus currentStatus;
 
-	//! The error description. Empty if no errors occured.
+	//! The error description. Empty if no errors occurred.
 	QString errorString;
-};
-
-
-//! @class SimbadSearcher
-//! Provides lookup features into the online Simbad service from CDS.
-//! See http://simbad.u-strasbg.fr for more info.
-class SimbadSearcher : public QObject
-{
-	Q_OBJECT
-
-public:
-	SimbadSearcher(QObject* parent = Q_NULLPTR);
-
-	//! Lookup in Simbad for object which have a name starting with @em objectName.
-	//! @param serverUrl URL of the SIMBAD mirror server.
-	//! @param objectName the possibly truncated object name.
-	//! @param maxNbResult the maximum number of returned result.
-	//! @param delayMs a delay in ms to wait for before actually triggering the lookup.
-	//! This used to group requests, e.g. send only one request when a used types a word insead of one per letter.
-	//! @return a new SimbadLookupReply which is owned by the caller.
-	SimbadLookupReply* lookup(const QString& serverUrl, const QString& objectName, int maxNbResult=1, int delayMs=500);
-	//! Lookup in Simbad for objects which have a position coordsJ2000
-	//! @param serverUrl URL of the SIMBAD mirror server.
-	//! @param objectName the possibly truncated object name.
-	//! @param maxNbResult the maximum number of returned result.
-	//! @param delayMs a delay in ms to wait for before actually triggering the lookup.
-	//! @param radius search radius, arcseconds
-	//! @param IDs retrieve lists of all IDs in addition to the primary ID
-	//! @param types retrieve type information
-	//! @param spectrum retrieve spectral class (if available)
-	//! @param morpho retrieve morphological information (if available)
-	//! @param dim retrieve dimensions (if available)
-	//! @return a new SimbadLookupReply which is owned by the caller.
-	//! The returned information is a raw query answer. Depending on object, the spectrum, morpho or dim information may be useless.
-	SimbadLookupReply* lookupCoords(const QString& serverUrl, const Vec3d coordsJ2000, int maxNbResult=1, int delayMs=500,
-					int radius=30, bool IDs=false, bool types=false, bool spectrum=false, bool morpho=false, bool dim=false);
-
-private:
-	//! The network manager used query simbad
-	QNetworkAccessManager* networkMgr;
 };
 
 #endif /*SIMBADSEARCHER_HPP*/

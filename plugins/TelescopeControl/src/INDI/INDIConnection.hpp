@@ -20,7 +20,13 @@
 #define INDICONNECTION_HPP
 
 #include <QObject>
-#include "indibase/baseclient.h"
+#include "common/TelescopeLogging.hpp"
+#include <libindi/baseclient.h>
+#include <libindi/basedevice.h>
+
+#ifdef J2000
+#undef J2000
+#endif
 
 #include <mutex>
 #include <QStringList>
@@ -40,7 +46,8 @@ public:
 		bool operator!=(const Coordinates &other) const;
 	};
 
-	INDIConnection(QObject* parent = Q_NULLPTR);
+	//! The slot identifies this connection in diagnostics; zero omits the prefix.
+	INDIConnection(QObject* parent = nullptr, int slot = 0);
 	INDIConnection(const INDIConnection& that) = delete;
 
 	Coordinates position() const;
@@ -63,22 +70,17 @@ signals:
 private:
 	void setSpeed(int speed);
 
+	const TelescopeLogPrefix logPrefix;
 	mutable std::mutex mMutex;
-	INDI::BaseDevice* mTelescope = Q_NULLPTR;	
-	Coordinates mCoordinates;
+	INDI::BaseDevice mTelescope;
 	QStringList mDevices;
 
 public: // from INDI::BaseClient
-	void newDevice(INDI::BaseDevice *dp) override;
-	void removeDevice(INDI::BaseDevice *dp) override;
-	void newProperty(INDI::Property *property) override;
-	void removeProperty(INDI::Property *property) override;
-	void newBLOB(IBLOB *bp) override;
-	void newSwitch(ISwitchVectorProperty *svp) override;
-	void newNumber(INumberVectorProperty *nvp) override;
-	void newText(ITextVectorProperty *tvp) override;
-	void newLight(ILightVectorProperty *lvp) override;
-	void newMessage(INDI::BaseDevice *dp, int messageID) override;
+	void newDevice(INDI::BaseDevice dp) override;
+	void removeDevice(INDI::BaseDevice dp) override;
+	void newProperty(INDI::Property property) override;
+	void removeProperty(INDI::Property property) override;
+	void newMessage(INDI::BaseDevice dp, int messageID) override;
 	void serverConnected() override;
 	void serverDisconnected(int exit_code) override;
 	void unParkTelescope();

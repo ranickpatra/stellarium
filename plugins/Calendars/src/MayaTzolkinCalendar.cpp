@@ -23,7 +23,13 @@
 #include "StelApp.hpp"
 #include "StelCore.hpp"
 
-const int MayaTzolkinCalendar::mayanTzolkinEpoch=MayaLongCountCalendar::mayanEpoch-MayaTzolkinCalendar::mayanTzolkinOrdinal({4,20});
+// Default solution. Make sure to wire up some reset mechanism if MayaLongCountCalendar::mayanEpoch ever loses const-ness!
+int MayaTzolkinCalendar::mayanTzolkinEpoch=MayaLongCountCalendar::mayanEpoch-MayaTzolkinCalendar::mayanTzolkinOrdinal({4,20});
+
+void MayaTzolkinCalendar::updateFromMayaEpoch()
+{
+	MayaTzolkinCalendar::mayanTzolkinEpoch=MayaLongCountCalendar::mayanEpoch-MayaTzolkinCalendar::mayanTzolkinOrdinal({4,20});
+}
 
 MayaTzolkinCalendar::MayaTzolkinCalendar(double jd): Calendar(jd)
 {
@@ -88,11 +94,11 @@ QStringList MayaTzolkinCalendar::getDateStrings() const
 // set date from a vector of calendar date elements sorted from the largest to the smallest.
 // month-day
 // We face a problem as the year is not unique. We can only find the date before current JD which matches the parts.
-void MayaTzolkinCalendar::setDate(QVector<int> parts)
+void MayaTzolkinCalendar::setDate(const QVector<int> &parts)
 {
 	this->parts=parts;
 
-	const int rdOnOrBefore=mayanTzolkinOnOrBefore(parts, fixedFromJD(JD));	
+	const int rdOnOrBefore=mayanTzolkinOnOrBefore(parts, fixedFromJD(JD, true));
 	// restore time from JD!
 	double frac=StelUtils::fmodpos(JD+0.5+StelApp::getInstance().getCore()->getUTCOffset(JD)/24., 1.);
 	JD=jdFromFixed(rdOnOrBefore+frac, true);
@@ -100,7 +106,7 @@ void MayaTzolkinCalendar::setDate(QVector<int> parts)
 	emit jdChanged(JD);
 }
 
-int MayaTzolkinCalendar::mayanTzolkinOnOrBefore(QVector<int> tzolkin, int rd)
+int MayaTzolkinCalendar::mayanTzolkinOnOrBefore(const QVector<int> &tzolkin, int rd)
 {
 	return modInterval(mayanTzolkinOrdinal(tzolkin)+mayanTzolkinEpoch, rd, rd-260);
 }

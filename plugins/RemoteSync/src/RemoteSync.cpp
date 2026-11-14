@@ -18,16 +18,16 @@
  */
 
 #include "RemoteSync.hpp"
-#include "RemoteSyncDialog.hpp"
+#ifndef NO_GUI
+  #include "RemoteSyncDialog.hpp"
+#endif
 
 #include "SyncServer.hpp"
 #include "SyncClient.hpp"
 
-#include "CLIProcessor.hpp"
-#include "StelUtils.hpp"
 #include "StelApp.hpp"
 #include "StelCore.hpp"
-#include "StelModuleMgr.hpp"
+#include "StelTranslator.hpp"
 
 #include <QApplication>
 #include <QDebug>
@@ -52,7 +52,7 @@ StelPluginInfo RemoteSyncStelPluginInterface::getPluginInfo() const
 	info.id = "RemoteSync";
 	info.displayedName = N_("Remote Sync");
 	info.authors = "Florian Schaukowitsch and Georg Zotti";
-	info.contact = "http://homepage.univie.ac.at/Georg.Zotti";
+	info.contact = "https://homepage.univie.ac.at/Georg.Zotti";
 	info.description = N_("Provides state synchronization for multiple Stellarium instances running in a network. See manual for detailed description.");
 	info.acknowledgements = N_("This plugin was created in the 2015/2016 campaigns of the ESA Summer of Code in Space programme.");
 	info.version = REMOTESYNC_PLUGIN_VERSION;
@@ -72,16 +72,19 @@ RemoteSync::RemoteSync()
 	, connectionLostBehavior(ClientBehavior::RECONNECT)
 	, quitBehavior(ClientBehavior::NONE)
 	, state(IDLE)
-	, server(Q_NULLPTR)
-	, client(Q_NULLPTR)
+	, server(nullptr)
+	, client(nullptr)
+	, allowVersionMismatch(false)
 {
 	setObjectName("RemoteSync");
 
+#ifndef NO_GUI
 	configDialog = new RemoteSyncDialog();
+#endif
 	conf = StelApp::getInstance().getSettings();
 
 	reconnectTimer.setSingleShot(true);
-	connect(&reconnectTimer, SIGNAL(timeout()), this, SLOT(connectToServer()));
+	connect(&reconnectTimer, &QTimer::timeout, this, &RemoteSync::connectToServer);
 
 	// There are a few unsynchronizable properties. They must be listed here!
 	propertyBlacklist.push_back("HipsMgr.surveys");
@@ -89,17 +92,23 @@ RemoteSync::RemoteSync()
 
 RemoteSync::~RemoteSync()
 {
+#ifndef NO_GUI
 	delete configDialog;
+#endif
 }
 
 bool RemoteSync::configureGui(bool show)
 {
+#ifdef NO_GUI
+	return false;
+#else
 	if (show)
 		configDialog->setVisible(true);
 	return true;
+#endif
 }
 
-QVariant RemoteSync::argsGetOptionWithArg(const QStringList& args, QString shortOpt, QString longOpt, QVariant defaultValue)
+QVariant RemoteSync::argsGetOptionWithArg(const QStringList& args, const QString &shortOpt, const QString &longOpt, const QVariant &defaultValue)
 {
 	// Don't see anything after a -- as an option
 	int lastOptIdx = args.indexOf("--");
@@ -161,7 +170,7 @@ void RemoteSync::init()
 
 	loadSettings();
 
-	qCDebug(remoteSync)<<"Plugin initialized";
+	qCInfo(remoteSync)<<"Plugin initialized";
 
 	//parse command line args
 	QStringList args = StelApp::getCommandlineArguments();
@@ -173,7 +182,7 @@ void RemoteSync::init()
 	{
 		if(syncPort!=0)
 			setServerPort(syncPort);
-		qCDebug(remoteSync)<<"Starting server from command line";
+		qCInfo(remoteSync)<<"Starting server from command line";
 		startServer();
 	}
 	else if(syncMode=="client")
@@ -182,11 +191,11 @@ void RemoteSync::init()
 			setClientServerHost(syncHost);
 		if(syncPort!=0)
 			setClientServerPort(syncPort);
-		qCDebug(remoteSync)<<"Connecting to server from command line";
+		qCInfo(remoteSync)<<"Connecting to server from command line";
 		connectToServer();
 	}
 
-	connect(StelApp::getInstance().getCore(), SIGNAL(configurationDataSaved()), this, SLOT(saveSettings()));
+	connect(StelApp::getInstance().getCore(), &StelCore::configurationDataSaved, this, &RemoteSync::saveSettings);
 }
 
 void RemoteSync::update(double deltaTime)
@@ -276,14 +285,14 @@ void RemoteSync::startServer()
 {
 	if(state == IDLE)
 	{
-		server = new SyncServer(this);
+		server = new SyncServer(this, allowVersionMismatch);
 		if(server->start(serverPort))
 			setState(SERVER);
 		else
 		{
 			setError(server->errorString());
 			delete server;
-			server = Q_NULLPTR;
+			server = nullptr;
 		}
 	}
 	else
@@ -294,9 +303,9 @@ void RemoteSync::stopServer()
 {
 	if(state == SERVER)
 	{
-		connect(server, SIGNAL(serverStopped()), server, SLOT(deleteLater()));
+		connect(server, &SyncServer::serverStopped, server, &SyncServer::deleteLater);
 		server->stop();
-		server = Q_NULLPTR;
+		server = nullptr;
 		setState(IDLE);
 	}
 	else
@@ -308,8 +317,8 @@ void RemoteSync::connectToServer()
 	if(state == IDLE || state == CLIENT_WAIT_RECONNECT)
 	{
 		client = new SyncClient(syncOptions, stelPropFilter, this);
-		connect(client, SIGNAL(connected()), this, SLOT(clientConnected()));
-		connect(client, SIGNAL(disconnected(bool)), this, SLOT(clientDisconnected(bool)));
+		connect(client, &SyncClient::connected, this, &RemoteSync::clientConnected);
+		connect(client, &SyncClient::disconnected, this, &RemoteSync::clientDisconnected);
 		setState(CLIENT_CONNECTING);
 		client->connectToServer(clientServerHost,clientServerPort);
 	}
@@ -327,7 +336,7 @@ void RemoteSync::clientDisconnected(bool clean)
 {
 	QString errStr = client->errorString();
 	client->deleteLater();
-	client = Q_NULLPTR;
+	client = nullptr;
 
 	if(!clean)
 	{
@@ -394,6 +403,7 @@ void RemoteSync::loadSettings()
 	setConnectionLostBehavior(static_cast<ClientBehavior>(conf->value("connectionLostBehavior",1).toInt()));
 	setQuitBehavior(static_cast<ClientBehavior>(conf->value("quitBehavior").toInt()));
 	reconnectTimer.setInterval(conf->value("clientReconnectInterval", 5000).toInt());
+	allowVersionMismatch=conf->value("allowVersionMismatch", false).toBool();
 	conf->endGroup();
 }
 
@@ -408,15 +418,16 @@ void RemoteSync::saveSettings()
 	conf->setValue("connectionLostBehavior", connectionLostBehavior);
 	conf->setValue("quitBehavior", quitBehavior);
 	conf->setValue("clientReconnectInterval", reconnectTimer.interval());
+	conf->setValue("allowVersionMismatch", allowVersionMismatch);
 	conf->endGroup();
 }
 
-QString RemoteSync::packStringList(const QStringList props)
+QString RemoteSync::packStringList(const QStringList &props)
 {
 	return props.join("|");
 }
 
-QStringList RemoteSync::unpackStringList(const QString packedProps)
+QStringList RemoteSync::unpackStringList(const QString &packedProps)
 {
 	return packedProps.split("|");
 }
@@ -435,32 +446,6 @@ void RemoteSync::setError(const QString &errorString)
 {
 	this->errorString = errorString;
 	emit errorOccurred(errorString);
-}
-
-QDebug operator<<(QDebug deb, RemoteSync::SyncState state)
-{
-	switch (state) {
-		case RemoteSync::IDLE:
-			deb<<"IDLE";
-			break;
-		case RemoteSync::SERVER:
-			deb<<"SERVER";
-			break;
-		case RemoteSync::CLIENT:
-			deb<<"CLIENT";
-			break;
-		case RemoteSync::CLIENT_CONNECTING:
-			deb<<"CLIENT_CONNECTING";
-			break;
-		case RemoteSync::CLIENT_WAIT_RECONNECT:
-			deb<<"CLIENT_WAIT_RECONNECT";
-			break;
-		default:
-			deb<<"RemoteSync::SyncState(" <<int(state)<<')';
-			break;
-	}
-
-	return deb;
 }
 
 bool RemoteSync::isPropertyBlacklisted(const QString &name)

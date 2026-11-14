@@ -29,16 +29,15 @@
 // gtime
 #include "gTime.hpp"
 // GExcpt
-#include "gException.hpp"
-#include "stdsat.h"
+//#include "stdsat.h"
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
+//#include <cstdio>
+//#include <cstdlib>
 
 // Class GTimeSpan
 
 //////////////////////////////////////////////////////////////////////////////
-// Referencies:
+// References:
 // Astronomical Formulae for Calculators.
 //	Jean Meeus
 //	Chapter 3: Julian Day and Calendar Date. PG's 23, 24, 25
@@ -55,7 +54,7 @@ void gTime::setTime(int year, double day)
 	int B = 2 - A + (A / 4);
 
 	double JDforYear = static_cast<int>(365.25 * year) +
-				      static_cast<int>(30.6001 * 14)  +  //MM = 1 then MM=12 + 1 for the expresion (30.6001 * (mm +1))
+				      static_cast<int>(30.6001 * 14)  +  //MM = 1 then MM=12 + 1 for the expression (30.6001 * (mm +1))
 				      1720994.5 + B;
 
 	m_time = JDforYear + day;
@@ -70,20 +69,13 @@ gTime gTime::getCurrentTime()
 	struct tm timeinfo;
 
 	time(&rawtime);
-	#ifdef _MSC_VER
+	#if defined(_MSC_VER) || defined(__MINGW32__)
 	gmtime_s(&timeinfo, &rawtime);
 	#else
 	gmtime_r(&rawtime, &timeinfo);
 	#endif
 
 	return gTime(timeinfo);
-}
-
-
-
-gTime::gTime(int year, double day)
-{
-	setTime(year, day);
 }
 
 gTime::gTime(double ai_jDays)
@@ -94,23 +86,11 @@ gTime::gTime(double ai_jDays)
 gTime::gTime(int nYear, int nMonth, int nDay, int nHour, int nMin, double nSec)
 {
 	// Calculate N, the day of the year (1..366)
-	int N;
 	int F1 = static_cast<int>((275.0 * nMonth) / 9.0);
 	int F2 = static_cast<int>((nMonth + 9.0) / 12.0);
-
-	if(isLeapYear(nYear))
-	{
-		// Leap year
-		N = F1 - F2 + nDay - 30;
-	}
-	else
-	{
-		// Common year
-		N = F1 - (2 * F2) + nDay - 30;
-	}
+	int N  = F1 + nDay - 30 - (isLeapYear(nYear) ? F2 : 2*F2);
 
 	double dDay = N + (nHour + (nMin + (nSec / 60.0)) / 60.0) / 24.0;
-
 
 	setTime(nYear, dDay);
 }
@@ -136,7 +116,7 @@ gTimeSpan gTime::getTimeToUTC()
 	time_t when   = time(nullptr);
 	struct tm utc;
 	struct tm lcl;
-	#ifdef _MSC_VER
+	#if defined(_MSC_VER) || defined(__MINGW32__)
 	gmtime_s(&utc, &when);
 	localtime_s(&lcl, &when);
 	#else
@@ -146,7 +126,7 @@ gTimeSpan gTime::getTimeToUTC()
 	gTimeSpan tUTCDiff;
 
 	int delta_h = lcl.tm_hour - utc.tm_hour;
-	tUTCDiff = (time_t) delta_h*3600;
+	tUTCDiff = static_cast<time_t>(delta_h)*3600;
 
 	return(tUTCDiff);
 }
@@ -162,7 +142,7 @@ const gTime& gTime::operator=(time_t t)
 {
 	struct tm ptm;
 
-	#ifdef _MSC_VER
+	#if defined(_MSC_VER) || defined(__MINGW32__)
 	gmtime_s(&ptm, &t);
 	#else
 	gmtime_r(&t, &ptm);
@@ -202,31 +182,25 @@ void gTime::toCalendarDate(int *pYear, int *pMonth , double *pDom) const
 	assert(pMonth != nullptr);
 	assert(pDom != nullptr);
 
-	double jdAdj, F, alpha, A, B, DOM;
-	int Z, C, D, E, month, year;
+	const double jdAdj = m_time + 0.5;
+	const int Z        = static_cast<int>(jdAdj);  // integer part
+	const double F     = jdAdj - Z;   // fractional part
+	double A=Z;
 
-	jdAdj = m_time + 0.5;
-	Z     = static_cast<int>(jdAdj);  // integer part
-	F     = jdAdj - Z;   // fractional part
-
-	if(Z < 2299161)
+	if(Z >= 2299161)
 	{
-		A = Z;
-	}
-	else
-	{
-		alpha = static_cast<int>((Z - 1867216.25) / 36524.25);
-		A     = Z + 1 + alpha - static_cast<int>(alpha / 4.0);
+		double alpha = static_cast<int>((Z - 1867216.25) / 36524.25);
+		A += 1 + alpha - static_cast<int>(alpha / 4.0);
 	}
 
-	B     = A + 1524.0;
-	C     = static_cast<int>((B - 122.1) / 365.25);
-	D     = static_cast<int>(C * 365.25);
-	E     = static_cast<int>((B - D) / 30.6001);
+	double B  = A + 1524.0;
+	int C     = static_cast<int>((B - 122.1) / 365.25);
+	int D     = static_cast<int>(C * 365.25);
+	int E     = static_cast<int>((B - D) / 30.6001);
 
-	DOM   = B - D - static_cast<int>(E * 30.6001) + F;
-	month = (E < 13.5) ? (E - 1) : (E - 13);
-	year  = (month > 2.5) ? (C - 4716) : (C - 4715);
+	double DOM = B - D - static_cast<int>(E * 30.6001) + F;
+	int month  = (E < 13.5) ? (E - 1) : (E - 13);
+	int year   = (month > 2.5) ? (C - 4716) : (C - 4715);
 
 	*pYear = year;
 	*pMonth = month;
@@ -235,12 +209,9 @@ void gTime::toCalendarDate(int *pYear, int *pMonth , double *pDom) const
 
 double gTime::toJCenturies() const
 {
-	double jd;
-	double UT = fmod((m_time + 0.5), 1.0);
-	jd = m_time - UT;
-	double TU = (jd- JDAY_JAN1_12H_2000) / 36525.0;
-
-	return TU;
+	const double UT = fmod((m_time + 0.5), 1.0);
+	const double jd = m_time - UT;
+	return (jd- JDAY_JAN1_12H_2000) / 36525.0;
 }
 
 // @method  toThetaGMST();
@@ -249,19 +220,18 @@ double gTime::toJCenturies() const
 // prime meridian.
 double gTime::toThetaGMST() const
 {
-	double jd, Theta_JD;
-	double UT = fmod((m_time + 0.5), 1.0);
-	jd = m_time - UT;
-	double TU = (jd- JDAY_JAN1_12H_2000) / 36525.0;
+	const double UT = fmod((m_time + 0.5), 1.0);
+	const double jd = m_time - UT;
+	const double TU = (jd- JDAY_JAN1_12H_2000) / 36525.0;
 
 	double GMST = 24110.54841 + TU *
 	              (8640184.812866 + TU * (0.093104 - TU * 6.2e-06));
 
 	GMST = fmod((GMST + KSEC_PER_DAY * OMEGA_E * UT),KSEC_PER_DAY);
-	Theta_JD=(K2PI * (GMST / KSEC_PER_DAY));
+	double Theta_JD=(2.*M_PI * (GMST / KSEC_PER_DAY));
 
 	if(Theta_JD <0.0)
-		Theta_JD+=K2PI;
+		Theta_JD+=2.*M_PI;
 
 	return Theta_JD;
 }
@@ -270,7 +240,7 @@ double gTime::toThetaGMST() const
 // Definition: Calculate Theta Angle at Local Mean Time for the Julian date.
 double gTime::toThetaLMST(double longitude) const
 {
-	return fmod(toThetaGMST() + longitude,  K2PI);
+	return fmod(toThetaGMST() + longitude,  2.*M_PI);
 }
 
 
@@ -306,48 +276,30 @@ const gTime& gTime::operator-=(gTimeSpan ai_timeSpan)
 
 bool gTime::operator==(gTime ai_time) const
 {
-	if(m_time == ai_time.m_time)
-		return true;
-
-	return false;
+	return (m_time == ai_time.m_time);
 }
 
 bool gTime::operator!=(gTime ai_time) const
 {
-	if(m_time != ai_time.m_time)
-		return true;
-
-	return false;
+	return (m_time != ai_time.m_time);
 }
 
 bool gTime::operator<(gTime ai_time) const
 {
-	if(m_time < ai_time.m_time)
-		return true;
-
-	return false;
+	return (m_time < ai_time.m_time);
 }
 
 bool gTime::operator>(gTime ai_time) const
 {
-	if(m_time > ai_time.m_time)
-		return true;
-
-	return false;
+	return (m_time > ai_time.m_time);
 }
 
 bool gTime::operator<=(gTime ai_time) const
 {
-	if(m_time <= ai_time.m_time)
-		return true;
-
-	return false;
+	return (m_time <= ai_time.m_time);
 }
 
 bool gTime::operator>=(gTime ai_time) const
 {
-	if(m_time >= ai_time.m_time)
-		return true;
-
-	return false;
+	return (m_time >= ai_time.m_time);
 }

@@ -27,7 +27,7 @@ StaticFileController::StaticFileController(const StaticFileControllerSettings& s
     maxCachedFileSize=settings.maxCachedFileSize;
     cache.setMaxCost(settings.cacheSize);
     cacheTimeout=settings.cacheTime;
-    qDebug("StaticFileController: cache timeout=%i, size=%i",cacheTimeout,cache.maxCost());
+    qDebug("StaticFileController: cache timeout=%i, size=%i",cacheTimeout,int(cache.maxCost()));
 }
 
 
@@ -57,8 +57,12 @@ void StaticFileController::service(HttpRequest& request, HttpResponse& response)
 #ifndef NDEBUG
         qDebug("StaticFileController: Cache miss for %s",path.data());
 #endif
-        // Forbid access to files outside the docroot directory
-        if (path.contains("/.."))
+
+#ifdef Q_OS_WIN
+        // URL paths use '/', but Windows also treats '\' as a directory separator.
+        path.replace('\\','/');
+#endif
+        if ((!path.isEmpty() && !path.startsWith('/')) || path.split('/').contains(QByteArray("..")))
         {
             qWarning("StaticFileController: detected forbidden characters in path %s",path.data());
             response.setStatus(403,"forbidden");

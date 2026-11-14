@@ -20,18 +20,6 @@
 #include "TuiNodeEnum.hpp"
 #include <QKeyEvent>
 
-TuiNodeEnum::TuiNodeEnum(const QString& text, QObject* receiver, const char* method, QStringList items,
-                         QString defValue, TuiNode* parent, TuiNode* prev)
-    : TuiNodeEditable(text, parent, prev), stringList(items), defValue(defValue)
-{
-	this->connect(this, SIGNAL(setValue(QString)), receiver, method);
-
-	if (stringList.contains(defValue))
-		currentIdx = stringList.indexOf(defValue);
-	else
-		currentIdx = 0;
-}	
-
 TuiNodeResponse TuiNodeEnum::handleEditingKey(int key)
 {
 	TuiNodeResponse response;
@@ -59,7 +47,7 @@ TuiNodeResponse TuiNodeEnum::handleEditingKey(int key)
 	}
 	else if (key==Qt::Key_Return)
 	{
-		emit(setValue(stringList.at(currentIdx)));
+		emit setValue(stringList.at(currentIdx));
 		response.accepted = true;
 		response.newNode = this;
 	}

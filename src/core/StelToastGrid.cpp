@@ -42,7 +42,7 @@ ToastGrid::ToastGrid(int amaxLevel)
 void ToastGrid::init_grid()
 {
 	// Allocate the grid memory.
-	grid.resize(size * size);
+	grid.resize(static_cast<long>(size) * size);
 	// Set up the level 0.
 	at(0, 0, 0) = at(0, 1, 0) = at(0, 1, 1) = at(0, 0, 1) = Vec3d(0, 0, -1);
 	// And the level 1
@@ -94,7 +94,7 @@ QVector<Vec3d> ToastGrid::getVertexArray(int level, int x, int y, int resolution
 	// The size of the returned array
 	int size = pow2(resolution - level) + 1;
 	QVector<Vec3d> ret;
-	ret.reserve(size * size);
+	ret.reserve(static_cast<long>(size) * size);
 	// Compute the real position in the grid
 	int scale = pow2(maxLevel - level);
 	x *= scale;
@@ -115,19 +115,19 @@ QVector<Vec3d> ToastGrid::getVertexArray(int level, int x, int y, int resolution
 
 QVector<Vec2f> ToastGrid::getTextureArray(int level, int x, int y, int resolution) const
 {
-	Q_UNUSED(x);
-	Q_UNUSED(y);
+	Q_UNUSED(x)
+	Q_UNUSED(y)
 	Q_ASSERT(resolution >= level);
 	Q_ASSERT(resolution <= maxLevel);
 	// The size of the returned array
 	int size = pow2(resolution - level) + 1;
 	QVector<Vec2f> ret;
-	ret.reserve(size * size);
+	ret.reserve(static_cast<long>(size) * size);
 	for (int i = size-1; i >= 0; i--)
 	{
 		for (int j = 0; j < size; j++)
 		{
-			ret.append(Vec2f(j,i) / (size-1));
+			ret.append(Vec2f(static_cast<float>(j),static_cast<float>(i)) / static_cast<float>(size-1));
 		}
 	}
 	Q_ASSERT(ret.size() == size * size);

@@ -33,13 +33,13 @@ class NavStarsWindow : public StelDialog
 
 public:
 	NavStarsWindow();
-	~NavStarsWindow();
+	~NavStarsWindow() override;
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 
 protected:
-	void createDialogContent();
+	void createDialogContent() override;
 
 private:
 	Ui_navStarsWindowForm* ui;
@@ -53,6 +53,7 @@ private slots:
 	void resetSettings();
 	void populateNavigationalStarsSets();
 	void setNavigationalStarsSet(int nsSetID);
+	void populateToday();
 };
 
 

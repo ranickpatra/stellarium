@@ -21,6 +21,8 @@
 #include <QPluginLoader>
 #include <QSettings>
 #include <QDir>
+#include <QCoreApplication>
+#include <QRegularExpression>
 
 #include "StelModuleMgr.hpp"
 #include "StelApp.hpp"
@@ -123,7 +125,7 @@ StelModule* StelModuleMgr::loadPlugin(const QString& moduleID)
 		{
 			Q_ASSERT(desc.pluginInterface);
 			StelModule* sMod = desc.pluginInterface->getStelModule();
-			qDebug() << "Loaded plugin" << moduleID;
+			qInfo() << "Loaded plugin" << moduleID;
 			pluginDescriptorList[moduleID].loaded=true;
 			return sMod;
 		}
@@ -156,7 +158,7 @@ QObjectList StelModuleMgr::loadExtensions(const QString &moduleID)
 
 struct StelModuleOrderComparator
 {
-	StelModuleOrderComparator(StelModule::StelModuleActionName aaction) : action(aaction) {;}
+	StelModuleOrderComparator(StelModule::StelModuleActionName aaction) : action(aaction) {}
 	bool operator()(StelModule* x, StelModule* y) {return x->getCallOrder(action)<y->getCallOrder(action);}
 private:
 	StelModule::StelModuleActionName action;
@@ -174,7 +176,7 @@ void StelModuleMgr::unloadAllPlugins()
 		if (d.loaded==false)
 			continue;
 		unloadModule(d.info.id, true);
-		qDebug() << "Unloaded plugin" << d.info.id;
+		qInfo() << "Unloaded plugin" << d.info.id;
 	}
 	// Call update now to make sure that all references to the now deleted plugins modules
 	// are removed (fix crashes at application shutdown).
@@ -211,7 +213,7 @@ void StelModuleMgr::generateCallingLists()
 		// Flush previous call orders
 		mc.value().clear();
 		// and init them with modules in creation order
-		for (auto* m : getAllModules())
+		for (auto& m : getAllModules())
 		{
 			mc.value().push_back(m);
 		}
@@ -231,7 +233,7 @@ QList<StelModuleMgr::PluginDescriptor> StelModuleMgr::getPluginsList()
 
 	// First list all static plugins.
 	// If a dynamic plugin with the same ID exists, it will take precedence on the static one.
-	for (auto* plugin : QPluginLoader::staticInstances())
+	for (auto& plugin : QPluginLoader::staticInstances())
 	{
 		StelPluginInterface* pluginInterface = qobject_cast<StelPluginInterface*>(plugin);
 		if (pluginInterface)
@@ -243,22 +245,34 @@ QList<StelModuleMgr::PluginDescriptor> StelModuleMgr::getPluginsList()
 		}
 	}
 
-	// Then list dynamic libraries from the modules/ directory
-	QSet<QString> moduleDirs;
-	moduleDirs = StelFileMgr::listContents("modules",StelFileMgr::Directory);
+	QStringList modules;
 
-	for (auto dir : moduleDirs)
+	// Then list dynamic libraries from the modules/ directory
+	const QSet<QString> moduleDirs = StelFileMgr::listContents("modules",StelFileMgr::Directory);
+
+	for (auto &dir : moduleDirs)
 	{
 		QString moduleFullPath = QString("modules/") + dir + "/lib" + dir;
 #ifdef Q_OS_WIN
 		moduleFullPath += ".dll";
-#else
-#ifdef Q_OS_MAC
+#elif defined(Q_OS_MACOS)
 		moduleFullPath += ".dylib";
 #else
 		moduleFullPath += ".so";
 #endif
+
+		modules += moduleFullPath;
+	}
+
+#if defined(Q_OS_ANDROID)
+	for( QFileInfo& info : QDir(QCoreApplication::applicationDirPath()).entryInfoList( QStringList() << "libmodule_*.so" , QDir::Files ) )
+	{
+		modules += info.absoluteFilePath();
+	}
 #endif
+
+	foreach (QString moduleFullPath, modules)
+	{
 		moduleFullPath = StelFileMgr::findFile(moduleFullPath, StelFileMgr::File);
 		if (moduleFullPath.isEmpty())
 			continue;
@@ -267,7 +281,7 @@ QList<StelModuleMgr::PluginDescriptor> StelModuleMgr::getPluginsList()
 		if (!loader.load())
 		{
 			qWarning() << "Couldn't load the dynamic library:" << QDir::toNativeSeparators(moduleFullPath) << ": " << loader.errorString();
-			qWarning() << "Plugin" << dir << "will not be loaded.";
+			qWarning() << "Plugin" << moduleFullPath << "will not be loaded.";
 			continue;
 		}
 
@@ -275,7 +289,7 @@ QList<StelModuleMgr::PluginDescriptor> StelModuleMgr::getPluginsList()
 		if (!obj)
 		{
 			qWarning() << "Couldn't open the dynamic library:" << QDir::toNativeSeparators(moduleFullPath) << ": " << loader.errorString();
-			qWarning() << "Plugin" << dir << "will not be open.";
+			qWarning() << "Plugin" << moduleFullPath << "will not be open.";
 			continue;
 		}
 
@@ -309,7 +323,7 @@ QList<StelModuleMgr::PluginDescriptor> StelModuleMgr::getPluginsList()
 QString StelModuleMgr::getStandardSupportLinksInfo(QString moduleName, bool furtherInfo)
 {
 	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
+	static const QRegularExpression a_rx("[{]([^{]*)[}]");
 	QString html;
 	html += "<h3>" + q_("Links") + "</h3>";
 	html += "<p>" + QString(q_("Support is provided via the Github website.  Be sure to put \"%1\" in the subject when posting.")).arg(moduleName) + "</p>";
@@ -321,8 +335,7 @@ QString StelModuleMgr::getStandardSupportLinksInfo(QString moduleName, bool furt
 	html += "</ul></p>";
 	if (furtherInfo)
 	{
-		QStringList ver = StelUtils::getApplicationVersion().split(".");
-		QString URL = QString("<a href=\"http://stellarium.org/doc/%1.%2/\">\\1</a>").arg(ver[0], ver[1]);
+		QString URL = QString("<a href=\"http://stellarium.org/doc/%1/\">\\1</a>").arg(StelUtils::getApplicationSeries());
 		// TRANSLATORS: The text between braces is the text of an HTML link.
 		html += "<p>" + q_("Further information can be found in the {developer documentation}.").toHtmlEscaped().replace(a_rx, URL) + "</p>";
 	}

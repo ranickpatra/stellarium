@@ -1,0 +1,81 @@
+/*
+ * Stellarium
+ * Copyright (C) 2022 Alexander Wolf
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
+ */
+ 
+#include <QStringList>
+
+namespace StelContributors {
+
+    static const QStringList contributorsList =
+    {
+        "Fabien Chereau", "Georg Zotti", "Alexander V. Wolf", "Ruslan Kabatsayev", "Matthew Gates", 
+        "Bogdan Marinov", "Rob Spearman", "Marcos Cardinot", "Guillaume Chereau", "Florian Schaukowitsch", 
+        "Ferdinand Majerech", "Johannes Gajdosik", "Susanne M Hoffmann", "Timothy Reaves", "Tony Furr", 
+        "Sun Shuwei", "Eleni Maria Stea", "Andrei Borza", "Teresa Huertas", "Diego Marcos", 
+        "Johan Meuris", "Worachate Boonplod", "J.L.Canales", "Henry Leung", "Andras Mohari", 
+        "Ivan Marti-Vidal", "Nicolas Martignoni", "Michael Storm", "Petr Kubánek", "Yuri Chornoivan", 
+        "Holger Nießner", "Atque", "Simon Parzer", "Qam1", "misibacsi", 
+        "Barry Gerdes", "Luca-Philipp Grumbach", "Alexey Sokolov", "Wang Siliang", "Khalid AlAjaji", 
+        "Anton Samoylov", "Alexander Duytschaever", "Adriano Steffler", "Minmin Gong", "Nick Fedoseev", 
+        "Sibi Antony", "Tanmoy Saha", "Pluton Helleformer", "Alex Gamper", "Rumen Bogdanovski", 
+        "Vishvas Vasuki विश्वासः", "Vladislav Bataron", "Alessandro Siniscalchi", "DreamNik", "Elaina", 
+        "Kutaibaa Akraa", "Peter Mousley", "Andy Kirkham", "Jörg Müller", "Peter Vasey", 
+        "Dan Smale", "Hernan Martinez", "henrysky", "FreewareTips", "RVS", 
+        "Wolfgang Laun", "luzpaz", "uwes-ufo", "Allan Johnson", "Colin Gaudion", 
+        "Emmanuel", "Greg Alexander", "Michal Sojka", "Peter Walser", "William Formyduval", 
+        "Lyu Haocheng", "Giuseppe Putzolu", "Fòram na Gàidhlig", "Paolo Cancedda (Pac)", "Pawel Stolowski", 
+        "Ralph Schäfermeier", "Teemu Nätkinniemi", "Volker Hören", "ChrUnger", "Chris Xiao", 
+        "Hleb Valoshka", "Iceflower", "Luke Henry", "Luz Paz", "Mike Garrahan", 
+        "Mircea Lite", "Moritz Rätz", "Paul Krizak", "Ray", "Sergej Krivonos", 
+        "Shantanu Agarwal", "Nick Kanel", "Youla Azkarrula", "colossatr0n", "Martin Bernardi", 
+        "Miroslav Broz", "ysjbserver", "Alexandros Kosiaris", "Alexey Dokuchaev", "Aspere", 
+        "Clement Sommelet", "Daniel", "David Baucum", "Diego Sandoval", "EuklidAlexandria", 
+        "Felix Z", "Freeman Li", "Hans Lambermont", "Jocelyn GIROD", "Jonas Persson", 
+        "Josh Meyers", "Kirill Snezhko", "Konrad Rybka", "Maciej Serylak", "Max Digruber", 
+        "Mike Boyle", "Norman Rasmussen", "Peter Neubauer", "Robert S. Fuller", "Sergey", 
+        "Steven Bellavia", "Victor Reijs", "bv6679", "Daniel Adastra", "Kutaibaa Akraa", 
+        "Stefan Schöfegger", "sebagr", "ssimard2504", "tofilwiktor", "Adam Majer", 
+        "Alec Clews", "Alexander Belopolsky", "Alexander Miller", "Andrew Jeddeloh", "Angelo Fraietta", 
+        "Annette S. Lee", "Antoine Jacoutot", "Arjen de Korte", "Balló György", "Bernd K", 
+        "Björn Höfling", "Brian Kloppenborg", "Cassy", "Chi Huynh", "Clepalitto", 
+        "Cosimo Cecchi", "DJ_he_zi", "Dan Joplin", "Daniel De Mickey", "Daniel Michalik", 
+        "Danny Milosavljevic", "Dark Dragon", "Dempsey-p", "Dhia", "Dominik Maximilián Ramík", 
+        "Eduardo Alcantara", "Fabian Hofer", "François Scholder", "Froenchenko Leonid", "Gion Kunz", 
+        "GitHaarek", "Gizmoobs", "Guillaume Communie", "Gábor Péterffy", "Hector Quemada", 
+        "Heiko Becker", "Holger", "Imad Saddik", "Issei Hasegawa", "Ivan Lloro", 
+        "JAY RESPLER", "JMejuto", "Jack Schmidt", "Jean-Philippe Lambert", "John J. Foerch", 
+        "Kamil Zaraś", "Katrin Leinweber", "Kenan Dervišević", "Koya_Azk", "Louis Strous", 
+        "M.S. Adityan", "MaraJadeLives", "Martin Bernardi (Laptop)", "Matt Hughes", "Matthias Drochner", 
+        "Matwey V. Kornilov", "Michael Dickens", "Michael Taylor", "MichaelCASC5", "Mohammad Marshad Bin Khaled", 
+        "Mykyta Sytyi", "Nidroide", "Nir Lichtman", "Oleg Ginzburg", "Oscar Roig Felius", 
+        "Paolo Stivanin", "ParkSangJun", "Patrick", "Paul Evans", "Pavel Klimenko", 
+        "Peter", "Peter Hickey", "Pino Toscano", "Piotr Krawczun", "Roland Bosa", 
+        "Sabri Ünal", "Sam Lanning", "Sebastian Jennen", "SilverAstro", "Song Li", 
+        "Sripath Roy Koganti", "Sun Shuwei", "Sveinn í Felli", "Sylvain Simard", "Symm", 
+        "ThibaudGS", "Thilo", "Thomas Klausner", "Thomas1664", "Tig la Pomme", 
+        "Tomasz Buchert", "TotalCaesar659", "Tuomas Teipainen", "Tēvita O. Kaʻili", "Vancho Stojkoski", 
+        "Vicente Reyes", "Vincent Gerlach", "Wonkyo Choe", "Yaakov Selkowitz", "Youssif Ghantous Filho", 
+        "Yury Solomonov", "adalava", "afontenot", "bkuhls", "chithihuynh", 
+        "dusan-prascevic", "Marc Espie", "john lee", "joinother", "kutaibaa akraa", 
+        "leonardcj", "luz paz", "mike406", "mmustafasenoglu", "pkrawczun", 
+        "Pavel Klimenko", "rikardfalkeborn", "riodoro1", "Ross Mitchell", "Edgar Scholz", 
+        "zhu1995zpb", "Łukasz 'sil2100' Zemczak"
+    };
+    
+}
+

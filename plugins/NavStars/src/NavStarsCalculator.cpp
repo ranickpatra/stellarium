@@ -101,9 +101,8 @@ QString NavStarsCalculator::radToDm(double rad, const QString& pos, const QStrin
 	bool sign;	
 	if (useDecimalDegrees)
 	{
-		double dd;
-		StelUtils::radToDecDeg(rad, sign, dd);
-		rval = QString("%1%2&deg;").arg((sign ? pos : neg), QString::number(dd, 'f', useExtraDecimals ? 6 : 5));
+		double dd = rad * M_180_PI;
+		rval = QString("%1%2&deg;").arg((dd>=0. ? pos : neg), QString::number(dd, 'f', useExtraDecimals ? 6 : 5));
 	}
 	else
 	{
@@ -115,12 +114,6 @@ QString NavStarsCalculator::radToDm(double rad, const QString& pos, const QStrin
 		md += (s / 60.);
 		rval = QString("%1%2&deg;%3'").arg((sign ? pos : neg), QString::number(d, 'f', 0), QString::number(md, 'f', useExtraDecimals ? 4 : 1));
 	}
-#ifdef _DEBUG
-	// An easier to use display when working with Google Earth, 
-	// Google Maps, custom software tools, etc. Keep everything
-	// decimal. Only need DDMM.m for Almanac display.
-	rval += " (" + ( sign ? pos : neg ) + QString::number(qAbs(RAD2DEG(rad)), 'f', 5) + ")";
-#endif
 	return rval;
 }
 

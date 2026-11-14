@@ -23,8 +23,12 @@
 #include "StelPainter.hpp"
 #include "StelTexture.hpp"
 #include "StelUtils.hpp"
+#include "StelApp.hpp"
 
 #include <QtMath>
+
+#define MAX_ALTITUDE 120.f           //! max meteor altitude in km
+#define MIN_ALTITUDE 80.f            //! min meteor altitude in km
 
 Meteor::Meteor(const StelCore* core, const StelTextureSP& bolideTexture)
 	: m_core(core)
@@ -72,16 +76,15 @@ void Meteor::init(const float& radiantAlpha, const float& radiantDelta,
 	m_matAltAzToRadiant = Mat4d::zrotation(static_cast<double>(radiantAz)) * Mat4d::yrotation(M_PI_2 - static_cast<double>(radiantAlt));
 
 	// select a random initial meteor altitude in the horizontal system [MIN_ALTITUDE, MAX_ALTITUDE]
-	float initialAlt = MIN_ALTITUDE + (MAX_ALTITUDE - MIN_ALTITUDE) * (static_cast<float>(qrand()) / (static_cast<float>(RAND_MAX) + 1));
-
+	float initialAlt = MIN_ALTITUDE + (MAX_ALTITUDE - MIN_ALTITUDE) * StelApp::getInstance().getRandF();
 	// calculates the max z-coordinate for the current radiant
 	float maxZ = meteorZ(M_PI_2f - radiantAlt, initialAlt);
 
 	// meteor trajectory
 	// select a random xy position in polar coordinates (radiant system)
 
-	const float xyDist = maxZ     * (static_cast<float>(qrand()) / (static_cast<float>(RAND_MAX) + 1)); // [0, maxZ]
-	const float theta = 2 * M_PIf * (static_cast<float>(qrand()) / (static_cast<float>(RAND_MAX) + 1)); // [0, 2pi]
+	const float xyDist = maxZ     * StelApp::getInstance().getRandF(); // [0, maxZ]
+	const float theta = 2 * M_PIf * StelApp::getInstance().getRandF(); // [0, 2pi]
 
 	// initial meteor coordinates (radiant system)
 	m_position[0] = static_cast<double>(xyDist * std::cos(theta));
@@ -97,7 +100,7 @@ void Meteor::init(const float& radiantAlpha, const float& radiantDelta,
 	positionAltAz.transfo4d(m_matAltAzToRadiant);
 
 	// find the angle from horizon to meteor
-	float meteorAlt = static_cast<float>(std::asin(positionAltAz[2] / positionAltAz.length()));
+	float meteorAlt = static_cast<float>(std::asin(positionAltAz[2] / positionAltAz.norm()));
 
 	// this meteor should not be visible if it is above the maximum altitude
 	// or if it's below the horizon!
@@ -111,7 +114,7 @@ void Meteor::init(const float& radiantAlpha, const float& radiantDelta,
 	{
 		// earth-grazers are rare!
 		// introduce a probabilistic factor just to make them a bit harder to occur
-		float prob = (static_cast<float>(qrand()) / (static_cast<float>(RAND_MAX) + 1));
+		float prob = StelApp::getInstance().getRandF();
 		if (prob > 0.3f) {
 			return;
 		}
@@ -136,9 +139,8 @@ void Meteor::init(const float& radiantAlpha, const float& radiantDelta,
 		return;
 	}
 
-	// select random magnitude [-3; 4.5]
-	float Mag = (static_cast<float>(qrand()) / (static_cast<float>(RAND_MAX) + 1)) * 7.5f - 3.f;
-
+	// select random magnitude [-4.5; 4.5]
+	float Mag = StelApp::getInstance().getRandF() * 9.0f - 4.5f;
 	// compute RMag and CMag
 	RCMag rcMag;
 	m_core->getSkyDrawer()->computeRCMag(Mag, &rcMag);
@@ -192,7 +194,7 @@ bool Meteor::update(double deltaTime)
 	}
 
 	// update apparent magnitude based on distance to observer
-	float scale = std::pow(m_minDist / static_cast<float>(m_position.length()), 2);
+	float scale = std::pow(m_minDist / static_cast<float>(m_position.norm()), 2);
 	m_aptMag = m_absMag * qMin(scale, 1.f);
 	m_aptMag = qMax(m_aptMag, 0.f);
 
@@ -231,9 +233,9 @@ Vec4f Meteor::getColorFromName(QString colorName)
 void Meteor::buildColorVectors(const QList<ColorPair> colors)
 {
 	// building color arrays (line and prism)
-	QList<Vec4f> lineColor;
-	QList<Vec4f> trainColor;
-	for (auto color : colors)
+	QVector<Vec4f> lineColor;
+	QVector<Vec4f> trainColor;
+	for (auto &color : colors)
 	{
 		// segments to be painted with the current color
 		int segs = qRound(m_segments * (color.second / 100.f)); // rounds to nearest integer
@@ -268,23 +270,23 @@ void Meteor::buildColorVectors(const QList<ColorPair> colors)
 	// multi-color ?
 	// select a random segment to be the first (to alternate colors)
 	if (colors.size() > 1) {
-		int firstSegment = qRound((segs - 1) * (static_cast<float>(qrand()) / (static_cast<float>(RAND_MAX) + 1))); // [0, segments-1]
-		QList<Vec4f> lineColor2 = lineColor.mid(0, firstSegment);
-		QList<Vec4f> lineColor1 = lineColor.mid(firstSegment);
+		int firstSegment = StelApp::getInstance().getRandBounded(0, segs); // [0, segments-1]
+		QVector<Vec4f> lineColor2 = lineColor.mid(0, firstSegment);
+		QVector<Vec4f> lineColor1 = lineColor.mid(firstSegment);
 		lineColor.clear();
 		lineColor.append(lineColor1);
 		lineColor.append(lineColor2);
 
 		firstSegment *= 2;
-		QList<Vec4f> trainColor2 = trainColor.mid(0, firstSegment);
-		QList<Vec4f> trainColor1 = trainColor.mid(firstSegment);
+		QVector<Vec4f> trainColor2 = trainColor.mid(0, firstSegment);
+		QVector<Vec4f> trainColor1 = trainColor.mid(firstSegment);
 		trainColor.clear();
 		trainColor.append(trainColor1);
 		trainColor.append(trainColor2);
 	}
 
-	m_lineColorVector = lineColor.toVector();
-	m_trainColorVector = trainColor.toVector();
+	m_lineColorVector = lineColor;
+	m_trainColorVector = trainColor;
 }
 
 float Meteor::meteorZ(float zenithAngle, float altitude)
@@ -294,10 +296,9 @@ float Meteor::meteorZ(float zenithAngle, float altitude)
 	if (zenithAngle > 1.13446401f) // > 65 degrees?
 	{
 		const float zcos = cos(zenithAngle);
-		distance = sqrt(EARTH_RADIUS2 * pow(zcos, 2)
-				 + 2 * EARTH_RADIUS * altitude
-				 + pow(altitude, 2));
-		distance -= EARTH_RADIUS * zcos;
+        constexpr auto R = static_cast<float>(EARTH_RADIUS);
+		distance = sqrt(pow(R * zcos, 2) + 2 * R * altitude + pow(altitude, 2));
+		distance -= R * zcos;
 	}
 	else
 	{

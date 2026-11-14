@@ -20,7 +20,6 @@
 #ifndef SKYGUI_HPP
 #define SKYGUI_HPP
 
-#include "StelStyle.hpp"
 #include "StelObject.hpp"
 
 #include <QDebug>
@@ -34,22 +33,23 @@ class StelButton;
 class BottomStelBar;
 class StelProgressController;
 
-//! The informations about the currently selected object
+//! The information about the currently selected object
 class InfoPanel : public QGraphicsTextItem
 {
 	public:
 		//! Reads "gui/selected_object_info", etc from the configuration file.
-		//! @todo Bad idea to read from the configuration file in a constructor? --BM
 		InfoPanel(QGraphicsItem* parent);
-		~InfoPanel();
+		~InfoPanel() override;
 		void setInfoTextFilters(const StelObject::InfoStringGroup& aflags) {infoTextFilters=aflags;}
 		const StelObject::InfoStringGroup& getInfoTextFilters(void) const {return infoTextFilters;}
 		void setTextFromObjects(const QList<StelObjectP>&);
-		const QString getSelectedText(void) const;
+		QString getSelectedText() const; //! same as toPlainText()
+		QString getSelectedHTML() const; //! returns HTML formatted object InfoString
 
 	private:
+		QString infoHTML;
 		StelObject::InfoStringGroup infoTextFilters;
-		QGraphicsPixmapItem *infoPixmap; // Used when text rendering is buggy. Used when CLI option -t given.
+		int opacity; // allows dimming text background. Negative numbers force opacity even for daylight.
 };
 
 //! The class managing the layout for button bars, selected object info and loading bars.
@@ -60,25 +60,32 @@ class SkyGui: public QGraphicsWidget
 public:
 	friend class StelGui;
 	
-	SkyGui(QGraphicsItem * parent=Q_NULLPTR);
+	SkyGui(QGraphicsItem * parent=nullptr);
 	//! Add a new progress bar in the lower right corner of the screen.
 	//! When the progress bar is deleted with removeProgressBar() the layout is automatically rearranged.
-	//! @return a pointer to the progress bar
 	void addProgressBar(StelProgressController*);
 	
 	void init(class StelGui* stelGui);
 	
-	virtual void paint(QPainter*, const QStyleOptionGraphicsItem*, QWidget* = Q_NULLPTR) Q_DECL_OVERRIDE;
+	void paint(QPainter*, const QStyleOptionGraphicsItem*, QWidget* = nullptr) override;
 
+	//! actually returns window width
 	int getSkyGuiWidth() const;
+	//! actually returns window height
 	int getSkyGuiHeight() const;
-	qreal getBottomBarHeight() const; //!< return height of bottom Bar when fully shown
-	qreal getLeftBarWidth() const;    //!< return width of left Bar when fully shown
+	//! return height of bottom Bar when fully shown
+	qreal getBottomBarHeight() const;
+	//! return width of left Bar when fully shown
+	qreal getLeftBarWidth() const;
+	//! return the bounding rectangle of the bottom Bar in SkyGui coordinates (without help label)
+	QRectF getBottomBarRect() const;
+	//! return the bounding rectangle of the left Bar in SkyGui coordinates (without help label)
+	QRectF getLeftBarRect() const;
 	
 protected:
-	virtual void resizeEvent(QGraphicsSceneResizeEvent* event) Q_DECL_OVERRIDE;
-	virtual void hoverMoveEvent(QGraphicsSceneHoverEvent* event) Q_DECL_OVERRIDE;
-	virtual QVariant itemChange(GraphicsItemChange change, const QVariant & value) Q_DECL_OVERRIDE;
+	void resizeEvent(QGraphicsSceneResizeEvent* event) override;
+	void hoverMoveEvent(QGraphicsSceneHoverEvent* event) override;
+	QVariant itemChange(GraphicsItemChange change, const QVariant & value) override;
 
 private slots:
 	//! Load color scheme from the given ini file and section name
@@ -90,12 +97,15 @@ public slots:
 	void updateBarsPos();
 
 private:
-	class StelBarsPath* buttonBarPath;
+	void updateInfoPanelPos();
+
+private:
+	class StelBarsFrame* buttonBarsFrame;
 	QTimeLine* animLeftBarTimeLine;
 	QTimeLine* animBottomBarTimeLine;
-	int lastButtonbarWidth;
-	class LeftStelBar* winBar;
-	BottomStelBar* buttonBar;
+	int lastBottomBarWidth;
+	class LeftStelBar* leftBar;
+	BottomStelBar* bottomBar;
 	class InfoPanel* infoPanel;
 	class StelProgressBarMgr* progressBarMgr;
 
@@ -105,8 +115,13 @@ private:
 
 	class CornerButtons* autoHidebts;
 
-	bool autoHideHorizontalButtonBar;
-	bool autoHideVerticalButtonBar;
+	bool autoHideBottomBar;
+	bool autoHideLeftBar;
+
+	//! If true, the tool bar and dialog bar are docked to the top edge instead of the bottom.
+	bool toolbarAtTop;
+	//! If true, the tool bar and dialog bar are docked to the right edge instead of the left.
+	bool toolbarAtRight;
 	
 	StelGui* stelGui;
 };

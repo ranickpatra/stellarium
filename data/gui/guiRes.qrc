@@ -88,7 +88,7 @@
         <file>miscHorAutoHide-on.png</file>
         <file>miscVertAutoHide-off.png</file>
         <file>miscVertAutoHide-on.png</file>
-        <file>miscWorldMap.png</file>
+        <file>miscWorldMap.jpg</file>
         <file>normalHtml.css</file>
         <file>normalStyle.css</file>
         <file>tabDSO.png</file>
@@ -125,10 +125,12 @@
         <file>tabScripts-selected.png</file>
         <file>tabSky.png</file>
         <file>tabSky-selected.png</file>
+        <file>tabSpeech.png</file>
+        <file>tabSpeech-selected.png</file>
         <file>tabSSO.png</file>
         <file>tabSSO-selected.png</file>
-        <file>tabStarlore.png</file>
-        <file>tabStarlore-selected.png</file>
+        <file>tabSkyCulture.png</file>
+        <file>tabSkyCulture-selected.png</file>
         <file>tabSurveys.png</file>
         <file>tabSurveys-selected.png</file>
         <file>tabTime.png</file>
@@ -173,6 +175,7 @@
         <file>uibtStop.png</file>
         <file>uibtUp-disabled.png</file>
         <file>uibtUp.png</file>
+        <file>uibtTime-disabled.png</file>
         <file>uibtTime.png</file>
         <file>uieBackspaceInputButton.png</file>
         <file>uieCheckbox-checked.png</file>
@@ -196,11 +199,18 @@
         <file>uieSearchBoxBackground.png</file>
         <file>uieSpindown.png</file>
         <file>uieSpindown-pressed.png</file>
-        <file>uieSpinleft.png</file>
-        <file>uieSpinleft-pressed.png</file>
-        <file>uieSpinright.png</file>
-        <file>uieSpinright-pressed.png</file>
+        <file>uieSpindown-aboveNumber.png</file>
         <file>uieSpinup.png</file>
         <file>uieSpinup-pressed.png</file>
+        <file>uieSpinup-aboveNumber.png</file>
+        <file>uieScrollup.png</file>
+        <file>uieScrolldown.png</file>
+        <file>uieScrollleft.png</file>
+        <file>uieScrollright.png</file>
+        <file>uieSpinboxAdd.png</file>
+        <file>uieSpinboxAdd-pressed.png</file>
+        <file>uieSpinboxRemove.png</file>
+        <file>uieSpinboxRemove-pressed.png</file>
+        <file>skyCultureWorldMap.svgz</file>
     </qresource>
 </RCC>

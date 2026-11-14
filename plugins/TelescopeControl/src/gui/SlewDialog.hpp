@@ -28,9 +28,7 @@
 
 #include "StoredPointsDialog.hpp"
 
-#include "StelStyle.hpp"
 #include "StelDialog.hpp"
-#include "StelFileMgr.hpp"
 
 class Ui_slewDialog;
 class TelescopeControl;
@@ -42,15 +40,15 @@ class SlewDialog : public StelDialog
 	Q_OBJECT
 
 public:
-	SlewDialog();
-	virtual ~SlewDialog();
+	SlewDialog(const QString &dialogName=QString("TelescopeDialogSlew"), QObject* parent=nullptr);
+	~SlewDialog() override;
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 	
 protected:
 	//! Initialize the dialog widgets and connect the signals/slots
-	virtual void createDialogContent();
+	void createDialogContent() override;
 	Ui_slewDialog* ui;
 	
 private slots:
@@ -61,6 +59,9 @@ private slots:
 	void slew();
 	//! reads the fields and sync a telescope
 	void sync();
+	//! Sends the abortSlew command to current telescope.
+	//! @note Not all telescopes support Abort! Only a warning is printed to logfile in this case.
+	void abort();
 
 	void addTelescope(int slot, QString name);
 	void removeTelescope(int slot);
@@ -105,8 +106,8 @@ private:
 	void savePointsToFile();
 	void loadPointsFromFile();
 
-	TelescopeControl * telescopeManager =  Q_NULLPTR;
-	StoredPointsDialog * storedPointsDialog = Q_NULLPTR;
+	TelescopeControl * telescopeManager;
+	StoredPointsDialog * storedPointsDialog;
 	QHash<QString, int> connectedSlotsByName;
 	QVariantMap storedPointsDescriptions;
 };

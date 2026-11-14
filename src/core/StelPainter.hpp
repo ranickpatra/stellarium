@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Stellarium
  * Copyright (C) 2008 Fabien Chereau
  *
@@ -20,16 +20,20 @@
 #ifndef STELPAINTER_HPP
 #define STELPAINTER_HPP
 
+#include <memory>
 #include "StelOpenGL.hpp"
 #include "VecMath.hpp"
 #include "StelSphereGeometry.hpp"
 #include "StelProjectorType.hpp"
-#include "StelProjector.hpp"
+#include "StelTextureTypes.hpp"
+#include "StelUtils.hpp"
 #include <QString>
 #include <QVarLengthArray>
 #include <QFontMetrics>
 
+class QOpenGLBuffer;
 class QOpenGLShaderProgram;
+class QOpenGLVertexArrayObject;
 
 //! @class StelPainter
 //! Provides functions for performing openGL drawing operations.
@@ -63,15 +67,6 @@ public:
 		TriangleFan                 = 0x0006  //!< GL_TRIANGLE_FAN
 	};
 
-	enum class DitheringMode
-	{
-		Disabled,    //!< Dithering disabled, will leave the infamous color bands
-		Color565,    //!< 16-bit color (AKA High color) with R5_G6_B5 layout
-		Color666,    //!< TN+film typical color depth in TrueColor mode
-		Color888,    //!< 24-bit color (AKA True color)
-		Color101010, //!< 30-bit color (AKA Deep color)
-	};
-
 	explicit StelPainter(const StelProjectorP& prj);
 	~StelPainter();
 
@@ -92,23 +87,29 @@ public:
 	//! @param x horizontal position of the lower left corner of the first character of the text in pixel.
 	//! @param y vertical position of the lower left corner of the first character of the text in pixel.
 	//! @param str the text to print.
-	//! @param angleDeg rotation angle in degree. Rotation is around x,y.
+	//! @param angleDeg rotation angle in degree. Rotation is around x,y. Only used if noGravity=true
 	//! @param xshift shift in pixel in the rotated x direction.
 	//! @param yshift shift in pixel in the rotated y direction.
 	//! @param noGravity don't take into account the fact that the text should be written with gravity.
-	//! @param v direction vector of object to draw. GZ20120826: Will draw only if this is in the visible hemisphere.
 	void drawText(float x, float y, const QString& str, float angleDeg=0.f,
               float xshift=0.f, float yshift=0.f, bool noGravity=true);
+	//! @param v direction vector of object to draw. Will draw only if this is in the visible hemisphere.
+	//! @param str the text to print.
+	//! @param angleDeg rotation angle in degree. Rotation is around x,y. Only used if noGravity=true
+	//! @param xshift shift in pixel in the rotated x direction.
+	//! @param yshift shift in pixel in the rotated y direction.
+	//! @param noGravity don't take into account the fact that the text should be written with gravity.
 	void drawText(const Vec3d& v, const QString& str, float angleDeg=0.f,
               float xshift=0.f, float yshift=0.f, bool noGravity=true);
 
 	//! Draw the given SphericalRegion.
-	//! @param region The SphericalRegion to draw.
+	//! @param region The SphericalRegion to draw. If observerVelocity is given, it will be modified.
 	//! @param drawMode define whether to draw the outline or the fill or both.
 	//! @param clippingCap if not set to Q_NULLPTR, tells the painter to try to clip part of the region outside the cap.
 	//! @param doSubDivise if true tesselates the object to follow projection distortions.
-	//! Typically set that to false if you think that the region is fully contained in the viewport.
-	void drawSphericalRegion(const SphericalRegion* region, SphericalPolygonDrawMode drawMode=SphericalPolygonDrawModeFill, const SphericalCap* clippingCap=Q_NULLPTR, bool doSubDivise=true, double maxSqDistortion=5.);
+	//!        Typically set that to false if you think that the region is fully contained in the viewport.
+	//! @param observerVelocity precomputed vector shift for aberration correction
+	void drawSphericalRegion(SphericalRegion *region, SphericalPolygonDrawMode drawMode=SphericalPolygonDrawModeFill, const SphericalCap* clippingCap=Q_NULLPTR, bool doSubDivise=true, double maxSqDistortion=5., const Vec3d &observerVelocity=Vec3d(0.));
 
 	void drawGreatCircleArcs(const StelVertexArray& va, const SphericalCap* clippingCap=Q_NULLPTR);
 
@@ -139,6 +140,12 @@ public:
 	//! Draw a simple circle, 2d viewport coordinates in pixel
 	void drawCircle(float x, float y, float r);
 
+	//! Draw a simple ellipse, 2d viewport coordinates in pixel
+	//! @param rx: radius in x axis
+	//! @param ry: radius in y axis
+	//! @param angle: rotation (counterclockwise), radians [0..2pi]
+	void drawEllipse(double x, double y, double rx, double ry, double angle);
+
 	//! Draw a square using the current texture at the given projected 2d position.
 	//! This method is not thread safe.
 	//! @param x x position in the viewport in pixel.
@@ -146,11 +153,14 @@ public:
 	//! @param radius the half size of a square side in pixel.
 	//! @param v direction vector of object to draw. Will draw only if this is in the visible hemisphere.
 	void drawSprite2dMode(float x, float y, float radius);
+	void drawSprite2dMode(const std::vector<Vec2f>& points, float radius);
 	void drawSprite2dMode(const Vec3d& v, float radius);
 
 	//! Same as drawSprite2dMode but don't scale according to display device scaling. 
 	void drawSprite2dModeNoDeviceScale(float x, float y, float radius);
-	
+	void drawSprite2dModeNoDeviceScale(const std::vector<Vec2f>& points, float radius);
+	void drawSprite2dModeNoDeviceScale(float x, float y, float radius, float rotation);
+
 	//! Draw a rotated square using the current texture at the given projected 2d position.
 	//! This method is not thread safe.
 	//! @param x x position in the viewport in pixel.
@@ -197,7 +207,7 @@ public:
 	//!        bottomAngle = 95 degrees = 95*M_PI/180.0f
 	void sSphere(const double radius, const double oneMinusOblateness, const unsigned int slices, const unsigned int stacks,
 		     const bool orientInside = false, const bool flipTexture = false,
-		     const float topAngle = 0.0f, const float bottomAngle = static_cast<float>(M_PI));
+		     const float topAngle = 0.0f, const float bottomAngle = M_PIf);
 
 	//! Generate a StelVertexArray for a sphere.
 	//! @param radius
@@ -212,7 +222,7 @@ public:
 	//!        region around the bottom pole, like South Galactic Pole.
 	static StelVertexArray computeSphereNoLight(double radius, double oneMinusOblateness, unsigned int slices, unsigned int stacks,
 			    int orientInside = 0, bool flipTexture = false,
-			    float topAngle=0.0f, float bottomAngle=static_cast<float>(M_PI));
+			    float topAngle=0.0f, float bottomAngle = M_PIf);
 
 	//! Re-implementation of gluCylinder : glu is overridden for non-standard projection.
 	void sCylinder(double radius, double height, int slices, int orientInside = 0);
@@ -228,7 +238,7 @@ public:
 	static void computeFanDisk(float radius, uint innerFanSlices, uint level, QVector<Vec3d>& vertexArr, QVector<Vec2f>& texCoordArr);
 
 	//! Draw a fisheye texture in a sphere.
-	void sSphereMap(double radius, unsigned int slices, unsigned int stacks, float textureFov = 2.f*static_cast<float>(M_PI), int orientInside = 0);
+	void sSphereMap(double radius, unsigned int slices, unsigned int stacks, float textureFov = 2.f*M_PIf, int orientInside = 0);
 
 	//! Set the font to use for subsequent text drawing.
 	void setFont(const QFont& font);
@@ -254,6 +264,10 @@ public:
 	//! the StelPainter is destroyed.
 	void setBlending(bool enableBlending, GLenum blendSrc = GL_SRC_ALPHA, GLenum blendDst = GL_ONE_MINUS_SRC_ALPHA);
 
+	//! Retrieve current blending configuration
+	//! It is useful to preserve and restore these settings with setBlending() later.
+	bool getBlending(GLenum *src=Q_NULLPTR, GLenum *dst=Q_NULLPTR) const;
+
 	void setDepthTest(bool enable);
 
 	void setDepthMask(bool enable);
@@ -272,6 +286,13 @@ public:
 	//! Sets the color saturation effect value, from 0 (grayscale) to 1 (no effect).
 	void setSaturation(float v) { saturation = v; }
 
+	//! Sets texture color adjustment for subsequent simple textured draws.
+	void setTextureDisplayAdjustment(float gamma, float saturation, float brightness,
+	                                 float contrast, int colorChannel, bool invertedColors,
+	                                 bool premultiplyAlpha, float alpha = 1.f);
+	//! Restores neutral texture color adjustment for subsequent simple textured draws.
+	void resetTextureDisplayAdjustment();
+
 	//! Create the OpenGL shaders programs used by the StelPainter.
 	//! This method needs to be called once at init.
 	static void initGLShaders();
@@ -280,7 +301,7 @@ public:
 	//! This method needs to be called once before exit.
 	static void deinitGLShaders();
 
-	// Thoses methods should eventually be replaced by a single setVertexArray
+	// These methods should eventually be replaced by a single setVertexArray
 	//! use instead of glVertexPointer
 	void setVertexPointer(int size, GLenum type, const void* pointer) {
 		vertexArray.size = size; vertexArray.type = type; vertexArray.pointer = pointer;
@@ -310,6 +331,7 @@ public:
 	//! convenience method that enable and set all the given arrays.
 	//! It is equivalent to calling enableClientStates() and set the array pointer for each array.
 	void setArrays(const Vec3d* vertices, const Vec2f* texCoords=Q_NULLPTR, const Vec3f* colorArray=Q_NULLPTR, const Vec3f* normalArray=Q_NULLPTR);
+	void setArrays(const Vec3d* vertices, const Vec2f* texCoords, const Vec4f* colorArray, const Vec3f* normalArray=Q_NULLPTR);
 	void setArrays(const Vec3f* vertices, const Vec2f* texCoords=Q_NULLPTR, const Vec3f* colorArray=Q_NULLPTR, const Vec3f* normalArray=Q_NULLPTR);
 
 	//! Draws primitives using vertices from the arrays specified by setArrays() or enabled via enableClientStates().
@@ -322,13 +344,12 @@ public:
 
 	//! Draws the primitives defined in the StelVertexArray.
 	//! @param checkDiscontinuity will check and suppress discontinuities if necessary.
-	void drawStelVertexArray(const StelVertexArray& arr, bool checkDiscontinuity=true);
+	//! @param aberration a vector which moves all vertices according to aberration effects. The vector must be transformed to the frame used in the array.
+	void drawStelVertexArray(const StelVertexArray& arr, bool checkDiscontinuity=true, Vec3d aberration=Vec3d(0.));
 
 	//! Link an opengl program and show a message in case of error or warnings.
 	//! @return true if the link was successful.
 	static bool linkProg(class QOpenGLShaderProgram* prog, const QString& name);
-
-	DitheringMode getDitheringMode() const { return ditheringMode; }
 
 private:
 	friend class StelTextureMgr;
@@ -358,7 +379,7 @@ private:
 
 	// From text-use-opengl-buffer
 	static QCache<QByteArray, struct StringTexture> texCache;
-	struct StringTexture* getTexTexture(const QString& str, int pixelSize) const;
+	struct StringTexture* getTextTexture(const QString& str, int pixelSize) const;
 
 	//! Struct describing one opengl array
 	typedef struct ArrayDesc
@@ -368,11 +389,14 @@ private:
 		GLenum type;				// The data type of each coordinate (GL_SHORT, GL_INT, GL_FLOAT, or GL_DOUBLE).
 		const void* pointer;	// Pointer to the first coordinate of the first vertex in the array.
 		bool enabled;			// Define whether the array is enabled or not.
+		size_t vertexSizeInBytes() const;
 	} ArrayDesc;
 
 	//! Project an array using the current projection.
 	//! @return a descriptor of the new array
 	ArrayDesc projectArray(const ArrayDesc& array, int offset, int count, const unsigned short *indices=Q_NULLPTR);
+
+	void drawFixedColorWideLinesAsQuads(const ArrayDesc& vertexArray, int count, int offset, const Mat4f& projMat, DrawingMode mode);
 
 	//! Project the passed triangle on the screen ensuring that it will look smooth, even for non linear distortion
 	//! by splitting it into subtriangles. The resulting vertex arrays are appended to the passed out* ones.
@@ -387,12 +411,24 @@ private:
             double maxSqDistortion=5., int nbI=0,
             bool checkDisc1=true, bool checkDisc2=true, bool checkDisc3=true) const;
 
+	//! Draw the string starting at the given position x/y with the current font. The string is split into single characters and rotated against the view center for planetarium dome use.
+	//! @param x horizontal position of the lower left corner of the first character of the text in pixel.
+	//! @param y vertical position of the lower left corner of the first character of the text in pixel.
+	//! @param str the text to print.
+	//! @param xshift shift in pixel in the rotated x direction.
+	//! @param yshift shift in pixel in the rotated y direction.
 	void drawTextGravity180(float x, float y, const QString& str, float xshift = 0, float yshift = 0);
 
-	// Used by the method below
-	static QVector<Vec3f> smallCircleVertexArray;
-	static QVector<Vec4f> smallCircleColorArray;
+	// Used by the method below.
+	static QVarLengthArray<Vec3f, 128> smallCircleVertexArray;
+	static QVarLengthArray<Vec4f, 128> smallCircleColorArray;
 	void drawSmallCircleVertexArray();
+
+	// more arrays
+	static QVarLengthArray<Vec3f, 4096> polygonVertexArray;
+	static QVarLengthArray<Vec2f, 4096> polygonTextureCoordArray;
+	static QVarLengthArray<Vec3f, 4096> polygonColorArray;
+	static QVarLengthArray<unsigned int, 4096> indexArray;
 
 	//! The associated instance of projector
 	StelProjectorP prj;
@@ -408,6 +444,15 @@ private:
 	Vec4f currentColor;
 	//! Saturation effect adjustment.
 	float saturation = 1.f;
+	float textureGamma = 1.f;
+	float textureSaturation = 1.f;
+	float textureBrightness = 1.f;
+	float textureContrast = 1.f;
+	int textureColorChannel = 0;
+	bool textureInvertedColors = false;
+	bool texturePremultiplyAlpha = false;
+	float textureAlpha = 1.f;
+	bool hasTextureDisplayAdjustment() const;
 
 	static QOpenGLShaderProgram* basicShaderProgram;
 	struct BasicShaderVars {
@@ -420,6 +465,16 @@ private:
 	static QOpenGLShaderProgram* colorShaderProgram;
 	static BasicShaderVars colorShaderVars;
 
+	static QOpenGLShaderProgram* textShaderProgram;
+	struct TextShaderVars {
+		int projectionMatrix;
+		int texCoord;
+		int vertex;
+		int textColor;
+		int texture;
+	};
+	static TextShaderVars textShaderVars;
+
 	static QOpenGLShaderProgram* texturesShaderProgram;
 	struct TexturesShaderVars {
 		int projectionMatrix;
@@ -427,10 +482,17 @@ private:
 		int vertex;
 		int texColor;
 		int texture;
-		int bayerPattern;
-		int rgbMaxValue;
+		int gamma;
+		int saturation;
+		int brightness;
+		int contrast;
+		int colorChannel;
+		int invertedColors;
+		int premultiplyAlpha;
 	};
 	static TexturesShaderVars texturesShaderVars;
+	static QOpenGLShaderProgram* adjustedTexturesShaderProgram;
+	static TexturesShaderVars adjustedTexturesShaderVars;
 	static QOpenGLShaderProgram* texturesColorShaderProgram;
 	struct TexturesColorShaderVars {
 		int projectionMatrix;
@@ -438,15 +500,38 @@ private:
 		int vertex;
 		int color;
 		int texture;
-		int bayerPattern;
-		int rgbMaxValue;
 		int saturation;
+		int gamma;
+		int brightness;
+		int contrast;
+		int colorChannel;
+		int invertedColors;
+		int premultiplyAlpha;
+		int alpha;
 	};
 	static TexturesColorShaderVars texturesColorShaderVars;
 
-	GLuint bayerPatternTex=0;
-	DitheringMode ditheringMode;
-	static DitheringMode parseDitheringMode(QString const& s);
+	static QOpenGLShaderProgram* wideLineShaderProgram;
+	struct WideLineShaderVars {
+		int projectionMatrix;
+		int viewportSize;
+		int lineWidth;
+		int color;
+		int vertex;
+	};
+	static WideLineShaderVars wideLineShaderVars;
+
+	static QOpenGLShaderProgram* colorfulWideLineShaderProgram;
+	struct ColorfulWideLineShaderVars {
+		int projectionMatrix;
+		int viewportSize;
+		int lineWidth;
+		int color;
+		int vertex;
+	};
+	static ColorfulWideLineShaderVars colorfulWideLineShaderVars;
+
+	static bool multisamplingEnabled;
 
 	//! The descriptor for the current opengl vertex array
 	ArrayDesc vertexArray;
@@ -458,7 +543,4 @@ private:
 	ArrayDesc colorArray;
 };
 
-Q_DECLARE_METATYPE(StelPainter::DitheringMode)
-
 #endif // STELPAINTER_HPP
-

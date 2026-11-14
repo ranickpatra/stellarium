@@ -6,13 +6,12 @@ INCLUDE_DIRECTORIES(
      ${CMAKE_BINARY_DIR}/plugins/Satellites/src/gui
 )
 
-LINK_DIRECTORIES(${BUILD_DIR}/src)
+LINK_DIRECTORIES(${CMAKE_BINARY_DIR}/src)
 
 SET(Satellites_SRCS
      gsatellite/gException.hpp
      gsatellite/gSatTEME.cpp
      gsatellite/gSatTEME.hpp
-     gsatellite/mathUtils.cpp
      gsatellite/mathUtils.hpp
      gsatellite/gTime.cpp
      gsatellite/gTime.hpp
@@ -35,27 +34,57 @@ SET(Satellites_SRCS
      SatellitesListModel.cpp
      SatellitesListFilterModel.hpp
      SatellitesListFilterModel.cpp
+)
+
+IF (STELLARIUM_GUI_MODE STREQUAL "Standard")
+LIST(APPEND Satellites_SRCS
      gui/SatellitesDialog.hpp
      gui/SatellitesDialog.cpp
      gui/SatellitesImportDialog.hpp
      gui/SatellitesImportDialog.cpp
+     gui/SatellitesFilterDialog.hpp
+     gui/SatellitesFilterDialog.cpp
+     gui/SatellitesCommDialog.hpp
+     gui/SatellitesCommDialog.cpp
 )
 
 SET(SatellitesDialog_UIS
      gui/satellitesDialog.ui
      gui/satellitesImportDialog.ui
+     gui/satellitesFilterDialog.ui
+     gui/satellitesCommDialog.ui
 )
-QT5_WRAP_UI(SatellitesDialog_UIS_H ${SatellitesDialog_UIS})
+ENDIF (STELLARIUM_GUI_MODE STREQUAL "Standard")
 
 SET(Satellites_RES ../resources/Satellites.qrc)
-QT5_ADD_RESOURCES(Satellites_RES_CXX ${Satellites_RES})
+IF (${QT_VERSION_MAJOR} EQUAL "5")
+     IF (STELLARIUM_GUI_MODE STREQUAL "Standard")
+          QT5_WRAP_UI(SatellitesDialog_UIS_H ${SatellitesDialog_UIS})
+     ENDIF()
+     QT5_ADD_RESOURCES(Satellites_RES_CXX ${Satellites_RES})
+ELSE()
+     IF (STELLARIUM_GUI_MODE STREQUAL "Standard")
+          QT_WRAP_UI(SatellitesDialog_UIS_H ${SatellitesDialog_UIS})
+     ENDIF()
+     QT_ADD_RESOURCES(Satellites_RES_CXX ${Satellites_RES})
+ENDIF()
 
 IF(ENABLE_TESTING)
-    ADD_SUBDIRECTORY(test)
+     ADD_SUBDIRECTORY(test)
 ENDIF(ENABLE_TESTING)
 
 ADD_LIBRARY(Satellites-static STATIC ${Satellites_SRCS} ${Satellites_RES_CXX} ${SatellitesDialog_UIS_H})
-TARGET_LINK_LIBRARIES(Satellites-static Qt5::Core Qt5::Network Qt5::Widgets)
+SET(SATELLITES_DEPS Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::OpenGL)
+IF(NOT USE_BUNDLED_QTCOMPRESS)
+    SET(SATELLITES_DEPS ${SATELLITES_DEPS} Qt${QT_VERSION_MAJOR}::GuiPrivate)
+ENDIF()
+IF(ENABLE_XLSX AND (${SATELLITES_PLUGIN_IRIDIUM} EQUAL "1"))
+    SET(SATELLITES_DEPS ${SATELLITES_DEPS} QXlsx::QXlsx)
+ENDIF()
+IF (${QT_VERSION_MAJOR} EQUAL "6")
+    SET(SATELLITES_DEPS ${SATELLITES_DEPS} Qt${QT_VERSION_MAJOR}::Concurrent)
+ENDIF()
+TARGET_LINK_LIBRARIES(Satellites-static ${SATELLITES_DEPS})
 # The library target "Satellites-static" has a default OUTPUT_NAME of "Satellites-static", so change it.
 SET_TARGET_PROPERTIES(Satellites-static PROPERTIES OUTPUT_NAME "Satellites")
 IF(MSVC)

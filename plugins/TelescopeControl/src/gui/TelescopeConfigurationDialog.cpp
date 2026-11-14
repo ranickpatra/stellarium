@@ -21,16 +21,12 @@
 #include "TelescopeConfigurationDialog.hpp"
 #include "Dialog.hpp"
 #include "StelApp.hpp"
-#include "StelCore.hpp"
-#include "StelFileMgr.hpp"
-#include "StelLocaleMgr.hpp"
 #include "StelModuleMgr.hpp"
-#include "StelStyle.hpp"
 #include "StelTranslator.hpp"
 #include "TelescopeControl.hpp"
 #include "ui_telescopeConfigurationDialog.h"
 
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN)
 	#include "../common/ASCOMSupport.hpp"
 #endif
 
@@ -40,6 +36,7 @@
 #include <QFile>
 #include <QFrame>
 #include <QTimer>
+#include <QRegularExpression>
 #include <QtSerialPort/QSerialPortInfo>
 
 TelescopeConfigurationDialog::TelescopeConfigurationDialog()
@@ -49,14 +46,14 @@ TelescopeConfigurationDialog::TelescopeConfigurationDialog()
 
 	telescopeManager = GETSTELMODULE(TelescopeControl);
 
-	telescopeNameValidator = new QRegExpValidator(QRegExp("[^:\"]+"), this); // Test the update for JSON
+	telescopeNameValidator = new QRegularExpressionValidator(QRegularExpression("[^:\"]+"), this); // Test the update for JSON
 	hostNameValidator =
-	  new QRegExpValidator(QRegExp("[a-zA-Z0-9\\-\\.]+"), this); // TODO: Write a proper host/IP regexp?
-	circleListValidator = new QRegExpValidator(QRegExp("[0-9,\\.\\s]+"), this);
+	  new QRegularExpressionValidator(QRegularExpression("[a-zA-Z0-9\\-\\.]+"), this); // TODO: Write a proper host/IP regexp?
+	circleListValidator = new QRegularExpressionValidator(QRegularExpression("[0-9,\\.\\s]+"), this);
 #ifdef Q_OS_WIN
-	serialPortValidator = new QRegExpValidator(QRegExp("COM[0-9]+"), this);
+	serialPortValidator = new QRegularExpressionValidator(QRegularExpression("COM[0-9]+"), this);
 #else
-	serialPortValidator = new QRegExpValidator(QRegExp("/.*"), this);
+	serialPortValidator = new QRegularExpressionValidator(QRegularExpression("/.*"), this);
 #endif
 }
 
@@ -80,9 +77,9 @@ QStringList* TelescopeConfigurationDialog::listSerialPorts()
 #else
 		plist->append(serialPortInfo.systemLocation());
 #endif
-		qDebug() << "[TelescopeControl] port name:" << serialPortInfo.portName()
-				 << "; vendor identifier:" << serialPortInfo.vendorIdentifier()
-				 << "; product identifier:" << serialPortInfo.productIdentifier();
+		qCDebug(Telescopes) << "Port name:" << serialPortInfo.portName()
+		                    << "; vendor identifier:" << serialPortInfo.vendorIdentifier()
+		                    << "; product identifier:" << serialPortInfo.productIdentifier();
 	}
 
 // on linux find some virtual ports
@@ -135,7 +132,7 @@ void TelescopeConfigurationDialog::createDialogContent()
 	ui->setupUi(dialog);
 
 	// ASCOM Telescope client widget needs to be dynamically added in order to make use of preprocessors to exclude for non-windows
-	#ifdef Q_OS_WIN
+	#if defined(Q_OS_WIN)
 	ascomWidget = new TelescopeClientASCOMWidget(ui->scrollAreaWidgetContents);
 	ui->ASCOMLayout->addWidget(ascomWidget);
 
@@ -145,33 +142,44 @@ void TelescopeConfigurationDialog::createDialogContent()
 	}
 	#endif
 
-	// Inherited connect
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(buttonDiscardPressed()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
-	connect(dialog, SIGNAL(rejected()), this, SLOT(buttonDiscardPressed()));
-
-	// Connect: sender, signal, receiver, member
-	connect(ui->radioButtonTelescopeLocal, SIGNAL(toggled(bool)), this, SLOT(toggleTypeLocal(bool)));
-	connect(ui->radioButtonTelescopeConnection, SIGNAL(toggled(bool)), this, SLOT(toggleTypeConnection(bool)));
-	connect(ui->radioButtonTelescopeVirtual, SIGNAL(toggled(bool)), this, SLOT(toggleTypeVirtual(bool)));
-	connect(ui->radioButtonTelescopeRTS2, SIGNAL(toggled(bool)), this, SLOT(toggleTypeRTS2(bool)));
-	connect(ui->radioButtonTelescopeINDI, SIGNAL(toggled(bool)), this, SLOT(toggleTypeINDI(bool)));
-	#ifdef Q_OS_WIN
-	connect(ui->radioButtonTelescopeASCOM, SIGNAL(toggled(bool)), this, SLOT(toggleTypeASCOM(bool)));
+	#ifdef ENABLE_INDI
+	indiWidget = new TelescopeClientINDIWidget(ui->scrollAreaWidgetContents);
+	ui->INDILayout->addWidget(indiWidget);
 	#else
-	ui->radioButtonTelescopeASCOM->hide();
+	ui->radioButtonTelescopeINDI->hide();
 	#endif
 
-	connect(ui->pushButtonSave, SIGNAL(clicked()), this, SLOT(buttonSavePressed()));
-	connect(ui->pushButtonDiscard, SIGNAL(clicked()), this, SLOT(buttonDiscardPressed()));
+	// Inherited connect
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &TelescopeConfigurationDialog::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &TelescopeConfigurationDialog::buttonDiscardPressed);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &TelescopeConfigurationDialog::handleMovedTo);
+	connect(dialog, &QDialog::rejected, this, &TelescopeConfigurationDialog::buttonDiscardPressed);
 
-	connect(ui->comboBoxDeviceModel, SIGNAL(currentIndexChanged(const QString&)), this,
-	  SLOT(deviceModelSelected(const QString&)));
+	// Connect: sender, signal, receiver, member
+	connect(ui->radioButtonTelescopeLocal, &QRadioButton::toggled, this, &TelescopeConfigurationDialog::toggleTypeLocal);
+	connect(ui->radioButtonTelescopeConnection, &QRadioButton::toggled, this, &TelescopeConfigurationDialog::toggleTypeConnection);
+	connect(ui->radioButtonTelescopeVirtual, &QRadioButton::toggled, this, &TelescopeConfigurationDialog::toggleTypeVirtual);
+	connect(ui->radioButtonTelescopeRTS2, &QRadioButton::toggled, this, &TelescopeConfigurationDialog::toggleTypeRTS2);
+	#ifdef ENABLE_INDI
+	connect(ui->radioButtonTelescopeINDI, &QRadioButton::toggled, this, &TelescopeConfigurationDialog::toggleTypeINDI);
+	#endif
+	#ifdef Q_OS_WIN
+		connect(ui->radioButtonTelescopeASCOM, &QRadioButton::toggled, this, &TelescopeConfigurationDialog::toggleTypeASCOM);
+	#else
+		ui->radioButtonTelescopeASCOM->hide();
+	#endif
+
+	connect(ui->pushButtonSave, &QPushButton::clicked, this, &TelescopeConfigurationDialog::buttonSavePressed);
+	connect(ui->pushButtonDiscard, &QPushButton::clicked, this, &TelescopeConfigurationDialog::buttonDiscardPressed);
+
+	connect(ui->comboBoxDeviceModel, qOverload<int>(&QComboBox::currentIndexChanged), this, &TelescopeConfigurationDialog::deviceModelSelected);
+
+	connect(ui->radioButtonNetworkConnection, &QRadioButton::toggled, this, &TelescopeConfigurationDialog::toggleDeviceConnectionMedium);
 
 	// Setting validators
 	ui->lineEditTelescopeName->setValidator(telescopeNameValidator);
 	ui->lineEditHostName->setValidator(hostNameValidator);
+	ui->lineEditDeviceHost->setValidator(hostNameValidator);
 	ui->lineEditCircleList->setValidator(circleListValidator);
 	ui->comboSerialPort->setValidator(serialPortValidator);
 
@@ -196,8 +204,10 @@ void TelescopeConfigurationDialog::initConfigurationDialog()
 	ui->groupBoxConnectionSettings->hide();
 	ui->groupBoxDeviceSettings->hide();
 	ui->groupBoxRTS2Settings->hide();
-	ui->INDIProperties->hide();
-	#ifdef Q_OS_WIN
+	#ifdef ENABLE_INDI
+	indiWidget->hide();
+	#endif
+	#if defined(Q_OS_WIN)
 	ascomWidget->hide();
 	#endif
 
@@ -217,7 +227,11 @@ void TelescopeConfigurationDialog::initConfigurationDialog()
 	QStringList* plist = listSerialPorts();
 	ui->comboSerialPort->clear();
 	ui->comboSerialPort->addItems(*plist);
+#if (QT_VERSION>=QT_VERSION_CHECK(5,14,0))
+	emit ui->comboSerialPort->textActivated(plist->value(0));
+#else
 	ui->comboSerialPort->activated(plist->value(0));
+#endif
 	ui->comboSerialPort->setEditText(plist->value(0));
 	delete (plist);
 
@@ -254,21 +268,21 @@ void TelescopeConfigurationDialog::initNewTelescopeConfiguration(int slot)
 {
 	configuredSlot = slot;
 	initConfigurationDialog();
-	ui->stelWindowTitle->setText(q_("Add New Telescope"));
+	ui->titleBar->setTitle(q_("Add New Telescope"));
 	ui->lineEditTelescopeName->setText(QString("New Telescope %1").arg(QString::number(configuredSlot)));
 
-	ui->doubleSpinBoxTelescopeDelay->setValue(SECONDS_FROM_MICROSECONDS(DEFAULT_DELAY));
+	ui->doubleSpinBoxTelescopeDelay->setValue(SECONDS_FROM_MICROSECONDS(TelescopeControl::DEFAULT_DELAY));
 }
 
 void TelescopeConfigurationDialog::initExistingTelescopeConfiguration(int slot)
 {
 	configuredSlot = slot;
 	initConfigurationDialog();
-	ui->stelWindowTitle->setText(q_("Configure Telescope"));
+	ui->titleBar->setTitle(q_("Configure Telescope"));
 
 	// Read the telescope properties
 	QString name;
-	ConnectionType connectionType;
+	TelescopeControl::ConnectionType connectionType;
 	QString equinox;
 	QString host;
 	int portTCP;
@@ -288,12 +302,13 @@ void TelescopeConfigurationDialog::initExistingTelescopeConfiguration(int slot)
 		  connectAtStartup, circles, deviceModelName, serialPortName, rts2Url, rts2Username, rts2Password,
 		  rts2Refresh, ascomDeviceId, ascomUseDeviceEqCoordType))
 	{
-		// TODO: Add debug
+		// TODO: Add better debug
+		qCWarning(Telescopes) << "Cannot get telescope for slot" << slot;
 		return;
 	}
 	ui->lineEditTelescopeName->setText(name);
 
-	if (connectionType == ConnectionInternal && !deviceModelName.isEmpty())
+	if (connectionType == TelescopeControl::ConnectionInternal && !deviceModelName.isEmpty())
 	{
 		ui->radioButtonTelescopeLocal->setChecked(true);
 		ui->lineEditHostName->setText("localhost"); // TODO: Remove magic word!
@@ -302,32 +317,50 @@ void TelescopeConfigurationDialog::initExistingTelescopeConfiguration(int slot)
 		int index = ui->comboBoxDeviceModel->findText(deviceModelName);
 		if (index < 0)
 		{
-			qDebug() << "TelescopeConfigurationDialog: Current device model is not in the list?";
+			qCWarning(Telescopes) << "TelescopeConfigurationDialog: Current device model is not in the list?";
 			emit changesDiscarded();
 			return;
 		}
 		else
 			ui->comboBoxDeviceModel->setCurrentIndex(index);
 
-		// Initialize the serial port value
-		ui->comboSerialPort->activated(serialPortName);
-		ui->comboSerialPort->setEditText(serialPortName);
+		// A directly-connected device uses either a serial port or a network
+		// (TCP/IP) connection. An empty serial port with a host name stored
+		// means the device protocol is spoken over TCP.
+		if (serialPortName.isEmpty() && !host.isEmpty())
+		{
+			ui->radioButtonNetworkConnection->setChecked(true);
+			ui->lineEditDeviceHost->setText(host);
+			ui->spinBoxDevicePort->setValue(portTCP);
+		}
+		else
+		{
+			ui->radioButtonSerialConnection->setChecked(true);
+			// Initialize the serial port value
+#if (QT_VERSION>=QT_VERSION_CHECK(5,14,0))
+			emit ui->comboSerialPort->textActivated(serialPortName);
+#else
+			ui->comboSerialPort->activated(serialPortName);
+#endif
+			ui->comboSerialPort->setEditText(serialPortName);
+		}
+		updateDeviceConnectionMediumState();
 	}
-	else if (connectionType == ConnectionRemote)
+	else if (connectionType == TelescopeControl::ConnectionRemote)
 	{
 		ui->radioButtonTelescopeConnection->setChecked(true); // Calls toggleTypeConnection(true)
 		ui->lineEditHostName->setText(host);
 	}
-	else if (connectionType == ConnectionLocal)
+	else if (connectionType == TelescopeControl::ConnectionLocal)
 	{
 		ui->radioButtonTelescopeConnection->setChecked(true);
 		ui->lineEditHostName->setText("localhost");
 	}
-	else if (connectionType == ConnectionVirtual)
+	else if (connectionType == TelescopeControl::ConnectionVirtual)
 	{
 		ui->radioButtonTelescopeVirtual->setChecked(true);
 	}
-	else if (connectionType == ConnectionRTS2)
+	else if (connectionType == TelescopeControl::ConnectionRTS2)
 	{
 		ui->radioButtonTelescopeRTS2->setChecked(true);
 		ui->lineEditRTS2Url->setText(rts2Url);
@@ -335,15 +368,17 @@ void TelescopeConfigurationDialog::initExistingTelescopeConfiguration(int slot)
 		ui->lineEditRTS2Password->setText(rts2Password);
 		ui->doubleSpinBoxRTS2Refresh->setValue(SECONDS_FROM_MICROSECONDS(rts2Refresh));
 	}
-	else if (connectionType == ConnectionINDI)
+	#ifdef ENABLE_INDI
+	else if (connectionType == TelescopeControl::ConnectionINDI)
 	{
 		ui->radioButtonTelescopeINDI->setChecked(true);
-		ui->INDIProperties->setHost(host);
-		ui->INDIProperties->setPort(portTCP);
-		ui->INDIProperties->setSelectedDevice(deviceModelName);
+		indiWidget->setHost(host);
+		indiWidget->setPort(portTCP);
+		indiWidget->setSelectedDevice(deviceModelName);
 	}
-	#ifdef Q_OS_WIN
-	else if (connectionType == ConnectionASCOM)
+	#endif
+	#if defined(Q_OS_WIN)
+	else if (connectionType == TelescopeControl::ConnectionASCOM)
 	{
 		ui->radioButtonTelescopeASCOM->setChecked(true);
 		ascomWidget->setSelectedDevice(ascomDeviceId);
@@ -385,11 +420,19 @@ void TelescopeConfigurationDialog::toggleTypeLocal(bool isChecked)
 		// Re-initialize values that may have been changed
 		ui->comboBoxDeviceModel->setCurrentIndex(0);
 		QStringList* plist = listSerialPorts();
+#if (QT_VERSION>=QT_VERSION_CHECK(5,14,0))
+		emit ui->comboSerialPort->textActivated(plist->value(0));
+#else
 		ui->comboSerialPort->activated(plist->value(0));
+#endif
 		ui->comboSerialPort->setEditText(plist->value(0));
 		delete (plist);
 		ui->lineEditHostName->setText("localhost");
 		ui->spinBoxTCPPort->setValue(DEFAULT_TCP_PORT_FOR_SLOT(configuredSlot));
+
+		// Default a directly-connected device to the serial port medium
+		ui->radioButtonSerialConnection->setChecked(true);
+		updateDeviceConnectionMediumState();
 
 		ui->groupBoxDeviceSettings->show();
 
@@ -399,6 +442,39 @@ void TelescopeConfigurationDialog::toggleTypeLocal(bool isChecked)
 	{
 		ui->groupBoxDeviceSettings->hide();
 	}
+}
+
+bool TelescopeConfigurationDialog::currentDeviceModelSupportsNetwork() const
+{
+	const QString deviceModelName = ui->comboBoxDeviceModel->currentText();
+	const QString server = telescopeManager->getDeviceModels().value(deviceModelName).server;
+	return server == QLatin1String("TelescopeServerLx200") ||
+	       server == QLatin1String("TelescopeServerNexStar");
+}
+
+void TelescopeConfigurationDialog::updateDeviceConnectionMediumState()
+{
+	const bool networkSupported = currentDeviceModelSupportsNetwork();
+	ui->radioButtonNetworkConnection->setEnabled(networkSupported);
+	// If the selected device model cannot be reached over the network, fall
+	// back to the serial port medium.
+	if (!networkSupported && ui->radioButtonNetworkConnection->isChecked())
+		ui->radioButtonSerialConnection->setChecked(true);
+
+	const bool network = networkSupported && ui->radioButtonNetworkConnection->isChecked();
+
+	ui->labelSerialPort->setVisible(!network);
+	ui->comboSerialPort->setVisible(!network);
+	ui->labelDeviceHost->setVisible(network);
+	ui->lineEditDeviceHost->setVisible(network);
+	ui->labelDevicePort->setVisible(network);
+	ui->spinBoxDevicePort->setVisible(network);
+}
+
+void TelescopeConfigurationDialog::toggleDeviceConnectionMedium(bool networkChecked)
+{
+	Q_UNUSED(networkChecked)
+	updateDeviceConnectionMediumState();
 }
 
 void TelescopeConfigurationDialog::toggleTypeConnection(bool isChecked)
@@ -421,7 +497,7 @@ void TelescopeConfigurationDialog::toggleTypeConnection(bool isChecked)
 
 void TelescopeConfigurationDialog::toggleTypeVirtual(bool isChecked)
 {
-	Q_UNUSED(isChecked);
+	Q_UNUSED(isChecked)
 	ui->scrollArea->ensureWidgetVisible(ui->groupBoxTelescopeProperties);
 }
 
@@ -442,12 +518,14 @@ void TelescopeConfigurationDialog::toggleTypeRTS2(bool isChecked)
 	}
 }
 
+#ifdef ENABLE_INDI
 void TelescopeConfigurationDialog::toggleTypeINDI(bool enabled)
 {
-	ui->INDIProperties->setVisible(enabled);
+	indiWidget->setVisible(enabled);
 }
+#endif
 
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN)
 void TelescopeConfigurationDialog::toggleTypeASCOM(bool enabled)
 {
 	ascomWidget->setVisible(enabled);	
@@ -487,7 +565,7 @@ void TelescopeConfigurationDialog::buttonSavePressed()
 
 		for (int i = 0; i < circleStrings.size(); i++)
 		{
-			if (i >= MAX_CIRCLE_COUNT) break;
+			if (i >= TelescopeControl::MAX_CIRCLE_COUNT) break;
 			double circle = circleStrings.at(i).toDouble();
 			if (circle > 0.0) circles.append(circle);
 		}
@@ -498,48 +576,64 @@ void TelescopeConfigurationDialog::buttonSavePressed()
 
 	// Type and server properties
 	// TODO: When adding, check for success!
-	ConnectionType type = ConnectionNA;
+	TelescopeControl::ConnectionType type = TelescopeControl::ConnectionNA;
 	if (ui->radioButtonTelescopeLocal->isChecked())
 	{
-		// Read the serial port
-		QString serialPortName = ui->comboSerialPort->currentText();
-		type = ConnectionInternal;
-		telescopeManager->addTelescopeAtSlot(configuredSlot, type, name, equinox, host, portTCP, delay,
-		  connectAtStartup, circles, ui->comboBoxDeviceModel->currentText(), serialPortName);
+		type = TelescopeControl::ConnectionInternal;
+		if (ui->radioButtonNetworkConnection->isChecked() && currentDeviceModelSupportsNetwork())
+		{
+			// Directly connected over TCP/IP (serial device protocol over the network)
+			QString deviceHost = ui->lineEditDeviceHost->text().trimmed();
+			if (deviceHost.isEmpty())
+				return;
+			int devicePort = ui->spinBoxDevicePort->value();
+			// Pass an empty serial port so the slot is stored/started as a
+			// network connection.
+			telescopeManager->addTelescopeAtSlot(configuredSlot, type, name, equinox, deviceHost, devicePort, delay,
+			  connectAtStartup, circles, ui->comboBoxDeviceModel->currentText(), QString());
+		}
+		else
+		{
+			// Read the serial port
+			QString serialPortName = ui->comboSerialPort->currentText();
+			telescopeManager->addTelescopeAtSlot(configuredSlot, type, name, equinox, host, portTCP, delay,
+			  connectAtStartup, circles, ui->comboBoxDeviceModel->currentText(), serialPortName);
+		}
 	}
 	else if (ui->radioButtonTelescopeConnection->isChecked())
 	{
 		if (host == "localhost")
-			type = ConnectionLocal;
+			type = TelescopeControl::ConnectionLocal;
 		else
-			type = ConnectionRemote;
+			type = TelescopeControl::ConnectionRemote;
 		telescopeManager->addTelescopeAtSlot(
 		  configuredSlot, type, name, equinox, host, portTCP, delay, connectAtStartup, circles);
 	}
 	else if (ui->radioButtonTelescopeVirtual->isChecked())
 	{
-		type = ConnectionVirtual;
+		type = TelescopeControl::ConnectionVirtual;
 		telescopeManager->addTelescopeAtSlot(
 		  configuredSlot, type, name, equinox, QString(), portTCP, delay, connectAtStartup, circles);
 	}
 	else if (ui->radioButtonTelescopeRTS2->isChecked())
 	{
-		type = ConnectionRTS2;
+		type = TelescopeControl::ConnectionRTS2;
 		telescopeManager->addTelescopeAtSlot(configuredSlot, type, name, equinox, host, portTCP, delay,
 		  connectAtStartup, circles, QString(), QString(), ui->lineEditRTS2Url->text(),
 		  ui->lineEditRTS2Username->text(), ui->lineEditRTS2Password->text(),
 		  qRound(MICROSECONDS_FROM_SECONDS(ui->doubleSpinBoxRTS2Refresh->value())));
 	}
+	#ifdef ENABLE_INDI
 	else if (ui->radioButtonTelescopeINDI->isChecked())
 	{
-		type = ConnectionINDI;
-		telescopeManager->addTelescopeAtSlot(configuredSlot, type, name, equinox, ui->INDIProperties->host(),
-		  ui->INDIProperties->port(), delay, connectAtStartup, circles, ui->INDIProperties->selectedDevice());
+		type = TelescopeControl::ConnectionINDI;
+		telescopeManager->addTelescopeAtSlot(configuredSlot, type, name, equinox, indiWidget->host(), indiWidget->port(), delay, connectAtStartup, circles, indiWidget->selectedDevice());
 	}
-	#ifdef Q_OS_WIN
+	#endif
+	#if defined(Q_OS_WIN)
 	else if (ui->radioButtonTelescopeASCOM->isChecked())
 	{
-		type = ConnectionASCOM;
+		type = TelescopeControl::ConnectionASCOM;
 		telescopeManager->addTelescopeAtSlot(configuredSlot, type, name, equinox, host, portTCP, delay,
 		  connectAtStartup, circles, QString(), QString(), QString(), QString(), QString(), -1,
 		  ascomWidget->selectedDevice(), ascomWidget->useDeviceEqCoordType());
@@ -554,10 +648,14 @@ void TelescopeConfigurationDialog::buttonDiscardPressed()
 	emit changesDiscarded();
 }
 
-void TelescopeConfigurationDialog::deviceModelSelected(const QString& deviceModelName)
+void TelescopeConfigurationDialog::deviceModelSelected(int modelIndex)
 {
+	const QString& deviceModelName=ui->comboBoxDeviceModel->itemText(modelIndex);
 	ui->labelDeviceModelDescription->setText(
 	  q_(telescopeManager->getDeviceModels().value(deviceModelName).description));
 	ui->doubleSpinBoxTelescopeDelay->setValue(
 	  SECONDS_FROM_MICROSECONDS(telescopeManager->getDeviceModels().value(deviceModelName).defaultDelay));
+
+	// The serial/network choice depends on the selected device model
+	updateDeviceConnectionMediumState();
 }

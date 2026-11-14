@@ -17,18 +17,12 @@
  * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
  */
 
-#include "StelApp.hpp"
+#include "Dithering.hpp"
+#include "StelMainView.hpp"
 #include "StelTextureMgr.hpp"
-#include "StelFileMgr.hpp"
-#include "StelUtils.hpp"
-#include "StelPainter.hpp"
 
 #include <QFileInfo>
-#include <QFile>
-#include <QDebug>
-#include <QNetworkRequest>
 #include <QThread>
-#include <QSettings>
 #include <cstdlib>
 #include <QOpenGLContext>
 #include <QThreadPool>
@@ -37,8 +31,7 @@ StelTextureMgr::StelTextureMgr(QObject *parent)
 	: QObject(parent), glMemoryUsage(0), loaderThreadPool(new QThreadPool(this))
 {
 #ifdef Q_PROCESSOR_X86_64
-	//allow up to 4 textures to be loaded in parallel on 64 bit
-	loaderThreadPool->setMaxThreadCount(std::min(4,QThread::idealThreadCount()));
+	loaderThreadPool->setMaxThreadCount(QThread::idealThreadCount());
 #else
 	//on other archs, for now ensure that just 1 texture is at once in background
 	//otherwise, for large textures loaded in parallel (some scenery3d scenes), the risk of an out-of-memory error is greater on 32bit systems
@@ -48,10 +41,13 @@ StelTextureMgr::StelTextureMgr(QObject *parent)
 	QOpenGLContext* ctx = QOpenGLContext::currentContext();
 	ctx->functions()->glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTexSize);
 	if (maxTexSize<8192)
-		qDebug() << "Max texture size:" << maxTexSize;
+		qCDebug(Tex) << "Max texture size:" << maxTexSize;
+	StelTexture::textureMgr = this;
+
+	connect(&StelMainView::getInstance(), &StelMainView::frameFinished, this, &StelTextureMgr::onFrameFinished);
 }
 
-StelTextureSP StelTextureMgr::createTexture(const QString& afilename, const StelTexture::StelTextureParams& params)
+StelTextureSP StelTextureMgr::createTexture(const QString& afilename, const StelTexture::Params& params)
 {
 	QFileInfo file(afilename);
 	QString canPath;
@@ -59,7 +55,7 @@ StelTextureSP StelTextureMgr::createTexture(const QString& afilename, const Stel
 	if(!file.exists())
 	{
 		canPath="<fuchsia>"; // code name for "utterly broken texture"
-		qWarning()<<"Texture"<<afilename<<"does not exist. Replacing by Fuchsia color.";
+		qCWarning(Tex)<<"Texture"<<afilename<<"does not exist. Replacing by Fuchsia color.";
 	}
 	else
 		canPath = file.canonicalFilePath();
@@ -70,7 +66,7 @@ StelTextureSP StelTextureMgr::createTexture(const QString& afilename, const Stel
 	StelTextureSP cache = lookupCache(canPath);
 	if(!cache.isNull()) return cache;
 
-	StelTextureSP tex = StelTextureSP(new StelTexture(this));
+	StelTextureSP tex = StelTextureSP(new StelTexture);
 	tex->fullPath = canPath;
 
 	QImage image(tex->fullPath);
@@ -87,13 +83,19 @@ StelTextureSP StelTextureMgr::createTexture(const QString& afilename, const Stel
 
 		image=QImage(fuchsia_xpm);
 		if (image.isNull())
-			qWarning() << "Loading Fuchsia replacement failed.";
+			qCWarning(Tex) << "Loading Fuchsia replacement failed.";
+	}
+
+	if ((image.width()<16) && (image.height()<16))
+	{
+		qCWarning(Tex) << "Undersize texture image" << tex->fullPath << "needs rescaling to 16x16 ...";
+		image=image.scaled(qMax(image.width(), 16), qMax(image.height(), 16), Qt::IgnoreAspectRatio, Qt::FastTransformation);
 	}
 
 	// Try to use a texture image even if of excessive size.
 	if ((image.width()>maxTexSize) || (image.height()>maxTexSize))
 	{
-		qWarning() << "Oversize texture image" << tex->fullPath << "needs rescaling to" << qMin(image.width(), maxTexSize) << "x" << qMin(image.height(), maxTexSize) << "...";
+		qCWarning(Tex) << "Oversize texture image" << tex->fullPath << "needs rescaling to" << qMin(image.width(), maxTexSize) << "x" << qMin(image.height(), maxTexSize) << "...";
 		image=image.scaled(qMin(image.width(), maxTexSize), qMin(image.height(), maxTexSize), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
 	}
 
@@ -120,24 +122,24 @@ StelTextureSP StelTextureMgr::createTexture(const QString& afilename, const Stel
 		".*.*.*.*"
 		};
 		image=QImage(chess_xpm);
-		qWarning() << "Unclear error: " << tex->getErrorMessage();
+		qCWarning(Tex) << "Unclear error: " << tex->getErrorMessage();
 
 		if (tex->glLoad(image))
 		{
-			qWarning() << "Now using checkerboard texture instead of " << tex->fullPath;
+			qCWarning(Tex) << "Now using checkerboard texture instead of " << tex->fullPath;
 			textureCache.insert(canPath,tex);
 			return tex;
 		}
 		else
 		{
-			qWarning() << "Cannot load any texture for" << tex->fullPath << ":" << tex->getErrorMessage();
+			qCWarning(Tex) << "Cannot load any texture for" << tex->fullPath << ":" << tex->getErrorMessage();
 			return StelTextureSP();
 		}
 	}
 }
 
 
-StelTextureSP StelTextureMgr::createTextureThread(const QString& url, const StelTexture::StelTextureParams& params, bool lazyLoading)
+StelTextureSP StelTextureMgr::createTextureThread(const QString& url, const StelTexture::Params& params, bool lazyLoading)
 {
 	if (url.isEmpty())
 		return StelTextureSP();
@@ -151,7 +153,7 @@ StelTextureSP StelTextureMgr::createTextureThread(const QString& url, const Stel
 
 	if(canPath.isEmpty()) //file does not exist
 	{
-		qWarning()<<"Texture"<<url<<"does not exist";
+		qCWarning(Tex)<<"Texture"<<url<<"does not exist";
 		return StelTextureSP();
 	}
 
@@ -162,12 +164,12 @@ StelTextureSP StelTextureMgr::createTextureThread(const QString& url, const Stel
 	StelTextureSP cache = lookupCache(canPath);
 	if(!cache.isNull()) return cache;
 
-	StelTextureSP tex = StelTextureSP(new StelTexture(this));
+	StelTextureSP tex = StelTextureSP(new StelTexture);
 	tex->loadParams = params;
 	tex->fullPath = canPath;
 	if (!lazyLoading)
 	{
-		//use load() instead of bind() to prevent potential - if very unlikey - OpenGL errors
+		//use load() instead of bind() to prevent potential - if very unlikely - OpenGL errors
 		//because GL must be called in the main thread
 		tex->load();
 	}
@@ -175,13 +177,27 @@ StelTextureSP StelTextureMgr::createTextureThread(const QString& url, const Stel
 	return tex;
 }
 
-//! Create a texture from a QImage.
-StelTextureSP StelTextureMgr::createTexture(const QImage &image, const StelTexture::StelTextureParams& params)
+void StelTextureMgr::onFrameFinished()
 {
-	bool r;
-	StelTextureSP tex = StelTextureSP(new StelTexture(this));
+	totalLoadTimeTaken = 0;
+}
+
+void StelTextureMgr::reportTextureLoadStart()
+{
+	textureLoadTimer.start();
+}
+
+void StelTextureMgr::reportTextureLoadEnd()
+{
+	totalLoadTimeTaken += textureLoadTimer.nsecsElapsed();
+}
+
+//! Create a texture from a QImage.
+StelTextureSP StelTextureMgr::createTexture(const QImage &image, const StelTexture::Params& params)
+{
+	StelTextureSP tex = StelTextureSP(new StelTexture);
 	tex->loadParams = params;
-	r = tex->glLoad(image);
+	bool r = tex->glLoad(image);
 	Q_ASSERT(r);
 	return tex;
 }
@@ -206,7 +222,7 @@ StelTextureSP StelTextureMgr::wrapperForGLTexture(GLuint texId)
 
 
 	//no existing tex with this ID found, create a new wrapper
-	StelTextureSP newTex(new StelTexture(this));
+	StelTextureSP newTex(new StelTexture);
 	newTex->wrapGLTexture(texId);
 	if(!newTex->errorOccured)
 	{
@@ -216,7 +232,33 @@ StelTextureSP StelTextureMgr::wrapperForGLTexture(GLuint texId)
 	else
 	{
 		//error while wrapping
-		qWarning()<<newTex->getErrorMessage();
+		qCWarning(Tex)<<newTex->getErrorMessage();
+		return StelTextureSP();
+	}
+}
+
+StelTextureSP StelTextureMgr::getDitheringTexture(const int samplerToBindTo)
+{
+	if(ditheringTexture)
+	{
+		ditheringTexture->bind(samplerToBindTo);
+		return ditheringTexture;
+	}
+
+	QOpenGLFunctions& gl = *QOpenGLContext::currentContext()->functions();
+	gl.glActiveTexture(GL_TEXTURE0 + samplerToBindTo);
+
+	const auto texId = ForTextureMgr::makeDitherPatternTexture(gl);
+
+	ditheringTexture.reset(new StelTexture);
+	ditheringTexture->wrapGLTexture(texId);
+	if(!ditheringTexture->errorOccured)
+	{
+		return ditheringTexture;
+	}
+	else
+	{
+		qCWarning(Tex) << "Failed to wrap dither pattern texture:" << ditheringTexture->getErrorMessage();
 		return StelTextureSP();
 	}
 }

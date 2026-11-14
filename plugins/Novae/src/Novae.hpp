@@ -21,10 +21,8 @@
 
 #include "StelObjectModule.hpp"
 #include "StelObject.hpp"
-#include "StelFader.hpp"
 #include "Nova.hpp"
 #include "StelTextureTypes.hpp"
-#include <QFont>
 #include <QVariantMap>
 #include <QDateTime>
 #include <QList>
@@ -79,15 +77,14 @@ public:
 	};
 
 	Novae();
-	virtual ~Novae();
+	~Novae() override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in the StelModule class
-	virtual void init();
-	virtual void update(double) {;}
-	virtual void draw(StelCore* core);
+	void init() override;
+	void draw(StelCore* core) override;
 	virtual void drawPointer(StelCore* core, StelPainter& painter);
-	virtual double getCallOrder(StelModuleActionName actionName) const;
+	double getCallOrder(StelModuleActionName actionName) const override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in StelObjectModule class
@@ -96,19 +93,19 @@ public:
 	//! @param limitFov the field of view around the position v in which to search for novae.
 	//! @param core the StelCore to use for computations.
 	//! @return a list containing the novae located inside the limitFov circle around position v.
-	virtual QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const;
+	QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const override;
 
 	//! Return the matching Nova object's pointer if exists or Q_NULLPTR.
 	//! @param nameI18n The case in-sensitive localized Nova name
-	virtual StelObjectP searchByNameI18n(const QString& nameI18n) const;
+	StelObjectP searchByNameI18n(const QString& nameI18n) const override;
 
 	//! Return the matching Nova if exists or Q_NULLPTR.
 	//! @param name The case in-sensitive english Nova name
-	virtual StelObjectP searchByName(const QString& name) const;
+	StelObjectP searchByName(const QString& name) const override;
 
 	//! Return the matching Nova if exists or Q_NULLPTR.
 	//! @param id The Nova id
-	virtual StelObjectP searchByID(const QString &id) const
+	StelObjectP searchByID(const QString &id) const override
 	{
 		return qSharedPointerCast<StelObject>(getByID(id));
 	}
@@ -118,17 +115,17 @@ public:
 	//! @param maxNbItem the maximum number of returned object names
 	//! @param useStartOfWords the autofill mode for returned objects names
 	//! @return a list of matching object name by order of relevance, or an empty list if nothing match
-	virtual QStringList listMatchingObjects(const QString& objPrefix, int maxNbItem=5, bool useStartOfWords=false) const;
-	virtual QStringList listAllObjects(bool inEnglish) const;
-	virtual QString getName() const { return "Bright Novae"; }
-	virtual QString getStelObjectType() const { return Nova::NOVA_TYPE; }
+	QVector<QPair<QString,StelObjectP>> listMatchingObjects(const QString& objPrefix, int maxNbItem=5, bool useStartOfWords=false) const override;
+	QVector<QPair<QString,StelObjectP>> listAllObjects(bool inEnglish) const override;
+	QString getName() const  override{ return "Bright Novae"; }
+	QString getStelObjectType() const override { return Nova::NOVA_TYPE; }
 
 	//! get a nova object by identifier
 	NovaP getByID(const QString& id) const;
 
 	//! Implement this to tell the main Stellarium GUI that there is a GUI element to configure this
 	//! plugin.
-	virtual bool configureGui(bool show=true);
+	bool configureGui(bool show=true) override;
 
 	//! Set up the plugin with default values.  This means clearing out the Novae section in the
 	//! main config.ini (if one already exists), and populating it with default values.  It also
@@ -184,20 +181,20 @@ signals:
 public slots:
 	// TODO: Add functions for scripting support
 
-	//! Download JSON from web recources described in the module section of the
+	//! Download JSON from web resources described in the module section of the
 	//! module.ini file and update the local JSON file.
 	void updateJSON(void);
 
 	//! Display a message. This is used for plugin-specific warnings and such
-	void displayMessage(const QString& message, const QString hexColor="#999999");
+	void displayMessage(const QString& message, const QString &hexColor="#999999");
 
 	void reloadCatalog(void);
 
 	//! Connect this to StelApp font size.
-	void setFontSize(int s){font.setPixelSize(s);}
+	void setFontSize(int s){fontSize = s;}
 private:
-	// Font used for displaying our text
-	QFont font;
+	// Fontsize used for displaying our text
+	int fontSize;
 
 	// if existing, delete Novae section in main config.ini, then create with default values
 	void restoreDefaultConfigIni(void);
@@ -247,13 +244,14 @@ private:
 	QDateTime lastUpdate;
 	int updateFrequencyDays;
 
-	void startDownload(QString url);
+	void startDownload(const QString &url);
 	void deleteDownloadProgressBar();
 
 	QSettings* conf;
 
-	// GUI
-	NovaeDialog* configDialog;	
+#ifndef NO_GUI
+	NovaeDialog* configDialog;
+#endif
 
 private slots:
 	//! Check to see if an update is required.  This is called periodically by a timer
@@ -266,6 +264,8 @@ private slots:
 
 	//! Call when button "Save settings" in main GUI are pressed
 	void saveSettings() { saveSettingsToConfig(); }
+
+	void setFlagSyncShowLabels(bool b) { Nova::syncShowLabels = b; }
 };
 
 #include <QObject>
@@ -278,9 +278,9 @@ class NovaeStelPluginInterface : public QObject, public StelPluginInterface
 	Q_PLUGIN_METADATA(IID StelPluginInterface_iid)
 	Q_INTERFACES(StelPluginInterface)
 public:
-	virtual StelModule* getStelModule() const;
-	virtual StelPluginInfo getPluginInfo() const;
-	virtual QObjectList getExtensionList() const { return QObjectList(); }
+	StelModule* getStelModule() const override;
+	StelPluginInfo getPluginInfo() const override;
+	//QObjectList getExtensionList() const override { return QObjectList(); }
 };
 
 #endif /*NOVAE_HPP*/

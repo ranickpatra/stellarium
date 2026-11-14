@@ -21,10 +21,11 @@
 #ifndef SCENERY3DDIALOG_HPP
 #define SCENERY3DDIALOG_HPP
 
+#include <QListWidgetItem>
 #include "StelDialog.hpp"
 #include "S3DEnum.hpp"
-#include "ui_scenery3dDialog.h"
 
+class Ui_scenery3dDialogForm;
 class Scenery3d;
 struct SceneInfo;
 
@@ -32,14 +33,14 @@ class Scenery3dDialog : public StelDialog
 {
 	Q_OBJECT
 public:
-	Scenery3dDialog(QObject* parent = Q_NULLPTR);
-	virtual ~Scenery3dDialog() Q_DECL_OVERRIDE;
+	Scenery3dDialog(QObject* parent = nullptr);
+	~Scenery3dDialog() override;
 
 public slots:
-	virtual void retranslate() Q_DECL_OVERRIDE;
+	void retranslate() override;
 
 protected:
-	virtual void createDialogContent() Q_DECL_OVERRIDE;
+	void createDialogContent() override;
 
 private slots:
 	void on_comboBoxShadowFiltering_currentIndexChanged(int index);
@@ -66,6 +67,8 @@ private slots:
 	void updateShortcutStrings();
 
 	void updateToolTipStrings();
+	//! Connect to the RadioButtons to set coordinate text output
+	void setCoordinateTextStyle();
 
 private:
 	//! Connects the UI to update events from the Scenery3dMgr
@@ -74,7 +77,7 @@ private:
 	void setToInitialValues();
 	void updateTextBrowser(const SceneInfo& si);
 
-	QVector<QAbstractButton*> shortcutButtons;
+	QVector<QWidget*> shortcutButtons; // a collection of checkable Buttons and GroupBoxes
 	Ui_scenery3dDialogForm* ui;
 	Scenery3d* mgr;
 };

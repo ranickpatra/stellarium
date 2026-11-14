@@ -20,65 +20,25 @@
 #include "ui_INDIControlWidget.h"
 
 INDIControlWidget::INDIControlWidget(QSharedPointer<TelescopeClient> telescope, QWidget *parent) :
-    QWidget(parent),
+	QWidget(parent),
 	ui(new Ui::INDIControlWidget),
 	mTelescope(telescope)
 {
-    ui->setupUi(this);
+	ui->setupUi(this);
 
-	QObject::connect(ui->northButton, &QPushButton::pressed, this, &INDIControlWidget::onNorthButtonPressed);
-	QObject::connect(ui->northButton, &QPushButton::released, this, &INDIControlWidget::onNorthButtonReleased);
-	QObject::connect(ui->eastButton, &QPushButton::pressed, this, &INDIControlWidget::onEastButtonPressed);
-	QObject::connect(ui->eastButton, &QPushButton::released, this, &INDIControlWidget::onEastButtonReleased);
-	QObject::connect(ui->southButton, &QPushButton::pressed, this, &INDIControlWidget::onSouthButtonPressed);
-	QObject::connect(ui->southButton, &QPushButton::released, this, &INDIControlWidget::onSouthButtonReleased);
-	QObject::connect(ui->westButton, &QPushButton::pressed, this, &INDIControlWidget::onWestButtonPressed);
-	QObject::connect(ui->westButton, &QPushButton::released, this, &INDIControlWidget::onWestButtonReleased);
+	QObject::connect(ui->moveUp, &QToolButton::pressed,  this, [=](){mTelescope->move(0, speed());});
+	QObject::connect(ui->moveUp, &QToolButton::released, this, [=](){mTelescope->move(0, 0);});
+	QObject::connect(ui->moveRight,  &QToolButton::pressed,  this, [=](){mTelescope->move(270, speed());});
+	QObject::connect(ui->moveRight,  &QToolButton::released, this, [=](){mTelescope->move(270, 0);});
+	QObject::connect(ui->moveDown, &QToolButton::pressed,  this, [=](){mTelescope->move(180, speed());});
+	QObject::connect(ui->moveDown, &QToolButton::released, this, [=](){mTelescope->move(180, 0);});
+	QObject::connect(ui->moveLeft,  &QToolButton::pressed,  this, [=](){mTelescope->move(90, speed());});
+	QObject::connect(ui->moveLeft,  &QToolButton::released, this, [=](){mTelescope->move(90, 0);});
 }
 
 INDIControlWidget::~INDIControlWidget()
 {
-    delete ui;
-}
-
-void INDIControlWidget::onNorthButtonPressed()
-{
-	mTelescope->move(180, speed());
-}
-
-void INDIControlWidget::onNorthButtonReleased()
-{
-	mTelescope->move(180, 0);
-}
-
-void INDIControlWidget::onEastButtonPressed()
-{
-	mTelescope->move(270, speed());
-}
-
-void INDIControlWidget::onEastButtonReleased()
-{
-	mTelescope->move(270, 0);
-}
-
-void INDIControlWidget::onSouthButtonPressed()
-{
-	mTelescope->move(0, speed());
-}
-
-void INDIControlWidget::onSouthButtonReleased()
-{
-	mTelescope->move(0, 0);
-}
-
-void INDIControlWidget::onWestButtonPressed()
-{
-	mTelescope->move(90, speed());
-}
-
-void INDIControlWidget::onWestButtonReleased()
-{
-	mTelescope->move(90, 0);
+	delete ui;
 }
 
 double INDIControlWidget::speed() const

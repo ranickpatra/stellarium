@@ -1,3 +1,413 @@
+26.3 [2026-09-28]
+Glad to announce the release of Stellarium 26.3 for all platforms. 
+This is our third release in 2026 with exciting features and many 
+bug fixes.
+
+The major changes of this version:
+- Added Potawatomi skyculture
+- Added new plugin: Object visibility
+- Many improvements in plugins
+- Many improvements in Core and GUI
+- Many updates in sky cultures
+- Improvements in scripting engine
+
+Thanks to all the developers, testers, and users who made this 
+release possible with your contributions and feedback.
+
+26.2 [2026-06-24]
+Glad to announce the release of Stellarium 26.2 for all platforms. 
+This is our second release in 2026 with exciting features and many 
+bug fixes.
+
+The major changes of this version:
+- Added new sky culture
+- Added new plugin: Planes
+- Many improvements in plugins
+- Many improvements in Core and GUI
+- Many updates in sky cultures
+
+Thanks to all the developers, testers, and users who made this 
+release possible with your contributions and feedback.
+
+26.1 [2026-04-05]
+Glad to announce the release of Stellarium 26.1 for all platforms. 
+This is our first release in 2026 with exciting features and many 
+bug fixes.
+
+The major changes of this version:
+- Added two new sky cultures
+- Added Time Navigator plugin
+- Many significant improvements in sky cultures support
+- Many improvements in plugins
+- Many improvements in Core and GUI
+- Many updates in sky cultures
+
+Thanks to all the developers, testers, and users who made this 
+release possible with your contributions and feedback.
+
+25.4 [2025-12-29]
+Glad to announce the release of Stellarium 25.4 for all platforms. 
+This is our final release in 2025 with exciting features and many 
+bug fixes.
+
+The major changes of this version:
+- Added initial support of narration
+- Added new sky cultures
+- Many improvements in Sky Culture Maker plugin
+- Many improvements in Core
+- Many updates in sky cultures
+
+Thanks to all the developers, testers, and users who made this 
+release possible with your contributions and feedback.
+
+25.3 [2025-09-29]
+Glad to announce the release of Stellarium 25.3 for all platforms. 
+This is our third release in 2025 with exciting features and many 
+bug fixes.
+
+The major changes of this version:
+- Many changes in support of sky cultures
+- Added new plugins: Sky Culture Maker
+- Many improvements in Core and AstroCalc
+- Many updates in sky cultures
+
+Thanks to all the developers, testers, and users who made this 
+release possible with your contributions and feedback.
+
+25.2 [2025-06-22]
+Glad to announce the release of Stellarium 25.2 for all platforms. 
+This is our second release in 2025 with exciting features and many 
+bug fixes.
+
+The major changes of this version:
+- Many changes in support of sky cultures
+- Added 2 new plugins: Mosaic Camera and Custom Nebula Textures
+- Many improvements in Core
+- Updates in sky cultures (include new one)
+
+Thanks to all the developers, testers, and users who made this 
+release possible with your contributions and feedback.
+
+25.1 [2025-03-23]
+Glad to announce the release of Stellarium 25.1 for all platforms. 
+This is our first release in 2025 with exciting features and many 
+bug fixes.
+
+The major changes of this version:
+- Switching to using Gaia DR3 catalog (extra catalogues with more 
+than 220 milliones stars)
+- Full 6D astrometry (2D sky positions, 2D proper motion, parallax, 
+radial velocity) compute for most bright stars (V<10.5)
+- Modelling movement for 15 couples of binary stars
+- New powerful data format for sky cultures
+- Many improvements in Core
+- Improvements in Telescope Control plugin
+- Updates in sky cultures (include new one)
+- Incorporated whole GCVS 5.1 catalog
+- New tool in AstroCalc dialog
+
+Thanks to all the developers, testers, and users who made this 
+release possible with your contributions and feedback.
+
+24.4 [2024-12-22]
+The Stellarium Team has released final version in this year - 24.4.
+
+The major changes of this version:
+- Changed in DSO rendering
+- Improvements in Core
+- Improvements in Telescope Control plugin
+- Updates in sky cultures
+
+Behind the scenes, many more minor issues were fixed.
+
+24.3 [2024-09-22]
+The Stellarium Team has released version 24.3.
+
+The major changes of this version:
+- Performance improvements for computation of Solar system bodies positions
+- Improvements in plugins and AstroCalc tools
+- Updates in sky cultures
+- Updates in GUI
+
+Behind the scenes, many more minor issues were fixed.
+
+TELESCOPE USERS
+
+We have identified and fixed some bugs in the TelescopeControl plugin on
+the Qt6-based releases.
+
+Telescope users, please try whether this solves your problems.
+If not, we are looking for those of you with programming skills to help
+us fixing remaining issues. Reward possible!
+
+24.2 [2024-06-23]
+The Stellarium Team has released version 24.2.
+
+The major changes of this version:
+- Improvements in plugins and AstroCalc tools
+- Updates in sky cultures
+- Updates in GUI
+
+Behind the scenes, many more minor issues were fixed.
+
+TELESCOPE USERS
+
+We have identified and fixed some bugs in the TelescopeControl plugin on
+the Qt6-based releases.
+
+Telescope users, please try whether this solves your problems.
+If not, we are looking for those of you with programming skills to help
+us fixing remaining issues. Reward possible!
+
+24.1 [2024-03-25]
+The Stellarium Team has released version 24.1.
+
+The major changes of this version:
+- Added low graphics mode
+- Improvements in plugins and AstroCalc tools
+- Improvements in Scripting Engine
+- Updates in Core
+
+Behind the scenes, many more minor issues were fixed.
+
+TELESCOPE USERS
+
+We have identified and fixed some bugs in the TelescopeControl plugin on
+the Qt6-based releases.
+
+Telescope users, please try whether this solves your problems.
+If not, we are looking for those of you with programming skills to help
+us fixing remaining issues. Reward possible!
+
+23.4 [2023-12-23]
+The Stellarium Team has released version 23.4.
+
+The major changes of this version:
+- New plugin: Lens Distortion Estimator (experimental)
+- Changed GUI: ability to change the look via normalStyle.css
+- Added new MESA for Windows packages
+- Added support Windows/ARM64 packages
+- Added support the origins of nomenclature names
+- Improvements in plugins and AstroCalc tools
+- Improvements for performance on macOS/ARM64
+
+Behind the scenes, many more minor issues were fixed.
+
+TELESCOPE USERS
+
+We have identified and fixed some bugs in the TelescopeControl plugin on
+the Qt6-based releases.
+
+Telescope users, please try whether this solves your problems.
+If not, we are looking for those of you with programming skills to help
+us fixing remaining issues. Reward possible!
+
+23.3 [2023-09-25]
+The Stellarium Team has released version 23.3.
+
+The major changes of this version:
+- New plugin: Missing Stars
+- Allow semitransparent landscapes
+- Added discovery circumstances for Solar system bodies
+- Improve orbit drawing for minor bodies
+- Show named impact features as ellipses
+- Major changes in Navigational Stars plugin
+- Observing List fixes
+- Unambiguous comet names
+
+Behind the scenes, many more minor issues were fixed.
+
+TELESCOPE USERS
+
+We have identified and fixed some bugs in the TelescopeControl plugin on
+the Qt6-based releases.
+
+Telescope users, please try whether this solves your problems.
+If not, we are looking for those of you with programming skills to help
+us fixing remaining issues. Reward possible!
+
+23.2 [2023-07-02]
+The Stellarium Team has released version 23.2.
+
+The major changes of this version:
+- vectorize marker of deep-sky objects
+- updated support locations
+- discovery circumstances for solar system objects
+
+Behind the scenes, many more minor issues were fixed.
+
+TELESCOPE USERS
+
+Like in the 1.* series, it seems the TelescopeControl plugin at least on
+Windows works better in the Qt5-based releases. Just install this if you
+are affected. We are looking for telescope users with programming skills
+to help us fixing this issue. Reward possible!
+
+23.1 [2023-03-27]
+The Stellarium Team has released version 23.1.
+
+From now on, releases will have version numbers indicating a year.release 
+scheme. For Windows, the version of the Qt framework used is visible as part 
+of the package name. Details are in the User Guide.
+
+PLEASE UPDATE!
+
+This issue mitigates a potential security issue (reported as CVE-2023-28371), 
+where scripts were allowed to write output text and screenshots to other places 
+on users' systems apart from the Stellarium user data directory or configured 
+screenshot directory. Running unknown scripts (which is a Bad Idea(tm) to begin 
+with) could have exploited that by attackers (script authors) writing even 
+command files to vulnerable places. We have not received a report where this
+would have caused a problem.
+
+However, now users must explicitly allow such behaviour in the settings
+tab of the Script Console.
+
+Apart from that, this release mostly aimed at fixing issues in the 1.*
+series, but also brought a few new features:
+- Much improved "Solar System observer" and other "Planet observers".
+- Solar dates along the ecliptic
+- Fixed issues with Observation Lists, and removed need for the extra
+  edit dialog.
+- Updated shader code for smoother projection
+- Allow texture decimation on the fly for very weak systems like
+  Raspberry Pi 3.
+- Solar limb darkening
+- Proper shadow edge for satellites
+
+Behind the scenes, many more minor issues were fixed.
+
+TELESCOPE USERS
+
+Like in the 1.* series, it seems the TelescopeControl plugin at least on
+Windows works better in the Qt5-based releases. Just install this if you
+are affected. We are looking for telescope users with programming skills
+to help us fixing this issue. Reward possible!
+
+1.2 [2022-12-25]
+The Stellarium Team has released version 1.2.
+
+This release mostly aimed at fixing issues but also brought a few new features:
+- New projection: Equirectangular (fills the screen)
+- Improved rendering of Milky Way, Zodiacal Light and landscapes
+- Improved rendering of the Moon
+- Improved HiDPI behaviour
+- Use Noto as default font
+- Added Modern (IAU), Tikuna and Seri sky cultures
+- Added Chinese and Bahai calendars (Calendars plugin)
+
+Behind the scenes, several minor issues were fixed.
+
+1.1 [2022-10-31]
+The major changes of this version:
+- Added support OpenGL 3.3 Core profile
+- Changed core: switch to use CalcMySky v0.2.1
+- Changed GUI: allow user CSS
+- Fixed compiling with Qt 6.4
+- Fixed Telescope Control plugin
+
+1.0 [2022-10-01]
+The Stellarium team did it. Stellarium 1.0 is here!
+
+What makes this 1.0?
+
+- After more than 20 years of development the program is finally accurate 
+  enough for historical application.
+- This is the first release based on the Qt6 framework, so the project is 
+  safe for future development. These packages are tagged with a version 
+  number like 1.22.3.
+- We keep releasing Qt5-based packages for legacy or obsolete systems. 
+  This may include many Windows users who have to run ANGLE mode.
+  These packages are tagged with a version number like 0.22.3.
+
+What is new for users?
+
+- A new, much better skylight model (Not for MacOS and OpenGL ES2 systems, 
+  sorry.)
+- Many details around eclipses
+- Updated Observation List features
+- New features in AstroCalc tool
+- HiDPI improvements
+- Better dithering
+- Able to use Windows location service (Windows)
+- New skyculture: Samoan
+- Updated several skycultures
+- Updates in Angle Measure, Satellites, Oculars, Remote Control, Pulsars 
+  plugins
+- Many more bugfixes.
+
+A huge thanks to the people who helped us a lot by reporting bugs, and
+especially contributed in development!
+
+Clear Skies!
+
+Alexander and Georg
+
+0.22.2 [2022-07-07]
+The major changes of this version:
+- Added recognition licenses for skycultures
+- Many improvements in the Satellites plugin, esp. display of earth shadow
+  and filtering
+- Improvements in AstroCalc: graphs, eclipses, transits
+- Improvements in Meteor Showers, Exoplanets and the Navigational Stars plugins
+- Updated DSO catalog
+- Fixed ANGLE mode for some rare cases
+- A large number of bug fixes and closed feature requests and enhancements
+  (see full list of changes).
+
+Behind the scenes, we are preparing for a major upgrade of the internal
+Qt framework.
+
+Enjoy!
+
+Alexander and Georg
+
+0.22.1 [2022-04-16]
+The major changes of this version:
+- Added fixed equatorial grid/line
+- Added new sky cultures
+- Fixed building Stellarium (AppImage)
+- Updated DSO catalog
+
+0.22.0 [2022-03-27]
+The major changes of this version:
+- AstroCalc: Eclipse Finder
+- AstroCalc: RTS (Rises, Transits, Settings)
+- Switch from Bortle scale to physical brightness values for light pollution.
+- Allow tweaks for the atmosphere brightness/color model and tone mapping
+- Several new calendars in the Calendars plugin
+- Seasonal polar caps on Mars
+- New and improved sky cultures
+- Larger textures allowed in Scenery3D
+- Improved OnlineQueries and Satellites plugin
+- Many fixes in core and plugins.
+- Technical preparations towards a major upgrade of the internal Qt framework.
+
+0.21.3 [2021-12-25]
+The major changes of this version:
+- Better handling of minor bodies with outdated orbital elements
+- "Goto next day at same altitude" functionality for selected objects
+- Mark a few special points on the planets
+- Three refined Arab skycultures
+- Updated Mul-Apin skyculture with new artwork
+- Improved OnlineQueries and Satellites plugin
+- Fixed a problem with LX200 telescopes
+- Many fixes in core and plugins
+
+0.21.2 [2021-09-27]
+The major changes of this version:
+- Annual aberration correction. Planet positions are finally very accurate!
+- Bookmarks replaced by Observation Lists
+- Politically neutral geonames
+- Right-click opens plugin configuration
+- Improved computation of rising, transit, setting times
+- "Goto next twilight" functionality
+- Two new Greek skycultures
+- Updated Mul-Apin skyculture with new artwork
+- Improved fidelity of Lunar eclipses
+- Fixed display of stellar proper motion
+- Many fixes in core and plugins
+
 0.21.1 [2021-06-24]
 The major changes of this version:
 - Updated designations of stars and handling of list of designations 

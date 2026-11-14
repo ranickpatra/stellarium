@@ -23,34 +23,39 @@
 #include "StelCore.hpp"
 #include "StelApp.hpp"
 #include "StelTranslator.hpp"
-#include "StelModuleMgr.hpp"
-#include "StelSkyLayerMgr.hpp"
 #include "StelUtils.hpp"
 
 #include <QNetworkReply>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QTimer>
+
+Q_LOGGING_CATEGORY(HiPS,"stel.HiPS", QtInfoMsg)
 
 HipsMgr::HipsMgr()
 {
 	setObjectName("HipsMgr");
-	connect(this, SIGNAL(surveysChanged()), this, SLOT(restoreVisibleSurveys()));
+	connect(this, &HipsMgr::surveysChanged, this, &HipsMgr::restoreVisibleSurveys);
 }
 
 HipsMgr::~HipsMgr()
 {
+#if (QT_VERSION<QT_VERSION_CHECK(6,0,0))
+	// This function is no longer available in Qt6. We assume it is OK to run the code in any case, even if we were not connected.
 	if (StelApp::getInstance().getNetworkAccessManager()->networkAccessible()==QNetworkAccessManager::Accessible)
+#endif
 	{
 		// Store active HiPS to config.ini if network is available
 		QSettings* conf = StelApp::getInstance().getSettings();
 		conf->beginGroup("hips");
 		conf->setValue("show", getFlagShow());
+		conf->setValue("show_atmospheric_extinction", getFlagShowAtmosphericExtinction());
 
 		// remove 0.18.0 scheme
 		conf->remove("visible");
 
 		QStringList surveyUrls;
-		for (auto survey: surveys)
+		for (auto &survey: surveys)
 		{
 			if (survey->isVisible() && survey->planet.isEmpty())
 				surveyUrls << survey->getUrl();
@@ -72,6 +77,25 @@ HipsMgr::~HipsMgr()
 			}
 			conf->endArray();
 		}
+
+		conf->remove("surveySettings");
+		int settingsIndex = 0;
+		conf->beginWriteArray("surveySettings");
+		for (auto &survey: surveys)
+		{
+			if (survey->isPlanetarySurvey() || survey->hasDefaultDisplaySettings())
+				continue;
+			conf->setArrayIndex(settingsIndex++);
+			conf->setValue("url", survey->getUrl());
+			conf->setValue("gamma", survey->getGamma());
+			conf->setValue("saturation", survey->getSaturation());
+			conf->setValue("brightness", survey->getBrightness());
+			conf->setValue("contrast", survey->getContrast());
+			conf->setValue("opacity", survey->getOpacity());
+			conf->setValue("colorChannel", survey->getColorChannel());
+			conf->setValue("invertedColors", survey->getInvertedColors());
+		}
+		conf->endArray();
 
 		conf->endGroup();
 		conf->sync();
@@ -105,18 +129,20 @@ void HipsMgr::loadSources()
 			<< "https://data.stellarium.org/surveys/hipslist";
 	}
 
-	for (QUrl source: sources)
+	for (QUrl source: std::as_const(sources))
 	{
 		if (source.scheme().isEmpty()) source.setScheme("file");
 		QNetworkRequest req = QNetworkRequest(source);
 		req.setRawHeader("User-Agent", StelUtils::getUserAgentString().toLatin1());
 		QNetworkReply* networkReply = StelApp::getInstance().getNetworkAccessManager()->get(req);
-		connect(networkReply, &QNetworkReply::finished, [=] {
+		connect(networkReply, &QNetworkReply::finished, this, [=] {
 			QByteArray data = networkReply->readAll();
-			QList<HipsSurveyP> newSurveys = HipsSurvey::parseHipslist(data);
-			for (HipsSurveyP survey: newSurveys)
+			QList<HipsSurveyP> newSurveys = HipsSurvey::parseHipslist(source.toString(), data);
+			for (HipsSurveyP &survey: newSurveys)
 			{
-				connect(survey.data(), SIGNAL(propertiesChanged()), this, SIGNAL(surveysChanged()));
+				connect(survey.data(), &HipsSurvey::propertiesChanged, this, &HipsMgr::surveysChanged);
+				connect(survey.data(), &HipsSurvey::visibleChanged, this, &HipsMgr::updateActiveSurveys);
+				connect(survey.data(), &HipsSurvey::displaySettingsChanged, this, &HipsMgr::saveSurveySettings);
 				emit gotNewSurvey(survey);
 			}
 			surveys += newSurveys;
@@ -137,31 +163,37 @@ void HipsMgr::init()
 	QSettings* conf = StelApp::getInstance().getSettings();
 	conf->beginGroup("hips");
 	setFlagShow(conf->value("show", false).toBool());
+	flagShowAtmosphericExtinction = conf->value("show_atmospheric_extinction", false).toBool();
 	int size = conf->beginReadArray("surveys");
 	conf->endArray();	
 	conf->endGroup();
 	bool hasVisibleSurvey = size>0 ? true: false;
 
+#if (QT_VERSION<QT_VERSION_CHECK(6,0,0))
+	// In Qt6 we don't have the online check. We could ping somewhere, or just live with it.
+	// There is QNetworkInformation in Qt6.1, but it may give wrong results under certain circumstances.
+	// https://doc.qt.io/qt-6/qnetworkinformation.html
 	if (StelApp::getInstance().getNetworkAccessManager()->networkAccessible()==QNetworkAccessManager::NotAccessible)
 	{
 		setFlagShow(false);
 		hasVisibleSurvey = false;
 	}
-
+#endif
 	addAction("actionShow_Hips_Surveys", N_("Display Options"), N_("Toggle Hierarchical Progressive Surveys"), "flagShow", "Ctrl+Alt+D");
+	addAction("actionShow_Hips_Surveys_dialog", N_("Display Options"), N_("Toggle HiPS dialog"), this, [this]{emit toggleDialog();});
 
 	// Start loading the sources only after stellarium has time to set up the proxy.
 	// We only do it if we actually have a visible survey.  Otherwise it's
 	// better not to do it until the user open the survey ui so that we
 	// don't make a systematic request to the hipslist files!
 	if (hasVisibleSurvey)
-		QTimer::singleShot(0, this, SLOT(loadSources()));
+		QTimer::singleShot(0, this, &HipsMgr::loadSources);
 }
 
 
 void HipsMgr::restoreVisibleSurveys()
 {
-	//qDebug() << "HipsMgr::restoreVisibleSurveys()";
+	qCDebug(HiPS) << "HipsMgr::restoreVisibleSurveys()";
 	QSettings* conf = StelApp::getInstance().getSettings();
 	conf->beginGroup("hips");
 
@@ -173,11 +205,56 @@ void HipsMgr::restoreVisibleSurveys()
 		QString url = conf->value("url").toString();
 		if (!url.isEmpty())
 		{
-			// qDebug() << "HiPS: Restore visible survey:" << url;
+			qCDebug(HiPS) << "HiPS: Restore visible survey:" << url;
 			HipsSurveyP survey=getSurveyByUrl(url);
 			if (survey)
 				survey->setVisible(true);
 		}
+	}
+	conf->endArray();
+
+	size = conf->beginReadArray("surveySettings");
+	for (int i = 0; i < size; i++)
+	{
+		conf->setArrayIndex(i);
+		const QString url = conf->value("url").toString();
+		HipsSurveyP survey = getSurveyByUrl(url);
+		if (survey && !survey->isPlanetarySurvey())
+		{
+			const QSignalBlocker blocker(survey.data());
+			survey->setDisplaySettings(conf->value("gamma", 1.).toFloat(),
+			                           conf->value("saturation", 1.).toFloat(),
+			                           conf->value("brightness", 1.).toFloat(),
+			                           conf->value("contrast", 1.).toFloat(),
+			                           conf->value("opacity", 1.).toFloat(),
+			                           conf->value("colorChannel", HipsSurvey::ColorChannelRgb).toInt(),
+			                           conf->value("invertedColors", false).toBool());
+		}
+	}
+	conf->endArray();
+	conf->endGroup();
+}
+
+void HipsMgr::saveSurveySettings() const
+{
+	QSettings* conf = StelApp::getInstance().getSettings();
+	conf->beginGroup("hips");
+	conf->remove("surveySettings");
+	int settingsIndex = 0;
+	conf->beginWriteArray("surveySettings");
+	for (auto &survey: surveys)
+	{
+		if (survey->isPlanetarySurvey() || survey->hasDefaultDisplaySettings())
+			continue;
+		conf->setArrayIndex(settingsIndex++);
+		conf->setValue("url", survey->getUrl());
+		conf->setValue("gamma", survey->getGamma());
+		conf->setValue("saturation", survey->getSaturation());
+		conf->setValue("brightness", survey->getBrightness());
+		conf->setValue("contrast", survey->getContrast());
+		conf->setValue("opacity", survey->getOpacity());
+		conf->setValue("colorChannel", survey->getColorChannel());
+		conf->setValue("invertedColors", survey->getInvertedColors());
 	}
 	conf->endArray();
 	conf->endGroup();
@@ -191,20 +268,25 @@ void HipsMgr::draw(StelCore* core)
 {
 	if (!visible) return;
 	StelPainter sPainter(core->getProjection(StelCore::FrameJ2000));
-	for (auto survey: surveys)
+	for (auto &survey: activeSurveys)
 	{
 		if (survey->isVisible() && survey->planet.isEmpty())
 		{
-			survey->draw(&sPainter);
+			survey->draw(&sPainter, 2.0 * M_PI, Q_NULLPTR, flagShowAtmosphericExtinction);
 		}
 	}
 }
 
 void HipsMgr::update(double deltaTime)
 {
-	for (auto survey: surveys)
+	for (auto it = activeSurveys.begin(); it != activeSurveys.end();)
 	{
+		const auto &survey = *it;
 		survey->fader.update(static_cast<int>(deltaTime * 1000));
+		if (!survey->isVisible() && survey->fader.getInterstate() == 0.f)
+			it = activeSurveys.erase(it);
+		else
+			++it;
 	}
 }
 
@@ -217,11 +299,11 @@ double HipsMgr::getCallOrder(StelModuleActionName actionName) const
 
 HipsSurveyP HipsMgr::getSurveyByUrl(const QString &url)
 {
-	for (auto survey: surveys)
+	for (auto &survey: surveys)
 	{
 		if (survey->getUrl() == url) return survey;
 	}
-	return HipsSurveyP(NULL);
+	return HipsSurveyP(Q_NULLPTR);
 }
 
 bool HipsMgr::getFlagShow(void) const
@@ -235,5 +317,32 @@ void HipsMgr::setFlagShow(bool b)
 	{
 		visible = b;
 		emit showChanged(b);
+	}
+	if (!b)
+	{
+		for (auto &survey: surveys)
+		{
+			if (survey->isVisible())
+				survey->hideProgressBar();
+		}
+	}
+}
+
+void HipsMgr::setFlagShowAtmosphericExtinction(bool b)
+{
+	if (flagShowAtmosphericExtinction == b)
+		return;
+	flagShowAtmosphericExtinction = b;
+	StelApp::immediateSave("hips/show_atmospheric_extinction", b);
+	emit flagShowAtmosphericExtinctionChanged(b);
+}
+
+void HipsMgr::updateActiveSurveys()
+{
+	activeSurveys.clear();
+	for (auto &survey: surveys)
+	{
+		if (survey->isVisible() || survey->fader.getInterstate() > 0.f)
+			activeSurveys << survey;
 	}
 }

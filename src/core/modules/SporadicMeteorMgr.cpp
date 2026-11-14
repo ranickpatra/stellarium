@@ -49,7 +49,7 @@ void SporadicMeteorMgr::init()
 {
 	m_bolideTexture = StelApp::getInstance().getTextureManager().createTextureThread(
 				StelFileMgr::getInstallationDir() + "/textures/cometComa.png",
-				StelTexture::StelTextureParams(true, GL_LINEAR, GL_CLAMP_TO_EDGE));
+				StelTexture::Params().enableMipmapGen());
 
 	QSettings* conf = StelApp::getInstance().getSettings();
 	setZHR(conf->value("astro/meteor_zhr", 10).toInt());
@@ -60,7 +60,8 @@ double SporadicMeteorMgr::getCallOrder(StelModuleActionName actionName) const
 {
 	if (actionName == StelModule::ActionDraw)
 	{
-		return GETSTELMODULE(SolarSystem)->getCallOrder(actionName) + 10.;
+		static SolarSystem *ss=GETSTELMODULE(SolarSystem);
+		return ss->getCallOrder(actionName) + 10.;
 	}
 	return 0;
 }
@@ -102,7 +103,7 @@ void SporadicMeteorMgr::update(double deltaTime)
 	float rate = mpf / static_cast<float>(maxMpf);
 	for (int i = 0; i < maxMpf; ++i)
 	{
-		float prob = static_cast<float>(qrand()) / static_cast<float>(RAND_MAX);
+		float prob = StelApp::getInstance().getRandF();
 		if (prob < rate)
 		{
 			SporadicMeteor* m = new SporadicMeteor(core, m_maxVelocity, m_bolideTexture);
@@ -125,7 +126,7 @@ void SporadicMeteorMgr::draw(StelCore* core)
 		return;
 	}
 
-	LandscapeMgr* landmgr = GETSTELMODULE(LandscapeMgr);
+	static LandscapeMgr* landmgr = GETSTELMODULE(LandscapeMgr);
 	if (landmgr->getFlagAtmosphere() && landmgr->getLuminance() > 5.f)
 	{
 		return;
@@ -133,7 +134,7 @@ void SporadicMeteorMgr::draw(StelCore* core)
 
 	// step through and draw all active meteors
 	StelPainter sPainter(core->getProjection(StelCore::FrameAltAz));
-	for (auto* m: activeMeteors)
+	for (auto* m: std::as_const(activeMeteors))
 	{
 		m->draw(core, sPainter);
 	}
@@ -144,6 +145,7 @@ void SporadicMeteorMgr::setZHR(int zhr)
 	if(zhr!=m_zhr)
 	{
 		m_zhr = zhr;
+		StelApp::immediateSave("astro/meteor_zhr", zhr);
 		emit zhrChanged(zhr);
 	}
 }

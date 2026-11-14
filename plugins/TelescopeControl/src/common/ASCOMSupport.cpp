@@ -18,19 +18,43 @@
 
 
 #include "OLE.hpp"
+#include "TelescopeControl.hpp"
 #include "ASCOMSupport.hpp"
 
 
 #ifdef Q_OS_WIN
 
-#include <atlcomcli.h>
 #include <comdef.h>
+#include <QRegularExpression>
 
 #endif // Q_OS_WIN
 
 bool ASCOMSupport::isASCOMSupported()
 {
 	#ifdef Q_OS_WIN
+
+	int majorVersion = getASCOMMajorVersion();
+
+	// Check ASCOM Platform version to be 6 or greater. We apparently need 7 for Qt6!
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+	if (majorVersion >= 7)
+#else
+	if (majorVersion >= 6)
+#endif
+	{
+		return true;
+	}
+
+	return false;
+
+	#else // Q_OS_WIN
+	return false;
+	#endif // Q_OS_WIN
+}
+
+int ASCOMSupport::getASCOMMajorVersion()
+{
+#ifdef Q_OS_WIN
 
 	VARIANT v1;
 	HRESULT hResult;
@@ -42,30 +66,33 @@ bool ASCOMSupport::isASCOMSupported()
 
 	// OLE Problem
 	if (FAILED(hResult) || !initResult) {
+		qCCritical(Telescopes).nospace().noquote() << "ASCOM getASCOMMajorVersion(): initResult = " << initResult
+							   << ", hResult = 0x" << QString::number(unsigned(hResult), 16)
+							   << " = " << QString::number((hResult), 10);
+		qCCritical(Telescopes) << "Problem with ASCOM. Presumably not installed properly?";
 		return false;
-	};
-	
+	}
+
 	hResult = OlePropertyGet(utilDispatch, &v1, const_cast<wchar_t*>(LPlatformVersion));
+	if (hResult != 0)
+		qCInfo(Telescopes) << "ASCOM platformversion call returns (0 = call successful)" << hResult;
 	QString version = QString::fromStdWString(v1.bstrVal);
-	QString majorVersion = "";
+	QString majorVersion;
 
-	QRegExp versionRx("^([^\\.]*)\\.([^\\.]*)$");
-	if (versionRx.exactMatch(version))
+	static const QRegularExpression versionRx("^([^\\.]*)\\.([^\\.]*)$");
+	QRegularExpressionMatch versionMatch=versionRx.match(version);
+	if (versionMatch.hasMatch())
 	{
-		majorVersion = versionRx.cap(1).trimmed();
+		majorVersion = versionMatch.captured(1).trimmed();
+		qCInfo(Telescopes) << "ASCOM platformversion returns version" << version << ", major:" << majorVersion;
+		return majorVersion.toInt();
 	}
 
-	// Check ASCOM Platform version to be 6 or greater
-	if (majorVersion.toInt() >= 6)
-	{
-		return true;
-	}
-	
-	return false;
+	return 0;
 
-	#else // Q_OS_WIN
-	return false;
-	#endif // Q_OS_WIN
+#else // Q_OS_WIN
+	return 0;
+#endif // Q_OS_WIN
 }
 
 const wchar_t* ASCOMSupport::LPlatformVersion = L"PlatformVersion";

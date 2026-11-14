@@ -26,6 +26,8 @@
 #include "StelLocation.hpp"
 #include "StelSkyDrawer.hpp"
 #include "StelPropertyMgr.hpp"
+#include "SolarSystem.hpp"
+#include "Dithering.hpp"
 #include <QString>
 #include <QStringList>
 #include <QTime>
@@ -49,13 +51,13 @@ class StelObserver;
 class StelCore : public QObject
 {
 	Q_OBJECT
-	Q_ENUMS(FrameType)
-	Q_ENUMS(ProjectionType)
-	Q_ENUMS(RefractionMode)
-	Q_ENUMS(DeltaTAlgorithm)
 	Q_PROPERTY(bool flipHorz READ getFlipHorz WRITE setFlipHorz NOTIFY flipHorzChanged)
 	Q_PROPERTY(bool flipVert READ getFlipVert WRITE setFlipVert NOTIFY flipVertChanged)
 	Q_PROPERTY(bool flagUseNutation READ getUseNutation WRITE setUseNutation NOTIFY flagUseNutationChanged)
+	Q_PROPERTY(bool flagUseAberration READ getUseAberration WRITE setUseAberration NOTIFY flagUseAberrationChanged)
+	Q_PROPERTY(double aberrationFactor READ getAberrationFactor WRITE setAberrationFactor NOTIFY aberrationFactorChanged)
+	Q_PROPERTY(bool flagUseParallax READ getUseParallax WRITE setUseParallax NOTIFY flagUseParallaxChanged)
+	Q_PROPERTY(double parallaxFactor READ getParallaxFactor WRITE setParallaxFactor NOTIFY parallaxFactorChanged)
 	Q_PROPERTY(bool flagUseTopocentricCoordinates READ getUseTopocentricCoordinates WRITE setUseTopocentricCoordinates NOTIFY flagUseTopocentricCoordinatesChanged)
 	Q_PROPERTY(ProjectionType currentProjectionType READ getCurrentProjectionType WRITE setCurrentProjectionType NOTIFY currentProjectionTypeChanged)
 	//! This is just another way to access the projection type, by string instead of enum
@@ -66,6 +68,9 @@ class StelCore : public QObject
 	Q_PROPERTY(QString currentTimeZone READ getCurrentTimeZone WRITE setCurrentTimeZone NOTIFY currentTimeZoneChanged)
 	Q_PROPERTY(bool flagUseCTZ READ getUseCustomTimeZone WRITE setUseCustomTimeZone NOTIFY useCustomTimeZoneChanged)
 	Q_PROPERTY(bool flagUseDST READ getUseDST WRITE setUseDST NOTIFY flagUseDSTChanged)
+	Q_PROPERTY(bool startupTimeStop READ getStartupTimeStop WRITE setStartupTimeStop NOTIFY startupTimeStopChanged)
+	Q_PROPERTY(DitheringMode ditheringMode READ getDitheringMode WRITE setDitheringMode NOTIFY ditheringModeChanged)
+	Q_PROPERTY(bool flagClearSky READ getFlagClearSky WRITE setFlagClearSky NOTIFY flagClearSkyChanged)
 
 public:
 	//! @enum FrameType
@@ -73,17 +78,19 @@ public:
 	enum FrameType
 	{
 		FrameUninitialized,			//!< Reference frame is not set (FMajerech: Added to avoid condition on uninitialized value in StelSkyLayerMgr::draw())
-		FrameAltAz,				//!< Altazimuthal reference frame centered on observer.
-		FrameHeliocentricEclipticJ2000,		//!< Fixed-ecliptic reference frame centered on the Sun. GZ: This is J2000 ecliptical / almost VSOP87.
-		FrameObservercentricEclipticJ2000,	//!< Fixed-ecliptic reference frame centered on the Observer. GZ: was ObservercentricEcliptic, but renamed because it is Ecliptic of J2000!
-		FrameObservercentricEclipticOfDate,	//!< Moving ecliptic reference frame centered on the Observer. GZ new for V0.14: Ecliptic of date, i.e. includes the precession of the ecliptic.
+		FrameAltAz,				//!< Altazimuthal reference frame centered on observer: +x=south, +y=east, +z=zenith.
+		FrameHeliocentricEclipticJ2000,		//!< Fixed-ecliptic reference frame centered on the Sun. This is J2000 ecliptical / almost VSOP87.
+		FrameObservercentricEclipticJ2000,	//!< Fixed-ecliptic reference frame centered on the Observer. Was ObservercentricEcliptic, but renamed because it is Ecliptic of J2000!
+		FrameObservercentricEclipticOfDate,	//!< Moving ecliptic reference frame centered on the Observer. Ecliptic of date, i.e. includes the precession of the ecliptic.
 		FrameEquinoxEqu,			//!< Equatorial reference frame at the current equinox centered on the observer.
-								//!< The north pole follows the precession of the planet on which the observer is located.
-								//!< On Earth, this may include nutation if so configured. Has been corrected for V0.14 to really properly reflect ecliptical motion and precession (Vondrak 2011 model) and nutation.
+							//!< The north pole follows the precession of the planet on which the observer is located.
+							//!< On Earth, this may include nutation if so configured. Models ecliptical motion and precession (Vondrak 2011 model) and nutation.
 		FrameJ2000,				//!< Equatorial reference frame at the J2000 equinox centered on the observer. This is also the ICRS reference frame.
+		FrameFixedEquatorial,			//!< Fixed equatorial frame (hour angle/declination). Note that hour angle is counted backwards here and must be treated specially for user I/O.
 		FrameGalactic,				//!< Galactic reference frame centered on observer.
 		FrameSupergalactic			//!< Supergalactic reference frame centered on observer.
 	};
+	Q_ENUM(FrameType)
 
 	//! @enum ProjectionType
 	//! Available projection types. A value of 1000 indicates the default projection
@@ -95,11 +102,14 @@ public:
 		ProjectionOrthographic,		//!< Orthographic projection
 		ProjectionEqualArea,		//!< Equal Area projection
 		ProjectionHammer,		//!< Hammer-Aitoff projection
+		ProjectionMollweide,	//!< Mollweide projection
 		ProjectionSinusoidal,		//!< Sinusoidal projection
 		ProjectionMercator,		//!< Mercator projection
 		ProjectionMiller,		//!< Miller cylindrical projection
 		ProjectionCylinder,		//!< Cylinder projection
+		ProjectionCylinderFill		//!< Cylinder projection, no zoom or movement allowed
 	};
+	Q_ENUM(ProjectionType)
 
 	//! @enum RefractionMode
 	//! Available refraction mode.
@@ -109,48 +119,51 @@ public:
 		RefractionOn,		//!< Always add refraction (i.e. apparent coordinates)
 		RefractionOff		//!< Never add refraction (i.e. geometric coordinates)
 	};
+	Q_ENUM(RefractionMode)
 
 	//! @enum DeltaTAlgorithm
 	//! Available DeltaT algorithms
 	enum DeltaTAlgorithm
 	{
-		WithoutCorrection,			//!< Without correction, DeltaT is Zero. Like Stellarium versions before 0.12.
-		Schoch,					//!< Schoch (1931) algorithm for DeltaT
-		Clemence,					//!< Clemence (1948) algorithm for DeltaT
-		IAU,						//!< IAU (1952) algorithm for DeltaT (based on observations by Spencer Jones (1939))
-		AstronomicalEphemeris,		//!< Astronomical Ephemeris (1960) algorithm for DeltaT
-		TuckermanGoldstine,		//!< Tuckerman (1962, 1964) & Goldstine (1973) algorithm for DeltaT
-		MullerStephenson,			//!< Muller & Stephenson (1975) algorithm for DeltaT
-		Stephenson1978,                     //!< Stephenson (1978) algorithm for DeltaT
-		SchmadelZech1979,			//!< Schmadel & Zech (1979) algorithm for DeltaT
-		MorrisonStephenson1982,	//!< Morrison & Stephenson (1982) algorithm for DeltaT (used by RedShift)
-		StephensonMorrison1984,	//!< Stephenson & Morrison (1984) algorithm for DeltaT
-		StephensonHoulden,			//!< Stephenson & Houlden (1986) algorithm for DeltaT
-		Espenak,					//!< Espenak (1987, 1989) algorithm for DeltaT
-		Borkowski,				//!< Borkowski (1988) algorithm for DeltaT
-		SchmadelZech1988,			//!< Schmadel & Zech (1988) algorithm for DeltaT
-		ChaprontTouze,			//!< Chapront-Touzé & Chapront (1991) algorithm for DeltaT
-		StephensonMorrison1995,	//!< Stephenson & Morrison (1995) algorithm for DeltaT
-		Stephenson1997,                     //!< Stephenson (1997) algorithm for DeltaT
-		ChaprontMeeus,			//!< Chapront, Chapront-Touze & Francou (1997) & Meeus (1998) algorithm for DeltaT
-		JPLHorizons,				//!< JPL Horizons algorithm for DeltaT
-		MeeusSimons,				//!< Meeus & Simons (2000) algorithm for DeltaT
-		MontenbruckPfleger,                 //!< Montenbruck & Pfleger (2000) algorithm for DeltaT
-		ReingoldDershowitz,                 //!< Reingold & Dershowitz (2002, 2007) algorithm for DeltaT
-		MorrisonStephenson2004,	//!< Morrison & Stephenson (2004, 2005) algorithm for DeltaT
-		Reijs,					//!< Reijs (2006) algorithm for DeltaT
-		EspenakMeeus,				//!< Espenak & Meeus (2006) algorithm for DeltaT (Recommended, default)
-		EspenakMeeusZeroMoonAccel,	//!< Espenak & Meeus (2006) algorithm for DeltaT (but without additional Lunar acceleration. FOR TESTING ONLY, NONPUBLIC)
-		Banjevic,					//!< Banjevic (2006) algorithm for DeltaT
-		IslamSadiqQureshi,			//!< Islam, Sadiq & Qureshi (2008 + revisited 2013) algorithm for DeltaT (6 polynomials)
-		KhalidSultanaZaidi,			//!< M. Khalid, Mariam Sultana and Faheem Zaidi polynomial approximation of time period 1620-2013 (2014)
-		StephensonMorrisonHohenkerk2016,    //!< Stephenson, Morrison, Hohenkerk (2016) RSPA paper provides spline fit to observations for -720..2016 and else parabolic fit.
-		Henriksson2017,			//!< Henriksson (2017) algorithm for DeltaT (The solution for Schoch formula for DeltaT (1931), but with ndot=-30.128"/cy^2)
-		Custom					//!< User defined coefficients for quadratic equation for DeltaT
+		WithoutCorrection,               //!< Without correction, DeltaT is Zero. Like Stellarium versions before 0.12.
+		Schoch,                          //!< Schoch (1931) algorithm for DeltaT
+		Clemence,                        //!< Clemence (1948) algorithm for DeltaT
+		IAU,                             //!< IAU (1952) algorithm for DeltaT (based on observations by Spencer Jones (1939))
+		AstronomicalEphemeris,           //!< Astronomical Ephemeris (1960) algorithm for DeltaT
+		TuckermanGoldstine,              //!< Tuckerman (1962, 1964) & Goldstine (1973) algorithm for DeltaT
+		MullerStephenson,                //!< Muller & Stephenson (1975) algorithm for DeltaT
+		Stephenson1978,                  //!< Stephenson (1978) algorithm for DeltaT
+		SchmadelZech1979,                //!< Schmadel & Zech (1979) algorithm for DeltaT
+		MorrisonStephenson1982,          //!< Morrison & Stephenson (1982) algorithm for DeltaT (used by RedShift)
+		StephensonMorrison1984,          //!< Stephenson & Morrison (1984) algorithm for DeltaT
+		StephensonHoulden,               //!< Stephenson & Houlden (1986) algorithm for DeltaT
+		Espenak,                         //!< Espenak (1987, 1989) algorithm for DeltaT
+		Borkowski,                       //!< Borkowski (1988) algorithm for DeltaT
+		SchmadelZech1988,                //!< Schmadel & Zech (1988) algorithm for DeltaT
+		ChaprontTouze,                   //!< Chapront-Touzé & Chapront (1991) algorithm for DeltaT
+		StephensonMorrison1995,          //!< Stephenson & Morrison (1995) algorithm for DeltaT
+		Stephenson1997,                  //!< Stephenson (1997) algorithm for DeltaT
+		ChaprontMeeus,                   //!< Chapront, Chapront-Touze & Francou (1997) & Meeus (1998) algorithm for DeltaT
+		JPLHorizons,                     //!< JPL Horizons algorithm for DeltaT
+		MeeusSimons,                     //!< Meeus & Simons (2000) algorithm for DeltaT
+		MontenbruckPfleger,              //!< Montenbruck & Pfleger (2000) algorithm for DeltaT
+		ReingoldDershowitz,              //!< Reingold & Dershowitz (2002, 2007) algorithm for DeltaT
+		MorrisonStephenson2004,          //!< Morrison & Stephenson (2004, 2005) algorithm for DeltaT
+		Reijs,                           //!< Reijs (2006) algorithm for DeltaT
+		EspenakMeeus,                    //!< Espenak & Meeus (2006) algorithm for DeltaT
+		EspenakMeeusModified,            //!< Espenak & Meeus (2006) algorithm with modified formulae for DeltaT (Recommended, default)
+		EspenakMeeusZeroMoonAccel,       //!< Espenak & Meeus (2006) algorithm for DeltaT (but without additional Lunar acceleration. FOR TESTING ONLY, NONPUBLIC)
+		Banjevic,                        //!< Banjevic (2006) algorithm for DeltaT
+		IslamSadiqQureshi,               //!< Islam, Sadiq & Qureshi (2008 + revisited 2013) algorithm for DeltaT (6 polynomials)
+		KhalidSultanaZaidi,              //!< M. Khalid, Mariam Sultana and Faheem Zaidi polynomial approximation of time period 1620-2013 (2014)
+		StephensonMorrisonHohenkerk2016, //!< Stephenson, Morrison, Hohenkerk (2016) RSPA paper provides spline fit to observations for -720..2019 and else parabolic fit.
+		Henriksson2017,                  //!< Henriksson (2017) algorithm for DeltaT (The solution for Schoch formula for DeltaT (1931), but with ndot=-30.128"/cy^2)
+		Custom                           //!< User defined coefficients for quadratic equation for DeltaT
 	};
+	Q_ENUM(DeltaTAlgorithm)
 
 	StelCore();
-	virtual ~StelCore();
+	~StelCore() override;
 
 	//! Init and load all main core components.
 	void init();
@@ -190,7 +203,7 @@ public:
 	//! Get the current StelSkyDrawer used in the core.
 	const StelSkyDrawer* getSkyDrawer() const{return skyDrawer;}
 
-	//! Get an instance of StelGeodesicGrid which is garanteed to allow for at least maxLevel levels
+	//! Get an instance of StelGeodesicGrid which is guaranteed to allow for at least maxLevel levels
 	const StelGeodesicGrid* getGeodesicGrid(int maxLevel) const;
 
 	//! Get the instance of movement manager.
@@ -221,13 +234,15 @@ public:
 
 	//! Set vision direction
 	void lookAtJ2000(const Vec3d& pos, const Vec3d& up);
-	void setMatAltAzModelView(const Mat4d& mat);
+	// Unused as of 24.1
+	//void setMatAltAzModelView(const Mat4d& mat);
 
 	Vec3d altAzToEquinoxEqu(const Vec3d& v, RefractionMode refMode=RefractionAuto) const;
 	Vec3d equinoxEquToAltAz(const Vec3d& v, RefractionMode refMode=RefractionAuto) const;
 	Vec3d altAzToJ2000(const Vec3d& v, RefractionMode refMode=RefractionAuto) const;
 	Vec3d j2000ToAltAz(const Vec3d& v, RefractionMode refMode=RefractionAuto) const;
 	void j2000ToAltAzInPlaceNoRefraction(Vec3f* v) const {v->transfo4d(matJ2000ToAltAz);}
+	void j2000ToAltAzInPlaceNoRefraction(Vec3d* v) const {v->transfo4d(matJ2000ToAltAz);}
 	Vec3d galacticToJ2000(const Vec3d& v) const;
 	Vec3d supergalacticToJ2000(const Vec3d& v) const;
 	//! Transform position vector v from equatorial coordinates of date (which may also include atmospheric refraction) to those of J2000.
@@ -237,6 +252,8 @@ public:
 	Vec3d equinoxEquToJ2000(const Vec3d& v, RefractionMode refMode=RefractionAuto) const;
 	//! Use fixed matrix to allow fast transformation of positions related to the IAU constellation borders.
 	Vec3d j2000ToJ1875(const Vec3d& v) const;
+	//! Use fixed matrix to allow fast transformation of positions related to the IAU constellation borders.
+	Vec3d j1875ToJ2000(const Vec3d& v) const;
 	//! Transform position vector v from equatorial coordinates J2000 to those of date (optionally corrected by refraction).
 	//! Use refMode=StelCore::RefractionOff if you don't want any atmosphere correction.
 	//! Use refMode=StelCore::RefractionOn to correct observed (apparent) coordinates (which are subject to refraction).
@@ -267,6 +284,9 @@ public:
 	//! Get the modelview matrix for observer-centric equatorial at equinox drawing.
 	StelProjector::ModelViewTranformP getEquinoxEquModelViewTransform(RefractionMode refMode=RefractionAuto) const;
 
+	//! Get the modelview matrix for observer-centric fixed equatorial drawing.
+	StelProjector::ModelViewTranformP getFixedEquatorialModelViewTransform(RefractionMode refMode) const;
+
 	//! Get the modelview matrix for observer-centric altazimuthal drawing.
 	StelProjector::ModelViewTranformP getAltAzModelViewTransform(RefractionMode refMode=RefractionAuto) const;
 
@@ -294,10 +314,14 @@ public:
 
 	//! Return the observer heliocentric ecliptic position (GZ: presumably J2000)
 	Vec3d getObserverHeliocentricEclipticPos() const;
+	//! Return the observer heliocentric ecliptic velocity. This includes orbital and diurnal motion;
+	// diurnal motion is omitted if planetocentric coordinates are in use.
+	Vec3d getObserverHeliocentricEclipticVelocity() const;
 
 	//! Get the information on the current location
 	const StelLocation& getCurrentLocation() const;
 	//! Get the UTC offset on the current location (in hours)
+	//! N.B. This is a rather costly operation. Re-use where possible!
 	double getUTCOffset(const double JD) const;
 
 	QString getCurrentTimeZone() const;
@@ -357,17 +381,27 @@ public:
 
 	Vec3d getMouseJ2000Pos(void) const;
 
+	//! get vector used to compute parallax effect
+	Vec3d getParallaxDiff(double JD) const;
+	//! get vector used to compute aberration effect
+	Vec3d getAberrationVec(double JD) const;
+
+	//! Force clearing framebuffer on next redraw.
+	//! This should also be called while in no-clear mode (painting diurnal star streaks) on major changes which destroy the view:
+	//! Dialog closing or moving, zooming, moving view etc.
+	void setClearSkyOnce();
+
 public slots:
 	//! Smoothly move the observer to the given location
 	//! @param target the target location
 	//! @param duration direction of view move duration in s
 	//! @param durationIfPlanetChange direction of view + planet travel move duration in s.
 	//! This is used only if the destination planet is different from the starting one.
-	void moveObserverTo(const StelLocation& target, double duration=1., double durationIfPlanetChange=1.);
+	void moveObserverTo(const StelLocation& target, double duration=1., double durationIfPlanetChange=1., const QString& landscapeID=QString());
 
 	//! Set the current ProjectionType to use
-	void setCurrentProjectionType(ProjectionType type);
-	ProjectionType getCurrentProjectionType() const;
+	void setCurrentProjectionType(StelCore::ProjectionType type);
+	StelCore::ProjectionType getCurrentProjectionType() const;
 
 	//! Get the current Mapping used by the Projection
 	QString getCurrentProjectionTypeKey(void) const;
@@ -380,9 +414,9 @@ public slots:
 	QStringList getAllProjectionTypeKeys() const;
 
 	//! Set the current algorithm and nDot used therein for time correction (DeltaT)
-	void setCurrentDeltaTAlgorithm(DeltaTAlgorithm algorithm);
+	void setCurrentDeltaTAlgorithm(StelCore::DeltaTAlgorithm algorithm);
 	//! Get the current algorithm for time correction (DeltaT)
-	DeltaTAlgorithm getCurrentDeltaTAlgorithm() const { return currentDeltaTAlgorithm; }
+	StelCore::DeltaTAlgorithm getCurrentDeltaTAlgorithm() const { return currentDeltaTAlgorithm; }
 	//! Get description of the current algorithm for time correction
 	QString getCurrentDeltaTAlgorithmDescription(void) const;
 	//! Get the current algorithm used by the DeltaT
@@ -393,7 +427,7 @@ public slots:
 	//! Set the mask type.
 	void setMaskType(StelProjector::StelProjectorMaskType m);
 
-	//! Set the flag with decides whether to arrage labels so that
+	//! Set the flag with decides whether to arrange labels so that
 	//! they are aligned with the bottom of a 2d screen, or a 3d dome.
 	void setFlagGravityLabels(bool gravity);
 	//! return whether dome-aligned labels are in use
@@ -429,7 +463,7 @@ public slots:
 	//! Setting to a negative value will move the visible horizon down, this may be desired esp. in cylindrical projection.
 	//! Animation is available via StelMovementMgr::moveViewport()
 	void setViewportVerticalOffset(double newOffsetPct);
-	// Set both viewport offsets. Arguments will be clamped to be inside [-50...50]. I (GZ) hope this will avoid some of the shaking.
+	// Set both viewport offsets. Arguments will be clamped to be inside [-50...50].
 	void setViewportOffset(double newHorizontalOffsetPct, double newVerticalOffsetPct);
 
 	//! Can be used in specialized setups, intended e.g. for multi-projector installations with edge blending.
@@ -468,14 +502,25 @@ public slots:
 	//! It is still frequently used in the literature.
 	double getJDE() const;
 
-	//! Get solution of equation of time
-	//! Source: J. Meeus "Astronomical Algorithms" (2nd ed., with corrections as of August 10, 2009) p.183-187.
+	//! Get solution of equation of time [minutes].
+	//! Source: J. Meeus "Astronomical Algorithms" (2nd ed., 1998) 28.3.
 	//! @param JDE JD in Dynamical Time (previously called Ephemeris Time)
 	//! @return time in minutes
 	double getSolutionEquationOfTime(const double JDE) const;
+	//! Get solution of equation of time [minutes] for the current time.
+	//! Source: J. Meeus "Astronomical Algorithms" (2nd ed., with corrections as of August 10, 2009) p.183-187.
+	//! @return time in minutes
+	double getSolutionEquationOfTime() const;
 
 	bool getUseDST() const;
 	void setUseDST(const bool b);
+
+	bool getStartupTimeStop() const;
+	void setStartupTimeStop(const bool b);
+
+	DitheringMode getDitheringMode() const { return ditheringMode; }
+	void setDitheringMode(DitheringMode mode);
+	void setDitheringMode(const QString& modeName);
 
 	bool getUseCustomTimeZone(void) const;
 	void setUseCustomTimeZone(const bool b);
@@ -487,7 +532,7 @@ public slots:
 	//! Get the current date in Modified Julian Day (UT)
 	double getMJDay() const;
 
-	//! Compute DeltaT estimation for a given date.
+	//! Compute DeltaT estimation for a given date [seconds].
 	//! DeltaT is the accumulated effect of earth's rotation slowly getting slower, mostly caused by tidal braking by the Moon.
 	//! For accurate positioning of objects in the sky, we must compute earth-based clock-dependent things like earth rotation, hour angles etc.
 	//! using plain UT, but all orbital motions or rotation of the other planets must be computed in TT, which is a regular time frame.
@@ -502,18 +547,41 @@ public slots:
 	//!       Limits can be queried with getCurrentDeltaTAlgorithmValidRangeDescription()
 
 	double computeDeltaT(const double JD);
-	//! Get current DeltaT.
+	//! Get current DeltaT in seconds.
 	double getDeltaT() const;
 
 	//! @return whether nutation is currently used.
-	bool getUseNutation() const {return flagUseNutation;}
+	bool getUseNutation() const;
 	//! Set whether you want computation and simulation of nutation (a slight wobble of Earth's axis, just a few arcseconds).
-	void setUseNutation(bool use) { if (flagUseNutation != use) { flagUseNutation=use; emit flagUseNutationChanged(use); }}
+	void setUseNutation(bool use);
+
+	//! @return whether aberration is currently used.
+	bool getUseAberration() const;
+	//! Set whether you want computation and simulation of aberration (a slight wobble of stellar positions due to finite speed of light, about 20 arcseconds when observing from earth).
+	void setUseAberration(bool use);
+
+	//! @return aberration factor. 1 is realistic simulation, but higher values may be useful for didactic purposes.
+	double getAberrationFactor() const;
+	//! Set aberration factor. Values are clamped to 0...5. (Values above 5 cause graphical problems.)
+	void setAberrationFactor(double factor);
+
+	QByteArray getAberrationShader() const;
+	void setAberrationUniforms(QOpenGLShaderProgram& program) const;
+
+	//! @return whether parallax effect is currently used.
+	bool getUseParallax() const;
+	//! Set whether you want computation and simulation of parallax effect.
+	void setUseParallax(bool use);
+
+	//! @return parallax factor. 1 is realistic simulation, but higher values may be useful for didactic purposes.
+	double getParallaxFactor() const;
+	//! Set aberration factor. Values are clamped to 0...5. (Values above 5 cause graphical problems.)
+	void setParallaxFactor(double factor);
 
 	//! @return whether topocentric coordinates are currently used.
-	bool getUseTopocentricCoordinates() const {return flagUseTopocentricCoordinates;}
-	//! Set whether you want computation and simulation of nutation (a slight wobble of Earth's axis, just a few arcseconds).
-	void setUseTopocentricCoordinates(bool use) { if (flagUseTopocentricCoordinates!= use) { flagUseTopocentricCoordinates=use; emit flagUseTopocentricCoordinatesChanged(use); }}
+	bool getUseTopocentricCoordinates() const;
+	//! Set whether you want topocentric or planetocentric data
+	void setUseTopocentricCoordinates(bool use);
 
 	//! Return the preset sky time in JD
 	double getPresetSkyTime() const;
@@ -524,6 +592,9 @@ public slots:
 	void setTimeRate(double ts);
 	//! Get time speed in JDay/sec
 	double getTimeRate() const;
+
+	//! Toggle current time speed to zero and back [in JDay/sec]
+	void toggleTimeSpeed();
 
 	void revertTimeDirection(void);
 
@@ -557,7 +628,7 @@ public slots:
 	//! set the initial "today time" from the config file
 	void setInitTodayTime(const QTime& time);
 	//! Set the preset sky time from a QDateTime
-	void setPresetSkyTime(QDateTime dateTime);
+	void setPresetSkyDateTime(QDateTime dateTime);
 
 	//! Add one [Earth, solar] minute to the current simulation time.
 	void addMinute();
@@ -610,8 +681,17 @@ public slots:
 	//! Add one synodic month to the simulation time.
 	void addSynodicMonth();
 
+	//! Add one Metonic cycle (235 synodic months) from the simulation time.
+	void addMetonicCycle();
+
 	//! Add one saros (223 synodic months) to the simulation time.
 	void addSaros();
+
+	//! Add one inex (358 synodic months) to the simulation time.
+	void addInex();
+
+	//! Add one tritos (135 synodic months) to the simulation time.
+	void addTritos();
 
 	//! Add one draconic year to the simulation time.
 	void addDraconicYear();
@@ -634,8 +714,19 @@ public slots:
 	//! Add one tropical year to the simulation time.
 	void addTropicalYear();
 
-	//! Add one calendric month to the simulation time.
-	void addCalendricMonth();
+	//! Add one great year
+	//! Great Year [NASA SP-7, 1965] - the period of one complete cycle of the equinoxes around the ecliptic, about 25,800 years.
+	//! https://web.archive.org/web/20050421192849/http://www.hq.nasa.gov/office/hqlibrary/aerospacedictionary/aerodictall/g.html
+	void addGreatYear();
+
+	//! Add one calendar month to the simulation time.
+	void addCalendarMonth();
+	//! Add one calendar year to the simulation time.
+	void addCalendarYear();
+	//! Add one calendar decade to the simulation time.
+	void addCalendarDecade();
+	//! Add one calendar century to the simulation time.
+	void addCalendarCentury();
 
 	//! Add one Julian year to the simulation time.
 	void addJulianYear();
@@ -646,42 +737,62 @@ public slots:
 	//! Note that 1 GaussY=2 &pi;/k where k is the Gaussian gravitational constant. A massless body orbits one solar mass in 1AU distance in a Gaussian Year.
 	void addGaussianYear();
 
-	//! Subtract one synodic month to the simulation time.
+	//! Subtract one synodic month from the simulation time.
 	void subtractSynodicMonth();
 
-	//! Subtract one saros (223 synodic months) to the simulation time.
+	//! Subtract one Metonic cycle (235 synodic months) from the simulation time.
+	void subtractMetonicCycle();
+
+	//! Subtract one saros (223 synodic months) from the simulation time.
 	void subtractSaros();
 
-	//! Subtract one draconic year to the simulation time.
+	//! Subtract one inex (358 synodic months) from the simulation time.
+	void subtractInex();
+
+	//! Subtract one tritos (135 synodic months) from the simulation time.
+	void subtractTritos();
+
+	//! Subtract one draconic year from the simulation time.
 	void subtractDraconicYear();
-	//! Subtract one draconic month to the simulation time.
+	//! Subtract one draconic month from the simulation time.
 	void subtractDraconicMonth();
 
-	//! Subtract one anomalistic month to the simulation time.
+	//! Subtract one anomalistic month from the simulation time.
 	void subtractAnomalisticMonth();
-	//! Subtract one anomalistic year to the simulation time.
+	//! Subtract one anomalistic year from the simulation time.
 	void subtractAnomalisticYear();
-	//! Subtract n anomalistic years to the simulation time.
+	//! Subtract n anomalistic years from the simulation time.
 	void subtractAnomalisticYears(double n=100.);
 
-	//! Subtract one mean tropical month to the simulation time.
+	//! Subtract one mean tropical month from the simulation time.
 	void subtractMeanTropicalMonth();
-	//! Subtract one mean tropical year to the simulation time.
+	//! Subtract one mean tropical year from the simulation time.
 	void subtractMeanTropicalYear();
-	//! Subtract n mean tropical years to the simulation time.
+	//! Subtract n mean tropical years from the simulation time.
 	void subtractMeanTropicalYears(double n=100.);
-	//! Subtract one tropical year to the simulation time.
+	//! Subtract one tropical year from the simulation time.
 	void subtractTropicalYear();
 
-	//! Subtract one calendric month to the simulation time.
-	void subtractCalendricMonth();
+	//! Subtract one great year
+	//! Great Year [NASA SP-7, 1965] - the period of one complete cycle of the equinoxes around the ecliptic, about 25,800 years.
+	//! https://web.archive.org/web/20050421192849/http://www.hq.nasa.gov/office/hqlibrary/aerospacedictionary/aerodictall/g.html
+	void subtractGreatYear();
 
-	//! Subtract one Julian year to the simulation time.
+	//! Subtract one calendar month from the simulation time.
+	void subtractCalendarMonth();
+	//! Subtract one calendar year from the simulation time.
+	void subtractCalendarYear();
+	//! Subtract one calendar decade from the simulation time.
+	void subtractCalendarDecade();
+	//! Subtract one calendar century from the simulation time.
+	void subtractCalendarCentury();
+
+	//! Subtract one Julian year from the simulation time.
 	void subtractJulianYear();
-	//! Subtract n Julian years to the simulation time.
+	//! Subtract n Julian years from the simulation time.
 	void subtractJulianYears(double n=100.);
 
-	//! Subtract one Gaussian year to the simulation time.
+	//! Subtract one Gaussian year from the simulation time.
 	void subtractGaussianYear();
 
 	//! Add a number of Earth Solar days to the current simulation time
@@ -704,7 +815,7 @@ public slots:
 	void setDeltaTCustomNDot(double v) { deltaTCustomNDot=v; }
 	//! Set coefficients for custom equation for calculation of DeltaT
 	//! @param c the coefficients, e.g. -20,0,32
-	void setDeltaTCustomEquationCoefficients(Vec3d c) { deltaTCustomEquationCoeff=c; }
+	void setDeltaTCustomEquationCoefficients(const Vec3d &c) { deltaTCustomEquationCoeff=c; }
 
 	//! Get central year for custom equation for calculation of DeltaT
 	double getDeltaTCustomYear() const { return deltaTCustomYear; }
@@ -725,23 +836,60 @@ public slots:
 	void setDe430Active(bool status);   //!< switch DE430 use to @param status (if de430IsAvailable()). DE430 is only used if date is within range of DE430.
 	void setDe431Active(bool status);   //!< switch DE431 use to @param status (if de431IsAvailable()). DE431 is only used if DE430 is not used and the date is within range of DE431.
 
+	bool de440IsAvailable();            //!< true if DE440 ephemeris file has been found
+	bool de441IsAvailable();            //!< true if DE441 ephemeris file has been found
+	bool de440IsActive();               //!< true if DE440 ephemeris is in use
+	bool de441IsActive();               //!< true if DE441 ephemeris is in use
+	void setDe440Active(bool status);   //!< switch DE440 use to @param status (if de440IsAvailable()). DE440 is only used if date is within range of DE440.
+	void setDe441Active(bool status);   //!< switch DE441 use to @param status (if de441IsAvailable()). DE441 is only used if DE440 is not used and the date is within range of DE441.
+
+	//! Set min and max range of dates for ephemeris
+	void setMinMaxEphemRange(QPair<int, int> mm) { minMaxEphemRange = mm; }
+	//! Get min and max range of dates for ephemeris
+	QPair<int, int> getMinMaxEphemRange(void) { return minMaxEphemRange; }
+
 	//! Return 3-letter abbreviation of IAU constellation name for position in equatorial coordinates on the current epoch.
 	//! Follows 1987PASP...99..695R: Nancy Roman: Identification of a Constellation from a Position
 	//! Data file from ADC catalog VI/42 with its amendment from 1999-12-30.
 	//! @param positionEqJnow position vector in rectangular equatorial coordinates of current epoch&equinox.
-	QString getIAUConstellation(const Vec3d positionEqJnow) const;
+	QString getIAUConstellation(const Vec3d &positionEqJnow) const;
+
+	//! Returns naked-eye limiting magnitude corresponding to the given sky luminance in cd/m².
+	static float luminanceToNELM(float luminance);
+	//! Returns sky luminance in cd/m² corresponding to the given naked-eye limiting magnitude.
+	static float nelmToLuminance(float nelm);
+	//! Returns some representative naked-eye limiting magnitude for the given Bortle scale index.
+	static float bortleScaleIndexToNELM(int index);
+	//! Returns some representative value of zenith luminance in cd/m² for the given Bortle scale index.
+	static float bortleScaleIndexToLuminance(const int index) { return nelmToLuminance(bortleScaleIndexToNELM(index)); }
+	//! Classifies the sky using the Bortle scale using zenith naked-eye limiting magnitude as input.
+	static int nelmToBortleScaleIndex(float nelm);
+	//! Classifies the sky using the Bortle scale using zenith luminance in cd/m² as input.
+	static int luminanceToBortleScaleIndex(const float luminance) { return nelmToBortleScaleIndex(luminanceToNELM(luminance)); }
+	//! Converts luminance in cd/m² to magnitude/arcsec².
+	static float luminanceToMPSAS(const float cdm2) { return std::log10(cdm2/10.8e4f) / -0.4f; }
+	//! Converts magnitude/arcsec² to luminance in cd/m².
+	static float mpsasToLuminance(const float mag) { return 10.8e4f*std::pow(10.f, -0.4f*mag); }
+
+	//! get state of the clear sky flag. For regular use it should be true, while false will overdraw the previous frame
+	bool getFlagClearSky() const {return flagClearSky;}
+	//! set state of the clear sky flag. For regular use it should be true, while false will overdraw the previous frame
+	void setFlagClearSky(const bool state);
 
 signals:
 	//! This signal is emitted when the observer location has changed.
 	void locationChanged(const StelLocation&);
-	//! This signal is emitted whenever the targetted location changes
-	void targetLocationChanged(const StelLocation&);
+	//! This signal is emitted whenever the targeted location changes, i.e., at the onset of location transitions.
+	//! The second parameter can transmit a landscapeID or should be QString().
+	void targetLocationChanged(const StelLocation& loc, const QString& id);
 	//! This signal is emitted when the current timezone name is changed.
 	void currentTimeZoneChanged(const QString& tz);
 	//! This signal is emitted when custom timezone use is activated (true) or deactivated (false).
 	void useCustomTimeZoneChanged(const bool b);
 	//! This signal is emitted when daylight saving time is enabled or disabled.
 	void flagUseDSTChanged(const bool b);
+	//! This signal is emitted when stop clock at startup is enabled or disabled.
+	void startupTimeStopChanged(const bool b);
 	//! This signal is emitted when the time rate has changed
 	void timeRateChanged(double rate);
 	//! This signal is emitted whenever the time is re-synced.
@@ -756,13 +904,21 @@ signals:
 	//! This signal is emitted when the date has changed for a month.
 	void dateChangedForMonth();
 	//! This signal is emitted when the date has changed by one year.
-	void dateChangedByYear();
+	void dateChangedByYear(const int year);
 	//! This signal indicates a horizontal display flip
 	void flipHorzChanged(bool b);
 	//! This signal indicates a vertical display flip
 	void flipVertChanged(bool b);
 	//! This signal indicates a switch in use of nutation
 	void flagUseNutationChanged(bool b);
+	//! This signal indicates a switch in use of aberration
+	void flagUseAberrationChanged(bool b);
+	//! This signal indicates a change in aberration exaggeration factor
+	void aberrationFactorChanged(double val);
+	//! This signal indicates a switch in use of parallax
+	void flagUseParallaxChanged(bool b);
+	//! This signal indicates a change in parallax exaggeration factor
+	void parallaxFactorChanged(double val);
 	//! This signal indicates a switch in use of topocentric coordinates
 	void flagUseTopocentricCoordinatesChanged(bool b);
 	//! Emitted whenever the projection type changes
@@ -776,6 +932,19 @@ signals:
 	//! Emitted when button "Save settings" is pushed
 	void configurationDataSaved();
 	void updateSearchLists();
+	void ditheringModeChanged(DitheringMode mode);
+	//! Emitted when clear sky flag changed.
+	void flagClearSkyChanged(bool state);
+
+	//! Called just after algorithm/theory for ephemeris is changed in the GUI
+	void ephemAlgorithmChanged();
+
+private slots:
+	//! Call this whenever latitude changes. I.e., just connect it to the locationChanged() signal.
+	void updateFixedEquatorialTransformMatrices();
+private:
+	DitheringMode parseDitheringMode(const QString& s);
+	static const QMap<QString, DitheringMode>ditheringMap;
 
 private:
 	StelToneReproducer* toneReproducer;		// Tones conversion between stellarium world and display device
@@ -795,6 +964,8 @@ private:
 	// Parameters to use when creating new instances of StelProjector
 	StelProjector::StelProjectorParams currentProjectorParams;
 
+	//! This is called in every frame to set rotation matrices for the various movable projection frames.
+	//! The rarely updated frame transform between AltAz and Fixed Equatorial is set in updateFixedEquatorialTransformMatrices() instead.
 	void updateTransformMatrices();
 	void updateTime(double deltaTime);
 	void updateMaximumFov();
@@ -802,12 +973,13 @@ private:
 
 	void registerMathMetaTypes();
 
-
 	// Matrices used for every coordinate transfo
 	Mat4d matHeliocentricEclipticJ2000ToAltAz; // Transform from heliocentric ecliptic Cartesian (VSOP87A) to topocentric (StelObserver) altazimuthal coordinate
 	Mat4d matAltAzToHeliocentricEclipticJ2000; // Transform from topocentric (StelObserver) altazimuthal coordinate to heliocentric ecliptic Cartesian (VSOP87A)
 	Mat4d matAltAzToEquinoxEqu;                // Transform from topocentric altazimuthal coordinate to Earth Equatorial
 	Mat4d matEquinoxEquToAltAz;                // Transform from Earth Equatorial to topocentric (StelObserver) altazimuthal coordinate
+	Mat4d matAltAzToFixedEquatorial;           // Transform from topocentric altazimuthal coordinate to Fixed Equatorial system (hour angle/decl)
+	Mat4d matFixedEquatorialToAltAz;           // Transform from Fixed Equatorial (hour angle/decl) to topocentric (StelObserver) altazimuthal coordinate
 	Mat4d matHeliocentricEclipticToEquinoxEqu; // Transform from heliocentric ecliptic Cartesian (VSOP87A) to earth equatorial coordinate
 	Mat4d matEquinoxEquDateToJ2000;            // For Earth, this is almost the inverse precession matrix, =Rz(VSOPbias)Rx(eps0)Rz(-psiA)Rx(-omA)Rz(chiA)
 	Mat4d matJ2000ToEquinoxEqu;                // precession matrix
@@ -826,13 +998,22 @@ private:
 
 	// flag to indicate we want to use nutation (the small-scale wobble of earth's axis)
 	bool flagUseNutation;
+	// flag to indicate we want to use aberration (a small-scale wobble of stellar positions (~20 arceconds on earth) due to finite speed of light and observer in motion on a planet.)
+	bool flagUseAberration;
+	// value to allow exaggerating aberration effects. 1 is natural value, stretching to e.g. 1000 may be useful for explanations.
+	double aberrationFactor;
+	// flag to indicate we want to include parallax effect
+	bool flagUseParallax;
+	// value to allow exaggerating parallax effects. 1 is natural value, stretching to e.g. 1000 may be useful for explanations.
+	double parallaxFactor;
 	// flag to indicate that we show topocentrically corrected coordinates. (Switching to false for planetocentric coordinates is new for 0.14)
 	bool flagUseTopocentricCoordinates;
 
 	// Time variables
 	double timeSpeed;           // Positive : forward, Negative : Backward, 1 = 1sec/sec
+	double savedTimeSpeed;	    // Time rate value for toggler
 	//double JDay;              // Current time in Julian day. IN V0.12 TO V0.14, this was JD in TT, and all places where UT was required had to subtract getDeltaT() explicitly.
-	QPair<double,double> JD;    // From 0.14 on: JD.first=JD_UT, JD.second=DeltaT=TT-UT. To gain JD_TT, compute JDE=JD.first+JD.second or better just call getJDE()
+	QPair<double,double> JD;    // From 0.14 on: JD.first=JD_UT, JD.second=DeltaT[seconds]=(TT-UT)*86400. To gain JD_TT, compute JDE=JD.first+JD.second/86400 or better just call getJDE()
 				    // Use is best with calls getJD()/setJD() and getJDE()/setJDE() to explicitly state which flavour of JD you need.
 	double presetSkyTime;
 	QTime initTodayTime;
@@ -840,25 +1021,47 @@ private:
 	qint64 milliSecondsOfLastJDUpdate;    // Time in milliseconds when the time rate or time last changed
 	double jdOfLastJDUpdate;         // JD when the time rate or time last changed
 
+	DitheringMode ditheringMode = DitheringMode::Color888;
+
 	QString currentTimeZone;	
 	bool flagUseDST;
 	bool flagUseCTZ; // custom time zone
+	bool startupTimeStop;
 
 	// Variables for equations of DeltaT
 	Vec3d deltaTCustomEquationCoeff;
 	double deltaTCustomNDot;
 	double deltaTCustomYear;
 	double deltaTnDot; // The currently applied nDot correction. (different per algorithm, and displayed in status line.)
-	bool  deltaTdontUseMoon; // true if the currenctly selected algorithm does not do a lunar correction (?????)
+	bool  deltaTdontUseMoon; // true if the currently selected algorithm does not do a lunar correction (?????)
 	double (*deltaTfunc)(const double JD); // This is a function pointer which must be set to a function which computes DeltaT(JD).
 	int deltaTstart;   // begin year of validity range for the selected DeltaT algorithm. (SET INT_MIN to mark infinite)
 	int deltaTfinish;  // end   year of validity range for the selected DeltaT algorithm. (Set INT_MAX to mark infinite)
 
-	// Variables for DE430/431 ephem calculation
+	// Variables for DE430/431/440/441 ephem calculation
 	bool de430Available; // ephem file found
 	bool de431Available; // ephem file found
 	bool de430Active;    // available and user-activated.
 	bool de431Active;    // available and user-activated.
-};
+	bool de440Available; // ephem file found
+	bool de441Available; // ephem file found
+	bool de440Active;    // available and user-activated.
+	bool de441Active;    // available and user-activated.
+	QPair<int, int> minMaxEphemRange;
+	
+	// Variables for caching the observer position relative to the star catalog reference frame
+	static Vec3d cachedParallaxDiff;
+	static double cachedParallaxJD; // Cached Julian Date
+	static PlanetP cachedParallaxPlanet;
+	Vec3d calculateParallaxDiff(double JD) const; // Actual calculation
 
+	// Variables for caching the aberration effect
+	static Vec3d cachedAberrationVec;
+	static double cachedAberrationJD;
+	static PlanetP cachedAberrationPlanet;
+	Vec3d calculateAberrationVec(double JD) const; // Actual calculation
+
+	bool flagClearSky; // Keep this true unless you want to render star trails.
+	int clearSkyOnceCounter; // used to force full redraw during star trail mode.
+};
 #endif // STELCORE_HPP

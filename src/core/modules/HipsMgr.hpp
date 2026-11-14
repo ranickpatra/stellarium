@@ -22,16 +22,30 @@
 
 #include "StelModule.hpp"
 #include "StelHips.hpp"
+#include <QLoggingCategory>
 #include <QJsonArray>
+
+
+//! @class HipsMgr
+//! This class controls display of Hierarchical Progressive Surveys (HiPS), all-sky surveys in a particular format
+//! defined by the International Virtual Observatory Alliance. A full description of the format can be found on the
+//! IVOA website. (https://www.ivoa.net/documents/HiPS/20170519/REC-HIPS-1.0-20170519.pdf)
+//! Stellarium supports only image-based surveys.
+//!
+//! @note You can finetune the amount of HiPS-related messages in the logfile by configuring the logging category stel.HiPS.
+//! For this, e.g. set environment variable QT_LOGGING_RULES="*.debug=false;stel.HiPS.debug=true;".
+//! By default, only Info and more severe messages are displayed.
+
+Q_DECLARE_LOGGING_CATEGORY(HiPS)
 
 class HipsMgr : public StelModule
 {
 	Q_OBJECT
-	Q_ENUMS(State)
 	Q_PROPERTY(QList<HipsSurveyP> surveys
 			MEMBER surveys
 			NOTIFY surveysChanged)
 	Q_PROPERTY(bool flagShow READ getFlagShow WRITE setFlagShow NOTIFY showChanged)
+	Q_PROPERTY(bool flagShowAtmosphericExtinction READ getFlagShowAtmosphericExtinction WRITE setFlagShowAtmosphericExtinction NOTIFY flagShowAtmosphericExtinctionChanged)
 	Q_PROPERTY(State state READ getState NOTIFY stateChanged)
 	Q_PROPERTY(bool loaded READ isLoaded NOTIFY stateChanged)
 
@@ -43,45 +57,54 @@ public:
 		Loading,
 		Loaded,
 	};
+	Q_ENUM(State)
 
 	HipsMgr();
-	virtual ~HipsMgr();
-	virtual void init() Q_DECL_OVERRIDE;
-	virtual void deinit() Q_DECL_OVERRIDE;
-	virtual void update(double deltaTime) Q_DECL_OVERRIDE;
-	virtual void draw(StelCore* core) Q_DECL_OVERRIDE;
-	virtual double getCallOrder(StelModuleActionName actionName) const Q_DECL_OVERRIDE;
+	~HipsMgr() override;
+	void init() override;
+	void deinit() override;
+	void update(double deltaTime) override;
+	void draw(StelCore* core) override;
+	double getCallOrder(StelModuleActionName actionName) const override;
 
 	//! Return the hips survey that has a given url.
 	Q_INVOKABLE
 	HipsSurveyP getSurveyByUrl(const QString &url);
-
-	//! Get whether the surveys are displayed.
-	bool getFlagShow(void) const;
-	//! Set whether the surveys are displayed.
-	void setFlagShow(bool b);
 
 	State getState() const {return state;}
 	bool isLoaded() const {return state == Loaded;}
 
 signals:
 	void showChanged(bool value) const;
+	void flagShowAtmosphericExtinctionChanged(bool value) const;
 	void surveysChanged() const;
 	void stateChanged(State value) const;
 	//! Emitted when a new survey has been loaded.
 	void gotNewSurvey(HipsSurveyP survey) const;
+	void toggleDialog() const;
 
 public slots:
 	//! Start to load the default sources.
 	void loadSources();
 
+	//! Get whether the surveys are displayed.
+	bool getFlagShow(void) const;
+	//! Set whether the surveys are displayed.
+	void setFlagShow(bool b);
+	bool getFlagShowAtmosphericExtinction(void) const { return flagShowAtmosphericExtinction; }
+	void setFlagShowAtmosphericExtinction(bool b);
+
 private slots:
 	// after loading survey list from network, restore the visible surveys from config.ini.
 	void restoreVisibleSurveys();
+	void saveSurveySettings() const;
+	void updateActiveSurveys();
 
 private:
 	QList<HipsSurveyP> surveys;
+	QList<HipsSurveyP> activeSurveys;
 	bool visible = true;
+	bool flagShowAtmosphericExtinction = false;
 	State state = Created;
 	//! Used internally to keep track of the loading state.
 	int nbSourcesLoaded = 0;

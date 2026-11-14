@@ -38,7 +38,7 @@ PROJECT_NAME           = Stellarium
 # could be handy for archiving the generated documentation or if some version
 # control system is used.
 
-PROJECT_NUMBER         = @VERSION@
+PROJECT_NUMBER         = @STELLARIUM_PUBLIC_VERSION@
 
 # Using the PROJECT_BRIEF tag one can provide an optional one line description
 # for a project that appears at the top of each page and should give viewer a
@@ -107,7 +107,7 @@ BRIEF_MEMBER_DESC      = YES
 # brief descriptions will be completely suppressed.
 # The default value is: YES.
 
-REPEAT_BRIEF           = NO
+REPEAT_BRIEF           = YES
 
 # This tag implements a quasi-intelligent brief description abbreviator that is
 # used to form the text in various listings. Each string in this list, if found
@@ -1125,6 +1125,7 @@ HTML_EXTRA_STYLESHEET  = @PROJECT_SOURCE_DIR@/doc/extrastyle.css
 # This tag requires that the tag GENERATE_HTML is set to YES.
 
 HTML_EXTRA_FILES       = @PROJECT_SOURCE_DIR@/doc/images/stellarium-architecture.svg \
+                         @PROJECT_SOURCE_DIR@/doc/stellarium-ide.xml \
                          @PROJECT_SOURCE_DIR@/doc/images/stellarium-architecture.png
 
 # The HTML_COLORSTYLE_HUE tag controls the color of the HTML output. Doxygen

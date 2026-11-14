@@ -24,9 +24,13 @@
 #include <QVector>
 #include "StelModule.hpp"
 #include "VecMath.hpp"
+#include "StelCore.hpp"
 #include "StelTextureTypes.hpp"
 #include "StelLocation.hpp"
 #include "StelPropertyMgr.hpp"
+
+class QOpenGLShaderProgram;
+class QOpenGLVertexArrayObject;
 
 //! @class ZodiacalLight 
 //! Manages the displaying of the Zodiacal Light. The brightness values follow the paper:
@@ -66,25 +70,25 @@ class ZodiacalLight : public StelModule
 
 public:
 	ZodiacalLight();
-	virtual ~ZodiacalLight();
+	~ZodiacalLight() override;
 	
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in the StelModule class
 	//! Initialize the class.  Here we load the texture for the Zodiacal Light and 
 	//! get the display settings from application settings, namely the flag which
 	//! determines if the Zodiacal Light is displayed or not, and the intensity setting.
-	virtual void init();
+	void init() override;
 
 	//! Draw the Zodiacal Light.
-	virtual void draw(StelCore* core);
+	void draw(StelCore* core) override;
 	
 	//! Update and time-dependent state.  Updates the fade level while the 
 	//! Zodiacal Light rendering is being changed from on to off or off to on.
-	virtual void update(double deltaTime);
+	void update(double deltaTime) override;
 	
 	//! Used to determine the order in which the various modules are drawn. MilkyWay=1, TOAST=7, we use 8.
 	//! Other actions return 0 for "nothing special".
-	virtual double getCallOrder(StelModuleActionName actionName) const;
+	double getCallOrder(StelModuleActionName actionName) const override;
 	
 	///////////////////////////////////////////////////////////////////////////////////////
 	// Setter and getters
@@ -93,15 +97,16 @@ public slots:
 	double getIntensity() const {return intensity;}
 	//! Set Zodiacal Light intensity. Default value: 1.
 	//! @param aintensity intensity of Zodiacal Light
-	void setIntensity(double aintensity) {if(aintensity!=intensity){intensity = aintensity; emit intensityChanged(intensity);}}
+	void setIntensity(double aintensity);
 	
 	//! Get the color used for rendering the Zodiacal Light. It is modulated by intensity, light pollution and atmospheric extinction.
 	Vec3f getColor() const {return color;}
 	//! Sets the color to use for rendering the Zodiacal Light
 	//! @param c The color to use for rendering the Zodiacal Light. Default (1.0, 1.0, 1.0).
 	//! @code
-	//! // example of usage in scripts
-	//! ZodiacalLight.setColor(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! ZodiacalLight.setColor(c.toVec3f());
 	//! @endcode
 	void setColor(const Vec3f& c) {if (c!=color) { color=c; emit colorChanged(c);}}
 	
@@ -114,6 +119,11 @@ public slots:
 	//! Gets whether the Zodiacal Light is displayed
 	bool getFlagShow(void) const;
 
+private:
+	void setupCurrentVAO();
+	void bindVAO();
+	void releaseVAO();
+
 private slots:
 	//! connect to StelCore to force-update ZL.
 	void handleLocationChanged(const StelLocation &loc);
@@ -125,7 +135,7 @@ signals:
 	
 private:
 	StelPropertyMgr* propMgr;
-	StelTextureSP tex;
+	StelTextureSP mainTex;
 	Vec3f color; // global color
 	double intensity;
 	double intensityFovScale; // like for constellations: reduce brightness when zooming in.
@@ -133,9 +143,21 @@ private:
 	double intensityMaxFov;
 	class LinearFader* fader;
 	double lastJD; // keep date of last computation. Position will be updated only if far enough away from last computation.
+	double lambdaSun; // angle of rotation around z to account for position of current planet in orbit
 
-	struct StelVertexArray* vertexArray;
-	QVector<Vec3d> eclipticalVertices;
+	struct
+	{
+		int mainTex;
+		int lambdaSun;
+		int brightness;
+		int bortleIntensity;
+		int extinctionEnabled;
+		int projectionMatrixInverse;
+	} shaderVars;
+	std::unique_ptr<QOpenGLVertexArrayObject> vao;
+	std::unique_ptr<QOpenGLBuffer> vbo;
+	StelProjectorP prevProjector;
+	std::unique_ptr<QOpenGLShaderProgram> renderProgram;
 };
 
 #endif // ZODIACALLIGHT_HPP

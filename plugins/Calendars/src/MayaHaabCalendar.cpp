@@ -24,11 +24,17 @@
 #include "StelApp.hpp"
 #include "StelCore.hpp"
 
-const int MayaHaabCalendar::mayanHaabEpoch=MayaLongCountCalendar::mayanEpoch-MayaHaabCalendar::mayanHaabOrdinal({18, 8});
+// Default solution. Make sure to wire up some reset mechanism if MayaLongCountCalendar::mayanEpoch ever loses const-ness!
+int MayaHaabCalendar::mayanHaabEpoch=MayaLongCountCalendar::mayanEpoch-MayaHaabCalendar::mayanHaabOrdinal({18, 8});
+
+void MayaHaabCalendar::updateFromMayaEpoch()
+{
+	MayaHaabCalendar::mayanHaabEpoch=MayaLongCountCalendar::mayanEpoch-MayaHaabCalendar::mayanHaabOrdinal({18, 8});
+}
 
 MayaHaabCalendar::MayaHaabCalendar(double jd): Calendar(jd)
 {
-	retranslate();
+	MayaHaabCalendar::retranslate();
 }
 
 QMap<int, QString> MayaHaabCalendar::monthNames;
@@ -89,19 +95,17 @@ QStringList MayaHaabCalendar::getDateStrings() const
 QString MayaHaabCalendar::getFormattedDateString() const
 {
 	QStringList str=getDateStrings();
-	return QString("%1 %2")
-			.arg(str.at(1))
-			.arg(str.at(0));
+	return QString("%1 %2").arg(str.at(1), str.at(0));
 }
 
 // set date from a vector of calendar date elements sorted from the largest to the smallest.
 // month-day
 // We face a problem as the year is not unique. We can only find the date before current JD which matches the parts.
-void MayaHaabCalendar::setDate(QVector<int> parts)
+void MayaHaabCalendar::setDate(const QVector<int> &parts)
 {
 	this->parts=parts;
 
-	const int rdOnOrBefore=mayanHaabOnOrBefore(parts, fixedFromJD(JD));
+	const int rdOnOrBefore=mayanHaabOnOrBefore(parts, fixedFromJD(JD, true));
 
 	// restore time from JD!
 	double frac=StelUtils::fmodpos(JD+0.5+StelApp::getInstance().getCore()->getUTCOffset(JD)/24., 1.);
@@ -110,7 +114,7 @@ void MayaHaabCalendar::setDate(QVector<int> parts)
 	emit jdChanged(JD);
 }
 
-int MayaHaabCalendar::mayanHaabOnOrBefore(QVector<int> haab, int rd)
+int MayaHaabCalendar::mayanHaabOnOrBefore(const QVector<int> &haab, int rd)
 {
 	return modInterval(mayanHaabOrdinal(haab)+mayanHaabEpoch, rd, rd-365);
 }
@@ -137,7 +141,7 @@ int MayaHaabCalendar::mayanYearBearerFromFixed(int rd)
 }
 
 // get RD of a calendar round date
-int MayaHaabCalendar::mayanCalendarRoundOnOrBefore(QVector<int>haab, QVector<int>tzolkin, int rd)
+int MayaHaabCalendar::mayanCalendarRoundOnOrBefore(const QVector<int> &haab, const QVector<int> &tzolkin, int rd)
 {
 	const int haabCount=mayanHaabOrdinal(haab)+mayanHaabEpoch;
 	const int tzolkinCount=MayaTzolkinCalendar::mayanTzolkinOrdinal(tzolkin)+MayaTzolkinCalendar::mayanTzolkinEpoch;

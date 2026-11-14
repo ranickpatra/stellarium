@@ -40,6 +40,7 @@
 ****************************************************************************/
 
 #include <QtGlobal>
+#include <memory>
 
 #ifndef QT_NO_TEXTODFWRITER
 
@@ -783,7 +784,6 @@ void QZipWriterPrivate::addEntry(EntryType type, const QString &fileName, const 
 
 /*!
     \class QZipReader::FileInfo
-
     Represents one entry in the zip table of contents.
 */
 
@@ -824,18 +824,14 @@ void QZipWriterPrivate::addEntry(EntryType type, const QString &fileName, const 
 
 /*!
     \variable FileInfo::d
-
     private pointer.
 */
 
 /*!
     \class QZipReader
-
     \since 4.5
-
     \brief the QZipReader class provides a way to inspect the contents of a zip
     archive and extract individual files from it.
-
     QZipReader can be used to read a zip archive either from a file or from any
     device. An in-memory QBuffer for instance.  The reader can be used to read
     which files are in the archive using fileInfoList() and entryInfoAt() but
@@ -849,7 +845,7 @@ void QZipWriterPrivate::addEntry(EntryType type, const QString &fileName, const 
 */
 QZipReader::QZipReader(const QString &archive, QIODevice::OpenMode mode)
 {
-    QScopedPointer<QFile> f(new QFile(archive));
+    std::unique_ptr<QFile> f(new QFile(archive));
     f->open(mode);
     QZipReader::Status status;
     if (f->error() == QFile::NoError)
@@ -865,8 +861,8 @@ QZipReader::QZipReader(const QString &archive, QIODevice::OpenMode mode)
             status = FileError;
     }
 
-    d = new QZipReaderPrivate(f.data(), /*ownDevice=*/true);
-    f.take();
+    d = new QZipReaderPrivate(f.get(), /*ownDevice=*/true);
+    f.release();
     d->status = status;
 }
 
@@ -945,7 +941,6 @@ int QZipReader::count() const
     Returns a FileInfo of an entry in the zipfile.
     The \a index is the index into the directory listing of the zipfile.
     Returns an invalid FileInfo if \a index is out of boundaries.
-
     \sa fileInfoList()
 */
 QZipReader::FileInfo QZipReader::entryInfoAt(int index) const
@@ -1097,9 +1092,7 @@ bool QZipReader::extractAll(const QString &destinationDir) const
 
 /*!
     \enum QZipReader::Status
-
     The following status values are possible:
-
     \value NoError  No error occurred.
     \value FileReadError    An error occurred when reading from the file.
     \value FileOpenError    The file could not be opened.
@@ -1128,11 +1121,8 @@ void QZipReader::close()
 
 /*!
     \class QZipWriter
-
     \since 4.5
-
     \brief the QZipWriter class provides a way to create a new zip archive.
-
     QZipWriter can be used to create a zip archive containing any number of files
     and directories. The files in the archive will be compressed in a way that is
     compatible with common zip reader applications.
@@ -1146,7 +1136,7 @@ void QZipReader::close()
 */
 QZipWriter::QZipWriter(const QString &fileName, QIODevice::OpenMode mode)
 {
-    QScopedPointer<QFile> f(new QFile(fileName));
+    std::unique_ptr<QFile> f(new QFile(fileName));
     f->open(mode);
     QZipWriter::Status status;
     if (f->error() == QFile::NoError)
@@ -1162,8 +1152,8 @@ QZipWriter::QZipWriter(const QString &fileName, QIODevice::OpenMode mode)
             status = QZipWriter::FileError;
     }
 
-    d = new QZipWriterPrivate(f.data(), /*ownDevice=*/true);
-    f.take();
+    d = new QZipWriterPrivate(f.get(), /*ownDevice=*/true);
+    f.release();
     d->status = status;
 }
 
@@ -1213,9 +1203,7 @@ bool QZipWriter::exists() const
 
 /*!
     \enum QZipWriter::Status
-
     The following status values are possible:
-
     \value NoError  No error occurred.
     \value FileWriteError    An error occurred when writing to the device.
     \value FileOpenError    The file could not be opened.
@@ -1234,7 +1222,6 @@ QZipWriter::Status QZipWriter::status() const
 
 /*!
     \enum QZipWriter::CompressionPolicy
-
     \value AlwaysCompress   A file that is added is compressed.
     \value NeverCompress    A file that is added will be stored without changes.
     \value AutoCompress     A file that is added will be compressed only if that will give a smaller file.
@@ -1242,9 +1229,7 @@ QZipWriter::Status QZipWriter::status() const
 
 /*!
      Sets the policy for compressing newly added files to the new \a policy.
-
     \note the default policy is AlwaysCompress
-
     \sa compressionPolicy()
     \sa addFile()
 */
@@ -1265,9 +1250,7 @@ QZipWriter::CompressionPolicy QZipWriter::compressionPolicy() const
 
 /*!
     Sets the permissions that will be used for newly added files.
-
     \note the default permissions are QFile::ReadOwner | QFile::WriteOwner.
-
     \sa creationPermissions()
     \sa addFile()
 */
@@ -1278,7 +1261,6 @@ void QZipWriter::setCreationPermissions(QFile::Permissions permissions)
 
 /*!
      Returns the currently set creation permissions.
-
     \sa setCreationPermissions()
     \sa addFile()
 */
@@ -1291,11 +1273,9 @@ QFile::Permissions QZipWriter::creationPermissions() const
     Add a file to the archive with \a data as the file contents.
     The file will be stored in the archive using the \a fileName which
     includes the full path in the archive.
-
     The new file will get the file permissions based on the current
     creationPermissions and it will be compressed using the zip compression
     based on the current compression policy.
-
     \sa setCreationPermissions()
     \sa setCompressionPolicy()
 */

@@ -44,14 +44,16 @@ public:
 	enum Visibility
 	{
 		//constants for visibility prediction
-		UNKNOWN=0,
-		RADAR_SUN=1,
-		VISIBLE=2,
-		RADAR_NIGHT=3,
-		NOT_VISIBLE=4
+		UNKNOWN		= 0,
+		RADAR_SUN	= 1,
+		VISIBLE		= 2,
+		RADAR_NIGHT	= 3,
+		PENUMBRAL	= 4,
+		ANNULAR		= 5,
+		BELOW_HORIZON   = 6
 	};
-        gSatWrapper(QString designation, QString tle1,QString tle2);
-        ~gSatWrapper();
+	gSatWrapper(const QString &designation, const QString &tle1, const QString &tle2);
+	~gSatWrapper();
 
 	// Operation setEpoch
 	//! @brief This operation update Epoch timestamp for gSatTEME object
@@ -78,44 +80,45 @@ public:
 	//! @return Vec3d Geographical coordinates\n
 	//!    Latitude:  Coord[0]  measured in degrees\n
 	//!    Longitude: Coord[1]  measured in degrees\n
-        //!    Altitude:  Coord[2]  measured in Km.\n
+	//!    Altitude:  Coord[2]  measured in Km.\n
 	Vec3d getSubPoint() const;
 
 	// Operation getAltAz
 	//! @brief This operation compute the coordinates in StelCore::FrameAltAz
-	//! @return Vect3d Vector with coordinates (meassured in km)
+	//! @return Vect3d Vector with coordinates (measured in km)
 	//! @par References
 	//!  Orbital Coordinate Systems, Part II
 	//!   Dr. T.S. Kelso
-	//!   http://www.celestrak.com/columns/v02n02/
+	//!   https://celestrak.org/columns/v02n02/
 	Vec3d getAltAz() const;
 
-        // Operation getSlantRange
-        //! @brief This operation compute the slant range (distance between the
-        //! satellite and the observer) and its variation/seg
-        //! @param &ao_slantRange Reference to a output variable where the method store the slant range measured in Km
-        //! @param &ao_slantRangeRate Reference to a output variable where the method store the slant range variation in Km/s
-        //! @return void
+	// Operation getSlantRange
+	//! @brief This operation compute the slant range (distance between the
+	//! satellite and the observer) and its variation/seg
+	//! @param &ao_slantRange Reference to a output variable where the method store the slant range measured in Km
+	//! @param &ao_slantRangeRate Reference to a output variable where the method store the slant range variation in Km/s
+	//! @return void
 	void  getSlantRange(double &ao_slantRange, double &ao_slantRangeRate) const; //measured in km and km/s
 
-        // Operation getVisibilityPredict
-        //! @brief This operation predicts the satellite visibility contidions.
-        //! This prediction can return 4 different states
-	//!   RADAR_SUN when satellite and observer are in the sunlight
-	//!   VISIBLE   when satellite is in sunlight and observer is in the dark. Satellite could be visible in the sky.
-        //!   RADAR_NIGHT when satellite is eclipsed by the earth shadow.
-        //!   NOT_VISIBLE The satellite is under the observer horizon
-        //! @return
-        //!     1 if RADAR_SUN
-        //!     2 if VISIBLE
+	// Operation getVisibilityPredict
+	//! @brief This operation predicts the satellite visibility contidions.
+	//! VISIBLE means the satellite is sunlit and the site is in the dark;
+	//! RADAR_NIGHT means the satellite isn't sunlit and the site either in the light or dark;
+	//! RADAR_SUN means the satellite and site are in the sunlight
+	//! PENUMBRAL means the satellite is in penumbra
+	//! ANNULAR means the satellite is eclipsed by the earth shadow
+	//! @return
+	//!     1 if RADAR_SUN
+	//!     2 if VISIBLE
 	//!     3 if RADAR_NIGHT
-        //!     3 if NOT_VISIBLE
-        //! @par References
-        //!   Fundamentals of Astrodynamis and Applications (Third Edition) pg 898
-        //!   David A. Vallado
+	//!     4 if PENUMBRAL
+	//!     5 if ANNULAR
+	//!     6 if BELOW_HORIZON
+	//! @par References
+	//!   Fundamentals of Astrodynamis and Applications (Fourth Edition) p. 911
+	//!   David A. Vallado
 	Visibility getVisibilityPredict() const;
 
-	double getPhaseAngle() const;
 	//! Get orbital period in minutes
 	double getOrbitalPeriod() const;
 	//! Get orbital inclination in degrees
@@ -127,16 +130,18 @@ public:
 	// Operation calcObserverECIPosition
 	//! @brief This operation computes the observer ECI coordinates in Geocentric
 	//! Equatorial Coordinate System (IJK) for the ai_epoch time.
-        //! This position can be asumed as observer position in TEME framework without an appreciable error.
-        //! ECI axis (IJK) are parallel to StelCore::EquinoxEQ Framework but centered in the earth centre
-        //! instead the observer position.
+	//! This position can be assumed as observer position in TEME framework without an appreciable error.
+	//! ECI axis (IJK) are parallel to StelCore::EquinoxEQ Framework but centered in the earth centre
+	//! instead the observer position.
 	//! @par References
 	//!  Orbital Coordinate Systems, Part II
 	//!   Dr. T.S. Kelso
-	//!   http://www.celestrak.com/columns/v02n02/
-        //! @param[out] ao_position Observer ECI position vector measured in Km
-        //! @param[out] ao_vel Observer ECI velocity vector measured in Km/s
+	//!   https://celestrak.org/columns/v02n02/
+	//! @param[out] ao_position Observer ECI position vector measured in Km
+	//! @param[out] ao_vel Observer ECI velocity vector measured in Km/s
 	static void calcObserverECIPosition(Vec3d& ao_position, Vec3d& ao_vel) ;
+
+	static Vec3d getObserverECIPos() {return observerECIPos;}
 
 private:
 	//! do the actual work to compute a cached value.
@@ -145,9 +150,9 @@ private:
 	gSatTEME *pSatellite;
 	static gTime	 epoch;
 
-	// GZ We can avoid many computations (solar and observer positions for every satellite) by computing them only once for all objects.
+	// We can avoid many computations (solar and observer positions for every satellite) by computing them only once for all objects.
 	static gTime lastSunECIepoch; // store last time of computation to avoid all-1 computations.
-	static Vec3d sunECIPos;       // enough to have these once.
+	static Vec3d sunECIPos;       // Observercentric ECI Solar position
 	static Vec3d observerECIPos;
 	static Vec3d observerECIVel;
 	static gTime lastCalcObserverECIPosition;

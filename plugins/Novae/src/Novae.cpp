@@ -19,8 +19,6 @@
 #include "StelProjector.hpp"
 #include "StelApp.hpp"
 #include "StelCore.hpp"
-#include "StelGui.hpp"
-#include "StelGuiItems.hpp"
 #include "StelLocaleMgr.hpp"
 #include "StelModuleMgr.hpp"
 #include "StelObjectMgr.hpp"
@@ -35,6 +33,7 @@
 #include "Novae.hpp"
 #include "NovaeDialog.hpp"
 #include "StelProgressController.hpp"
+#include "StarMgr.hpp"
 
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -42,6 +41,7 @@
 #include <QDebug>
 #include <QFile>
 #include <QFileInfo>
+#include <QFont>
 #include <QTimer>
 #include <QList>
 #include <QSettings>
@@ -93,10 +93,12 @@ Novae::Novae()
 	, updateFrequencyDays(0)
 {
 	setObjectName("Novae");
+#ifndef NO_GUI
 	configDialog = new NovaeDialog();
+#endif
 	conf = StelApp::getInstance().getSettings();
 	setFontSize(StelApp::getInstance().getScreenFontSize());
-	connect(&StelApp::getInstance(), SIGNAL(screenFontSizeChanged(int)), this, SLOT(setFontSize(int)));
+	connect(&StelApp::getInstance(), &StelApp::screenFontSizeChanged, this, &Novae::setFontSize);
 }
 
 /*
@@ -104,7 +106,9 @@ Novae::Novae()
 */
 Novae::~Novae()
 {
+#ifndef NO_GUI
 	delete configDialog;
+#endif
 }
 
 /*
@@ -137,12 +141,14 @@ void Novae::init()
 		// populate settings from main config file.
 		readSettingsFromConfig();
 
-		novaeJsonPath = StelFileMgr::findFile("modules/Novae", (StelFileMgr::Flags)(StelFileMgr::Directory|StelFileMgr::Writable)) + "/novae.json";
+		novaeJsonPath = StelFileMgr::findFile("modules/Novae", static_cast<StelFileMgr::Flags>(StelFileMgr::Directory|StelFileMgr::Writable)) + "/novae.json";
 		if (novaeJsonPath.isEmpty())
 			return;
 
 		texPointer = StelApp::getInstance().getTextureManager().createTexture(StelFileMgr::getInstallationDir()+"/textures/pointeur2.png");
+#ifndef NO_GUI
 		addAction("actionShow_Novae_ConfigDialog", N_("Bright Novae"), N_("Bright Novae configuration window"), configDialog, "visible", ""); // Allow assign shortkey
+#endif
 	}
 	catch (std::runtime_error &e)
 	{
@@ -151,7 +157,7 @@ void Novae::init()
 	}
 
 	// If the json file does not already exist, create it from the resource in the Qt resource
-	if(QFileInfo(novaeJsonPath).exists())
+	if(QFileInfo::exists(novaeJsonPath))
 	{
 		if (!checkJsonFileFormat() || getJsonFileVersion()<CATALOG_FORMAT_VERSION)
 		{
@@ -160,25 +166,28 @@ void Novae::init()
 	}
 	else
 	{
-		qDebug() << "[Novae] novae.json does not exist - copying default file to" << QDir::toNativeSeparators(novaeJsonPath);
+		qInfo().noquote() << "[Novae] novae.json does not exist - copying default file to" << QDir::toNativeSeparators(novaeJsonPath);
 		restoreDefaultJsonFile();
 	}
 
-	qDebug() << "[Novae] loading catalog file:" << QDir::toNativeSeparators(novaeJsonPath);
+	qInfo().noquote() << "[Novae] Loading catalog file:" << QDir::toNativeSeparators(novaeJsonPath);
 
 	readJsonFile();
 
 	// Set up download manager and the update schedule
-	networkManager = StelApp::getInstance().getNetworkAccessManager();
+	//networkManager = StelApp::getInstance().getNetworkAccessManager();
+	networkManager = new QNetworkAccessManager(this);
 	updateState = CompleteNoUpdates;
 	updateTimer = new QTimer(this);
 	updateTimer->setSingleShot(false);   // recurring check for update
 	updateTimer->setInterval(13000);     // check once every 13 seconds to see if it is time for an update
-	connect(updateTimer, SIGNAL(timeout()), this, SLOT(checkForUpdate()));
+	connect(updateTimer, &QTimer::timeout, this, &Novae::checkForUpdate);
 	updateTimer->start();
 
-	connect(this, SIGNAL(jsonUpdateComplete(void)), this, SLOT(reloadCatalog()));
-	connect(StelApp::getInstance().getCore(), SIGNAL(configurationDataSaved()), this, SLOT(saveSettings()));
+	connect(this, &Novae::jsonUpdateComplete, this, &Novae::reloadCatalog);
+	connect(StelApp::getInstance().getCore(), &StelCore::configurationDataSaved, this, &Novae::saveSettings);
+	StarMgr* smgr = GETSTELMODULE(StarMgr);
+	connect(smgr, &StarMgr::starLabelsDisplayedChanged, this, &Novae::setFlagSyncShowLabels);
 
 	GETSTELMODULE(StelObjectMgr)->registerStelObjectMgr(this);
 }
@@ -190,9 +199,11 @@ void Novae::draw(StelCore* core)
 {
 	StelProjectorP prj = core->getProjection(StelCore::FrameJ2000);
 	StelPainter painter(prj);
+	QFont font=QGuiApplication::font();
+	font.setPixelSize(fontSize);
 	painter.setFont(font);
 	
-	for (const auto& n : nova)
+	for (const auto& n : std::as_const(nova))
 	{
 		if (n && n->initialized)
 		{
@@ -214,13 +225,12 @@ void Novae::drawPointer(StelCore* core, StelPainter &painter)
 		const StelObjectP obj = newSelected[0];
 		Vec3d pos=obj->getJ2000EquatorialPos(core);
 
-		Vec3d screenpos;
+		Vec3f screenpos;
 		// Compute 2D pos and return if outside screen
 		if (!painter.getProjector()->project(pos, screenpos))
 			return;
 
-		const Vec3f& c(obj->getInfoColor());
-		painter.setColor(c[0],c[1],c[2]);
+		painter.setColor(obj->getInfoColor());
 		texPointer->bind();
 		painter.setBlending(true);
 		painter.drawSprite2dMode(screenpos[0], screenpos[1], 13.f, StelApp::getInstance().getTotalRunTime()*40.);
@@ -274,56 +284,60 @@ StelObjectP Novae::searchByNameI18n(const QString& nameI18n) const
 	return Q_NULLPTR;
 }
 
-QStringList Novae::listMatchingObjects(const QString& objPrefix, int maxNbItem, bool useStartOfWords) const
+QVector<QPair<QString,StelObjectP>> Novae::listMatchingObjects(const QString& objPrefix, int maxNbItem, bool useStartOfWords) const
 {
-	QStringList result;
+	QVector<QPair<QString,StelObjectP>> result;
 	if (maxNbItem <= 0)
 		return result;
 
-	QStringList names;
+	QVector<QPair<QString,StelObjectP>> names;
 	for (const auto& n : nova)
 	{
-		names.append(n->getNameI18n());
-		names.append(n->getEnglishName());
-		names.append(n->getDesignation());
+		names.append({n->getNameI18n(), StelObjectP(n)});
+		names.append({n->getEnglishName(), StelObjectP(n)});
+		names.append({n->getDesignation(), StelObjectP(n)});
 	}
 
-	QString fullMatch = "";
-	for (const auto& name : names)
+	QString fullMatchName;
+	StelObjectP fullMatchP;
+	for (const auto& [name,obj] : names)
 	{
 		if (!matchObjectName(name, objPrefix, useStartOfWords))
 			continue;
 
 		if (name==objPrefix)
-			fullMatch = name;
+		{
+			fullMatchName = name;
+			fullMatchP = obj;
+		}
 		else
-			result.append(name);
+			result.append({name, obj});
 
 		if (result.size() >= maxNbItem)
 			break;
 	}
 
-	result.sort();
-	if (!fullMatch.isEmpty())
-		result.prepend(fullMatch);
+	std::sort(result.begin(), result.end(), [](auto& a, auto& b){ return a.first < b.first; });
+	if (!fullMatchName.isEmpty())
+		result.prepend({fullMatchName, fullMatchP});
 	return result;
 }
 
-QStringList Novae::listAllObjects(bool inEnglish) const
+QVector<QPair<QString,StelObjectP>> Novae::listAllObjects(bool inEnglish) const
 {
-	QStringList result;
+	QVector<QPair<QString,StelObjectP>> result;
 	if (inEnglish)
 	{
 		for (const auto& n : nova)
 		{
-			result << n->getEnglishName();
+			result.append({n->getEnglishName(), StelObjectP(n)});
 		}
 	}
 	else
 	{
 		for (const auto& n : nova)
 		{
-			result << n->getNameI18n();
+			result.append({n->getNameI18n(), StelObjectP(n)});
 		}
 	}
 	return result;
@@ -334,7 +348,7 @@ QStringList Novae::listAllObjects(bool inEnglish) const
 */
 void Novae::restoreDefaultJsonFile(void)
 {
-	if (QFileInfo(novaeJsonPath).exists())
+    if (QFileInfo::exists(novaeJsonPath))
 		backupJsonFile(true);
 
 	QFile src(":/Novae/novae.json");
@@ -371,7 +385,7 @@ bool Novae::backupJsonFile(bool deleteOriginal)
 	}
 
 	QString backupPath = novaeJsonPath + ".old";
-	if (QFileInfo(backupPath).exists())
+	if (QFileInfo::exists(backupPath))
 		QFile(backupPath).remove();
 
 	if (old.copy(backupPath))
@@ -380,14 +394,14 @@ bool Novae::backupJsonFile(bool deleteOriginal)
 		{
 			if (!old.remove())
 			{
-				qWarning() << "[Novae] WARNING - could not remove old novae.json file";
+				qWarning() << "[Novae] Could not remove old novae.json file";
 				return false;
 			}
 		}
 	}
 	else
 	{
-		qWarning() << "[Novae] WARNING - failed to copy novae.json to novae.json.old";
+		qWarning() << "[Novae] Failed to copy novae.json to novae.json.old";
 		return false;
 	}
 
@@ -439,7 +453,7 @@ void Novae::setNovaeMap(const QVariantMap& map)
 	novalist.clear();
 	NovaCnt=0;
 	QVariantMap novaeMap = map.value("nova").toMap();
-	for (auto novaeKey : novaeMap.keys())
+	for (auto &novaeKey : novaeMap.keys())
 	{
 		QVariantMap novaeData = novaeMap.value(novaeKey).toMap();
 		novaeData["designation"] = QString("%1").arg(novaeKey);
@@ -478,7 +492,7 @@ int Novae::getJsonFileVersion(void) const
 	{
 		jsonVersion = map.value("version").toInt();
 	}
-	qDebug() << "[Novae] version of the catalog:" << jsonVersion;
+	qInfo().noquote() << "[Novae] version of the catalog:" << jsonVersion;
 	return jsonVersion;
 }
 
@@ -518,9 +532,13 @@ NovaP Novae::getByID(const QString& id) const
 
 bool Novae::configureGui(bool show)
 {
+#ifdef NO_GUI
+	return false;
+#else
 	if (show)
 		configDialog->setVisible(true);
 	return true;
+#endif
 }
 
 void Novae::restoreDefaults(void)
@@ -575,7 +593,11 @@ int Novae::getSecondsToUpdate(void)
 
 void Novae::checkForUpdate(void)
 {
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+	if (updatesEnabled && lastUpdate.addSecs(updateFrequencyDays * 3600 * 24) <= QDateTime::currentDateTime())
+#else
 	if (updatesEnabled && lastUpdate.addSecs(updateFrequencyDays * 3600 * 24) <= QDateTime::currentDateTime() && networkManager->networkAccessible()==QNetworkAccessManager::Accessible)
+#endif
 		updateJSON();
 }
 
@@ -593,8 +615,6 @@ void Novae::updateJSON(void)
 
 void Novae::deleteDownloadProgressBar()
 {
-	disconnect(this, SLOT(updateDownloadProgress(qint64,qint64)));
-
 	if (progressBar)
 	{
 		StelApp::getInstance().removeProgressBar(progressBar);
@@ -602,7 +622,7 @@ void Novae::deleteDownloadProgressBar()
 	}
 }
 
-void Novae::startDownload(QString urlString)
+void Novae::startDownload(const QString &urlString)
 {
 	QUrl url(urlString);
 	if (!url.isValid() || url.isRelative() || !url.scheme().startsWith("http", Qt::CaseInsensitive))
@@ -616,16 +636,18 @@ void Novae::startDownload(QString urlString)
 	progressBar->setValue(0);
 	progressBar->setRange(0, 0);
 
-	connect(networkManager, SIGNAL(finished(QNetworkReply*)), this, SLOT(downloadComplete(QNetworkReply*)));
+	connect(networkManager, &QNetworkAccessManager::finished, this, &Novae::downloadComplete);
 	QNetworkRequest request;
 	request.setUrl(QUrl(updateUrl));
 	request.setRawHeader("User-Agent", StelUtils::getUserAgentString().toUtf8());
-	request.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
+#if (QT_VERSION<QT_VERSION_CHECK(6,0,0))
+	request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, true);
+#endif
 	downloadReply = networkManager->get(request);
-	connect(downloadReply, SIGNAL(downloadProgress(qint64,qint64)), this, SLOT(updateDownloadProgress(qint64,qint64)));
+	connect(downloadReply, &QNetworkReply::downloadProgress, this, &Novae::updateDownloadProgress);
 
 	updateState = Novae::Updating;
-	emit(updateStateChanged(updateState));
+	emit updateStateChanged(updateState);
 }
 
 void Novae::updateDownloadProgress(qint64 bytesReceived, qint64 bytesTotal)
@@ -641,8 +663,8 @@ void Novae::updateDownloadProgress(qint64 bytesReceived, qint64 bytesTotal)
 		//Round to the greatest possible derived unit
 		while (bytesTotal > 1024)
 		{
-			bytesReceived = static_cast<qint64>(std::floor(bytesReceived / 1024.));
-			bytesTotal    = static_cast<qint64>(std::floor(bytesTotal / 1024.));
+			bytesReceived = static_cast<qint64>(std::floor(static_cast<double>(bytesReceived) / 1024.));
+			bytesTotal    = static_cast<qint64>(std::floor(static_cast<double>(bytesTotal) / 1024.));
 		}
 		currentValue = static_cast<int>(bytesReceived);
 		endValue = static_cast<int>(bytesTotal);
@@ -657,14 +679,14 @@ void Novae::downloadComplete(QNetworkReply *reply)
 	if (reply == Q_NULLPTR)
 		return;
 
-	disconnect(networkManager, SIGNAL(finished(QNetworkReply*)), this, SLOT(downloadComplete(QNetworkReply*)));
+	disconnect(networkManager, &QNetworkAccessManager::finished, this, &Novae::downloadComplete);
 	deleteDownloadProgressBar();
 
 	if (reply->error() || reply->bytesAvailable()==0)
 	{
 		qWarning() << "[Novae] Download error: While trying to access"
 			   << reply->url().toString()
-			   << "the following error occured:"
+			   << "the following error occurred:"
 			   << reply->errorString();
 
 		reply->deleteLater();
@@ -697,17 +719,18 @@ void Novae::downloadComplete(QNetworkReply *reply)
 		updateState = Novae::DownloadError;
 	}
 
-	emit(updateStateChanged(updateState));
-	emit(jsonUpdateComplete());
+	emit updateStateChanged(updateState);
+	emit jsonUpdateComplete();
 
 	reply->deleteLater();
 	downloadReply = Q_NULLPTR;
 
-	readJsonFile();
+	qDebug() << "[Novae] Updating novae catalog is complete...";
+	//readJsonFile();
 }
 
 
-void Novae::displayMessage(const QString& message, const QString hexColor)
+void Novae::displayMessage(const QString& message, const QString &hexColor)
 {
 	messageIDs << GETSTELMODULE(LabelMgr)->labelScreen(message, 30, 30 + (20*messageIDs.count()), true, 16, hexColor, false, 9000);
 }
@@ -718,7 +741,7 @@ QString Novae::getNovaeList()
 	int year, month, day;
 	QList<double> vals = novalist.values();
 	std::sort(vals.begin(), vals.end());
-	for (auto val : vals)
+	for (auto val : std::as_const(vals))
 	{
 		StelUtils::getDateFromJulianDay(val, &year, &month, &day);
 		out << QString("%1 (%2 %3 %4)").arg(novalist.key(val)).arg(day).arg(StelLocaleMgr::longGenitiveMonthName(month)).arg(year);
@@ -773,6 +796,7 @@ void Novae::reloadCatalog(void)
 	if (hasSelection)
 	{
 		// Restore selection...
-		objMgr->setSelectedObject(selectedObject);
+		StelObjectP obj = selectedObject[0];
+		objMgr->findAndSelect(obj->getEnglishName(), obj->getType());
 	}
 }

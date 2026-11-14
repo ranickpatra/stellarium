@@ -35,13 +35,13 @@ public:
 	//! @param zhr Zenith Hourly Rate
 	//! @param maxv Maximum meteor velocity
 	SporadicMeteorMgr(int zhr, int maxv);
-	virtual ~SporadicMeteorMgr();
+	~SporadicMeteorMgr() override;
 
 	// Methods defined in the StelModule class
-	virtual void init();
-	virtual void draw(StelCore* core);
-	virtual void update(double deltaTime);
-	virtual double getCallOrder(StelModuleActionName actionName) const;
+	void init() override;
+	void draw(StelCore* core) override;
+	void update(double deltaTime) override;
+	double getCallOrder(StelModuleActionName actionName) const override;
 
 public slots:
 	// Methods callable from script and GUI

@@ -18,45 +18,90 @@
  */
 
 #include <QDebug>
+#include <QWindow>
 
 #include "Dialog.hpp"
+#include <QHBoxLayout>
 #include "StelMainView.hpp"
+#include "StelCloseButton.hpp"
 
-void BarFrame::mousePressEvent(QMouseEvent *event)
+TitleBar::TitleBar(QWidget* parent)
+	: QFrame(parent)
+	, label(new QLabel("unnamed window"))
+{
+	setFrameStyle(QFrame::StyledPanel);
+
+	const auto layout = new QHBoxLayout(this);
+
+	label->setObjectName("stelWindowTitle");
+	label->setAlignment(Qt::AlignCenter);
+	label->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Preferred);
+	layout->addWidget(label);
+	layout->setContentsMargins(0,0,0,0);
+
+	const auto close = new StelCloseButton;
+	close->setFocusPolicy(Qt::NoFocus);
+	layout->addWidget(close);
+
+	connect(close, &QAbstractButton::clicked, this, &TitleBar::closeClicked);
+}
+
+void TitleBar::mousePressEvent(QMouseEvent *event)
 {
 	mousePos = event->pos();
 	moving = true;
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+	const auto parent = parentWidget();
+	if (parent->inherits("CustomDialog"))
+	{
+		if (const auto win = parent->windowHandle())
+			systemMoveStarted = win->startSystemMove();
+	}
+#endif
 }
 
-void BarFrame::mouseReleaseEvent(QMouseEvent *)
+void TitleBar::mouseReleaseEvent(QMouseEvent *)
 {
+	const auto parent = parentWidget();
+	Q_ASSERT(parent);
+
 	moving = false;
+	systemMoveStarted = false;
+
 	QWidget* p = dynamic_cast<QWidget*>(QFrame::parent());
 	emit movedTo(p->pos());
 }
 
-void BarFrame::mouseMoveEvent(QMouseEvent *event)
+void TitleBar::mouseMoveEvent(QMouseEvent *event)
 {
 	if (!moving) return;
+	if (systemMoveStarted) return;
+
 	QPoint dpos = event->pos() - mousePos;
 	QWidget* p = dynamic_cast<QWidget*>(QFrame::parent());
 	QPoint targetPos = p->pos() + dpos;
 	
-	// Prevent the title bar from being dragged to an unreachable position.
-	QWidget& mainWindow = StelMainView::getInstance();
-	int leftBoundX = 10 - width();
-	int rightBoundX = mainWindow.width() - 10;
-	if (targetPos.x() < leftBoundX)
-		targetPos.setX(leftBoundX);
-	else if (targetPos.x() > rightBoundX)
-		targetPos.setX(rightBoundX);
-	
-	int lowerBoundY = mainWindow.height() - height();
-	if (targetPos.y() < 0)
-		targetPos.setY(0);
-	else if (targetPos.y() > lowerBoundY)
-		targetPos.setY(lowerBoundY);
-	
+	QWidget *parent=parentWidget();
+	Q_ASSERT(parent);
+
+	if (!(parent->inherits("CustomDialog")))
+	{
+		// Prevent the title bar from being dragged to an unreachable position.
+		QWidget& mainWindow = StelMainView::getInstance();
+		int leftBoundX = 10 - width();
+		int rightBoundX = mainWindow.width() - 10;
+		if (targetPos.x() < leftBoundX)
+			targetPos.setX(leftBoundX);
+		else if (targetPos.x() > rightBoundX)
+			targetPos.setX(rightBoundX);
+
+		int lowerBoundY = mainWindow.height() - height();
+		if (targetPos.y() < 0)
+			targetPos.setY(0);
+		else if (targetPos.y() > lowerBoundY)
+			targetPos.setY(lowerBoundY);
+	}
 	p->move(targetPos);
 	//emit movedTo(targetPos);
 }

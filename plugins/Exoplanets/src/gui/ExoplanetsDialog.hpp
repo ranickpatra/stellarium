@@ -24,6 +24,11 @@
 #include <QObject>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
+#include <QtCharts/QtCharts>
+#if (QT_VERSION<QT_VERSION_CHECK(6,0,0))
+using namespace QtCharts;
+#endif
+#include <QXYSeries>
 
 #include "StelDialog.hpp"
 #include "Exoplanets.hpp"
@@ -59,25 +64,21 @@ public:
 	};
 
 	ExoplanetsDialog();
-	~ExoplanetsDialog();
+	~ExoplanetsDialog() override;
 
 protected:
 	//! Initialize the dialog widgets and connect the signals/slots
-	void createDialogContent();
+	void createDialogContent() override;
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 	void refreshUpdateValues(void);
 
 private slots:
 	void setUpdateValues(int hours);
 	void setUpdatesEnabled(int checkState);
-	void setDistributionEnabled(int checkState);
-	void setTimelineEnabled(int checkState);
-	void setHabitableEnabled(int checkState);
 	void setDisplayAtStartupEnabled(int checkState);
-	void setDisplayShowExoplanetsButton(int checkState);
-	void setDisplayShowExoplanetsDesignations(int checkState);
+	void setDisplayShowExoplanetsButton(int checkState);		
 	void updateStateReceiver(Exoplanets::UpdateState state);
         void updateCompleteReceiver();
 	void restoreDefaults(void);
@@ -119,7 +120,7 @@ public:
 	}
 
 private:
-	bool operator < (const QTreeWidgetItem &other) const
+	bool operator < (const QTreeWidgetItem &other) const override
 	{
 		int column = treeWidget()->sortColumn();
 

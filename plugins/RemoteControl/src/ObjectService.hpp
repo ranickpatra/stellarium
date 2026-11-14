@@ -36,18 +36,16 @@ class ObjectService : public AbstractAPIService
 {
 	Q_OBJECT
 public:
-	ObjectService(QObject* parent = Q_NULLPTR);
+	ObjectService(QObject* parent = nullptr);
 
-	virtual QLatin1String getPath() const Q_DECL_OVERRIDE { return QLatin1String("objects"); }
+	QLatin1String getPath() const override { return QLatin1String("objects"); }
 	//! @brief Implements the HTTP GET method
 	//! @see \ref rcObjectServiceGET
-	virtual void get(const QByteArray& operation,const APIParameters& parameters, APIServiceResponse& response) Q_DECL_OVERRIDE;
+	void get(const QByteArray& operation,const APIParameters& parameters, APIServiceResponse& response) override;
 
 private slots:
 	//! Executed in Stellarium main thread to avoid multiple QMetaObject::invoke calls
 	QStringList performSearch(const QString& text);
-	//! Wrapper around SearchDialog::substituteGreek
-	QString substituteGreek(const QString& text);
 
 	//! Wrapper around StelObjectMgr::find...
 	StelObjectP findObject(const QString& name);

@@ -21,19 +21,19 @@
 #include "StelTranslator.hpp"
 
 #include "StelProjector.hpp"
-#include "StelProjectorClasses.hpp"
+#include "StelApp.hpp"
 
 #include <QDebug>
 #include <QString>
+#include <QOpenGLShaderProgram>
 
-StelProjector::Mat4dTransform::Mat4dTransform(const Mat4d& m)
-    : transfoMat(m),
-      transfoMatf(static_cast<float>(m[0]),  static_cast<float>(m[1]),  static_cast<float>(m[2]),  static_cast<float>(m[3]),
-		  static_cast<float>(m[4]),  static_cast<float>(m[5]),  static_cast<float>(m[6]),  static_cast<float>(m[7]),
-		  static_cast<float>(m[8]),  static_cast<float>(m[9]),  static_cast<float>(m[10]), static_cast<float>(m[11]),
-		  static_cast<float>(m[12]), static_cast<float>(m[13]), static_cast<float>(m[14]), static_cast<float>(m[15]))
+StelProjector::Mat4dTransform::Mat4dTransform(const Mat4d& altAzToWorld, const Mat4d& vertexToAltAzPos)
+    : transfoMat(altAzToWorld*vertexToAltAzPos)
+    , transfoMatf(toMat4f(transfoMat))
+	, vertexToAltAzPos(toMat4f(vertexToAltAzPos))
+	, worldPosToAltAzPos(toMat4f(altAzToWorld.inverse()))
 {
-	Q_ASSERT(m[0]==m[0]); // prelude to assert later in Atmosphere rendering... still investigating
+	Q_ASSERT(transfoMat[0]==transfoMat[0]); // prelude to assert later in Atmosphere rendering... still investigating
 }
 
 void StelProjector::Mat4dTransform::forward(Vec3d& v) const
@@ -72,12 +72,8 @@ void StelProjector::Mat4dTransform::backward(Vec3f& v) const
 
 void StelProjector::Mat4dTransform::combine(const Mat4d& m)
 {
-	Mat4f mf(static_cast<float>(m[0]),  static_cast<float>(m[1]) ,  static_cast<float>(m[2]),  static_cast<float>(m[3]),
-		static_cast<float>(m[4]),  static_cast<float>(m[5]),   static_cast<float>(m[6]),  static_cast<float>(m[7]),
-		static_cast<float>(m[8]),  static_cast<float>(m[9]),   static_cast<float>(m[10]), static_cast<float>(m[11]),
-		static_cast<float>(m[12]), static_cast<float>(m[13]),  static_cast<float>(m[14]), static_cast<float>(m[15]));
 	transfoMat=transfoMat*m;
-	transfoMatf=transfoMatf*mf;
+	transfoMatf=toMat4f(transfoMat);
 }
 
 Mat4d StelProjector::Mat4dTransform::getApproximateLinearTransfo() const
@@ -87,7 +83,56 @@ Mat4d StelProjector::Mat4dTransform::getApproximateLinearTransfo() const
 
 StelProjector::ModelViewTranformP StelProjector::Mat4dTransform::clone() const
 {
-	return ModelViewTranformP(new Mat4dTransform(transfoMat));
+	return ModelViewTranformP(new Mat4dTransform(*this));
+}
+
+QByteArray StelProjector::Mat4dTransform::getForwardTransformShader() const
+{
+	return 1+R"(
+#line 1 104
+uniform highp mat4 PROJECTOR_vertexToAltAzPosMatrix;
+uniform highp mat4 PROJECTOR_modelViewMatrix;
+highp vec3 modelViewForwardTransform(highp vec3 v)
+{
+	return (PROJECTOR_modelViewMatrix * vec4(v,1)).xyz;
+}
+highp vec3 vertexToAltAzPos(highp vec3 v)
+{
+	return (PROJECTOR_vertexToAltAzPosMatrix * vec4(v,1)).xyz;
+}
+#line 1 0
+)";
+}
+
+void StelProjector::Mat4dTransform::setForwardTransformUniforms(QOpenGLShaderProgram& program) const
+{
+	program.setUniformValue("PROJECTOR_modelViewMatrix", transfoMatf.toQMatrix());
+	program.setUniformValue("PROJECTOR_vertexToAltAzPosMatrix", vertexToAltAzPos.toQMatrix());
+}
+
+QByteArray StelProjector::Mat4dTransform::getBackwardTransformShader() const
+{
+	return 1+R"(
+#line 1 105
+uniform highp mat4 PROJECTOR_modelViewMatrixInverse;
+uniform highp mat4 PROJECTOR_worldPosToAltAzPosMatrix;
+highp vec3 modelViewBackwardTransform(highp vec3 worldPos)
+{
+	return (PROJECTOR_modelViewMatrixInverse * vec4(worldPos,1)).xyz;
+}
+highp vec3 worldPosToAltAzPos(highp vec3 worldPos)
+{
+	return (PROJECTOR_worldPosToAltAzPosMatrix * vec4(worldPos,1)).xyz;
+}
+
+#line 1 0
+)";
+}
+
+void StelProjector::Mat4dTransform::setBackwardTransformUniforms(QOpenGLShaderProgram& program) const
+{
+	program.setUniformValue("PROJECTOR_modelViewMatrixInverse", transfoMatf.toQMatrix().inverted());
+	program.setUniformValue("PROJECTOR_worldPosToAltAzPosMatrix", worldPosToAltAzPos.toQMatrix());
 }
 
 const QString StelProjector::maskTypeToString(StelProjectorMaskType type)
@@ -124,14 +169,26 @@ void StelProjector::init(const StelProjectorParams& params)
 	flipHorz = params.flipHorz ? -1.f : 1.f;
 	flipVert = params.flipVert ? -1.f : 1.f;
 	viewportFovDiameter = params.viewportFovDiameter * devicePixelsPerPixel;
-	pixelPerRad = 0.5f * static_cast<float>(viewportFovDiameter) / fovToViewScalingFactor(params.fov*(static_cast<float>(M_PI)/360.f));
+	pixelPerRad = 0.5f * static_cast<float>(viewportFovDiameter) / fovToViewScalingFactor(M_PIf/360.f * params.fov);
 	widthStretch = params.widthStretch;
 	computeBoundingCap();
 }
 
 QString StelProjector::getHtmlSummary() const
 {
-	return QString("<h3>%1</h3><p>%2</p><b>%3</b>%4").arg(getNameI18()).arg(getDescriptionI18()).arg(q_("Maximum FOV: ")).arg(static_cast<double>(getMaxFov()))+QChar(0x00B0);
+	return QString("<h3>%1</h3><p>%2</p><b>%3</b>%4°").arg(getNameI18(), getDescriptionI18(), q_("Maximum FOV: "), QString::number(static_cast<double>(getMaxFov())));
+}
+
+void StelProjector::setForwardTransformUniforms(QOpenGLShaderProgram& program) const
+{
+	modelViewTransform->setForwardTransformUniforms(program);
+	program.setUniformValue("PROJECTOR_FWD_widthStretch", GLfloat(widthStretch));
+}
+
+void StelProjector::setBackwardTransformUniforms(QOpenGLShaderProgram& program) const
+{
+	modelViewTransform->setBackwardTransformUniforms(program);
+	program.setUniformValue("PROJECTOR_FWD_widthStretch", GLfloat(widthStretch));
 }
 
 bool StelProjector::intersectViewportDiscontinuity(const Vec3d& p1, const Vec3d& p2) const
@@ -212,7 +269,7 @@ SphericalRegionP StelProjector::getViewportConvexPolygon(float marginX, float ma
 	{
 		// Special case for handling degenerated cases, use full sky.
 		//qDebug() << "!ok";
-		return SphericalRegionP(reinterpret_cast<SphericalRegion*>(new AllSkySphericalRegion()));
+		return SphericalRegionP(new AllSkySphericalRegion());
 	}
 	e0.normalize();
 	e1.normalize();
@@ -253,9 +310,14 @@ float StelProjector::getPixelPerRadAtCenter() const
 	return pixelPerRad;
 }
 
+float StelProjector::getScreenScale() const
+{
+	return StelApp::getInstance().getScreenScale();
+}
+
 //! Get the current FOV diameter in degrees
 float StelProjector::getFov() const {
-	return 360.f/static_cast<float>(M_PI)*viewScalingFactorToFov(0.5f*static_cast<float>(viewportFovDiameter)/pixelPerRad);
+	return 360.f/M_PIf*viewScalingFactorToFov(0.5f*static_cast<float>(viewportFovDiameter)/pixelPerRad);
 }
 
 //! Get whether front faces need to be oriented in the clockwise direction
@@ -267,7 +329,7 @@ bool StelProjector::needGlFrontFaceCW() const
 bool StelProjector::checkInViewport(const Vec3d& pos) const
 {
 	return (pos[1]>=viewportXywh[1] && pos[0]>=viewportXywh[0] &&
-		pos[1]<=(viewportXywh[1] + viewportXywh[3]) && pos[0]<=(viewportXywh[0] + viewportXywh[2]));
+	        pos[1]<=(viewportXywh[1] + viewportXywh[3]) && pos[0]<=(viewportXywh[0] + viewportXywh[2]));
 }
 
 //! Check to see if a 2d position is inside the viewport.
@@ -275,7 +337,7 @@ bool StelProjector::checkInViewport(const Vec3d& pos) const
 bool StelProjector::checkInViewport(const Vec3f& pos) const
 {
 	return (pos[1]>=viewportXywh[1] && pos[0]>=viewportXywh[0] &&
-		pos[1]<=(viewportXywh[1] + viewportXywh[3]) && pos[0]<=(viewportXywh[0] + viewportXywh[2]));
+	        pos[1]<=(viewportXywh[1] + viewportXywh[3]) && pos[0]<=(viewportXywh[0] + viewportXywh[2]));
 }
 
 //! Return the position where the 2 2D point p1 and p2 cross the viewport edge
@@ -308,6 +370,14 @@ bool StelProjector::project(const Vec3f& v, Vec3f& win) const
 	return projectInPlace(win);
 }
 
+bool StelProjector::project(const Vec3d& v, Vec3f& win) const
+{
+	Vec3d wind = v;
+	bool res= projectInPlace(wind);
+	win = wind.toVec3f();
+	return res;
+}
+
 void StelProjector::project(int n, const Vec3d* in, Vec3f* out)
 {
 	Vec3d v;
@@ -318,8 +388,8 @@ void StelProjector::project(int n, const Vec3d* in, Vec3f* out)
 		out->set(static_cast<float>(v[0]), static_cast<float>(v[1]), static_cast<float>(v[2]));
 		forward(*out);
 		out->set(static_cast<float>(viewportCenter[0]) + flipHorz * pixelPerRad * (*out)[0],
-			static_cast<float>(viewportCenter[1]) + flipVert * pixelPerRad * (*out)[1],
-			static_cast<float>((static_cast<double>((*out)[2]) - zNear) * oneOverZNearMinusZFar));
+		         static_cast<float>(viewportCenter[1]) + flipVert * pixelPerRad * (*out)[1],
+		         static_cast<float>((static_cast<double>((*out)[2]) - zNear) * oneOverZNearMinusZFar));
 	}
 }
 
@@ -331,8 +401,8 @@ void StelProjector::project(int n, const Vec3f* in, Vec3f* out)
 		modelViewTransform->forward(*out);
 		forward(*out);
 		out->set(static_cast<float>(viewportCenter[0]) + flipHorz * pixelPerRad * (*out)[0],
-			static_cast<float>(viewportCenter[1]) + flipVert * pixelPerRad * (*out)[1],
-			static_cast<float>((static_cast<double>((*out)[2]) - zNear) * oneOverZNearMinusZFar));
+		         static_cast<float>(viewportCenter[1]) + flipVert * pixelPerRad * (*out)[1],
+		         static_cast<float>((static_cast<double>((*out)[2]) - zNear) * oneOverZNearMinusZFar));
 	}
 }
 
@@ -392,23 +462,107 @@ bool StelProjector::unProject(const Vec3d& win, Vec3d& v) const
 	return unProject(win[0], win[1], v);
 }
 
+QByteArray StelProjector::getProjectShader() const
+{
+	static const char*const projectSrc = 1+R"(
+#line 1 106
+uniform highp vec2 PROJECTOR_viewportCenter;
+uniform highp vec2 PROJECTOR_flip;
+uniform highp float PROJECTOR_pixelPerRad;
+uniform highp float PROJECTOR_zNear;
+uniform highp float PROJECTOR_oneOverZNearMinusZFar;
+highp vec3 project(highp vec3 modelSpacePoint)
+{
+	highp float flipHorz = PROJECTOR_flip.x, flipVert = PROJECTOR_flip.y;
+	highp vec2  viewportCenter = PROJECTOR_viewportCenter;
+	highp float pixelPerRad = PROJECTOR_pixelPerRad;
+	highp float zNear = PROJECTOR_zNear;
+	highp float oneOverZNearMinusZFar = PROJECTOR_oneOverZNearMinusZFar;
+
+	highp vec3 worldSpacePoint = modelViewForwardTransform(modelSpacePoint);
+	highp vec3 v = projectorForwardTransform(worldSpacePoint);
+	return vec3(viewportCenter[0] + flipHorz * pixelPerRad * v[0],
+	            viewportCenter[1] + flipVert * pixelPerRad * v[1],
+	            (v[2] - zNear) * oneOverZNearMinusZFar);
+}
+#line 1 0
+)";
+	return getForwardTransformShader() + projectSrc;
+}
+
+void StelProjector::setProjectUniforms(QOpenGLShaderProgram& program) const
+{
+	setForwardTransformUniforms(program);
+	program.setUniformValue("PROJECTOR_viewportCenter", QVector2D(viewportCenter[0], viewportCenter[1]));
+	program.setUniformValue("PROJECTOR_flip", QVector2D(flipHorz, flipVert));
+	program.setUniformValue("PROJECTOR_pixelPerRad", GLfloat(pixelPerRad));
+	program.setUniformValue("PROJECTOR_zNear", GLfloat(zNear));
+	program.setUniformValue("PROJECTOR_oneOverZNearMinusZFar", GLfloat(oneOverZNearMinusZFar));
+}
+
+QByteArray StelProjector::getUnProjectShader() const
+{
+	static const char*const projectSrc = 1+R"(
+#line 1 107
+uniform highp vec2 PROJECTOR_viewportCenter;
+uniform highp vec2 PROJECTOR_flip;
+uniform highp float PROJECTOR_pixelPerRad;
+highp vec3 winPosToWorldPos(highp float x, highp float y, out bool ok)
+{
+	highp float flipHorz = PROJECTOR_flip.x, flipVert = PROJECTOR_flip.y;
+	highp vec2  viewportCenter = PROJECTOR_viewportCenter;
+	highp float pixelPerRad = PROJECTOR_pixelPerRad;
+
+	highp vec3 v;
+	v[0] = flipHorz * (x - viewportCenter[0]) / pixelPerRad;
+	v[1] = flipVert * (y - viewportCenter[1]) / pixelPerRad;
+	v[2] = 0.;
+	return projectorBackwardTransform(v, ok);
+}
+
+highp vec3 unProject(highp float x, highp float y, out bool ok)
+{
+	highp vec3 worldPos = winPosToWorldPos(x, y, ok);
+	// Even when the reprojected point comes from a region of the screen,
+	// where nothing is projected to (rval=false), we finish reprojecting.
+	// This looks good for atmosphere rendering, and it helps avoiding
+	// discontinuities when dragging around with the mouse.
+
+	return modelViewBackwardTransform(worldPos);
+}
+#line 1 0
+)";
+	return getBackwardTransformShader() + projectSrc;
+}
+
+void StelProjector::setUnProjectUniforms(QOpenGLShaderProgram& program) const
+{
+	setBackwardTransformUniforms(program);
+	program.setUniformValue("PROJECTOR_viewportCenter", QVector2D(viewportCenter[0], viewportCenter[1]));
+	program.setUniformValue("PROJECTOR_flip", QVector2D(flipHorz, flipVert));
+	program.setUniformValue("PROJECTOR_pixelPerRad", GLfloat(pixelPerRad));
+}
+
 void StelProjector::computeBoundingCap()
 {
 	bool ok = unProject(static_cast<double>(viewportXywh[0]+0.5f*viewportXywh[2]), static_cast<double>(viewportXywh[1]+0.5f*viewportXywh[3]), boundingCap.n);
 	// The central point should be at a valid position by definition.
 	// When center is offset, this assumption may not hold however.
-	Q_ASSERT(ok || (viewportCenterOffset.lengthSquared()>0) );
-	const bool needNormalization = fabs(boundingCap.n.lengthSquared()-1.)>0.00000001;
+	Q_ASSERT(ok || (viewportCenterOffset.normSquared()>0) );
+	const bool needNormalization = fabs(boundingCap.n.normSquared()-1.)>0.00000001;
 
 	// Now need to determine the aperture
 	Vec3d e0,e1,e2,e3,e4,e5;
 	const Vec4i& vp = viewportXywh;
-	ok &= unProject(vp[0],vp[1],e0);
-	ok &= unProject(vp[0]+vp[2],vp[1],e1);
-	ok &= unProject(vp[0]+vp[2],vp[1]+vp[3],e2);
-	ok &= unProject(vp[0],vp[1]+vp[3],e3);
-	ok &= unProject(vp[0],vp[1]+vp[3]/2,e4);
-	ok &= unProject(vp[0]+vp[2],vp[1]+vp[3]/2,e5);
+	// Saemundsson's inversion formula for atmospheric refraction is not exact, so need some padding in terms of arcseconds
+	const double margin = 30000. * MAS2RAD * getPixelPerRadAtCenter();  // 0.5 arcmin
+
+	ok &= unProject(vp[0]-margin, vp[1]-margin, e0);             // e0: bottom left
+	ok &= unProject(vp[0]+vp[2]+margin, vp[1]-margin,e1);        // e1: bottom right
+	ok &= unProject(vp[0]+vp[2]+margin, vp[1]+vp[3]+margin, e2); // e2: top right
+	ok &= unProject(vp[0]-margin, vp[1]+vp[3]+margin, e3);       // e3: top left
+	ok &= unProject(vp[0]-margin,vp[1]+vp[3]/2+margin,e4);       // e4: left center
+	ok &= unProject(vp[0]+vp[2]+margin,vp[1]+vp[3]/2+margin,e5); // e5: right center
 	if (!ok)
 	{
 		// Some points were in invalid positions, use full sky.
@@ -483,4 +637,11 @@ Mat4f StelProjector::getProjectionMatrix() const
 StelProjector::StelProjectorMaskType StelProjector::getMaskType(void) const
 {
 	return maskType;
+}
+
+bool StelProjector::isSameProjection(const StelProjector& other) const
+{
+	// *this defines the projection type, modelViewTransform defines how refraction is handled.
+	return typeid(*this) == typeid(other) &&
+	       typeid(*modelViewTransform) == typeid(*other.modelViewTransform);
 }

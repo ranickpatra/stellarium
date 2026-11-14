@@ -31,18 +31,18 @@ Q_LOGGING_CATEGORY(syncServer,"stel.plugin.remoteSync.server")
 
 using namespace SyncProtocol;
 
-SyncServer::SyncServer(QObject* parent)
+SyncServer::SyncServer(QObject* parent, bool allowVersionMismatch)
 	: QObject(parent), stopping(false), timeoutTimerId(-1)
 {
 	qserver = new QTcpServer(this);
-	connect(qserver,SIGNAL(newConnection()), this, SLOT(handleNewConnection()));
-	connect(qserver,SIGNAL(acceptError(QAbstractSocket::SocketError)),this,SLOT(connectionError(QAbstractSocket::SocketError)));
+	connect(qserver, &QTcpServer::newConnection, this, &SyncServer::handleNewConnection);
+	connect(qserver, &QTcpServer::acceptError, this, &SyncServer::connectionError);
 
 	//create message handlers
-	handlerList.resize(MSGTYPE_SIZE);
-	handlerList[ERROR] =  new ServerErrorHandler();
-	handlerList[CLIENT_CHALLENGE_RESPONSE] = new ServerAuthHandler(this, false);
-	handlerList[ALIVE] = new ServerAliveHandler();
+	handlerHash.clear();
+	handlerHash[SYNC_ERROR] =  new ServerErrorHandler();
+	handlerHash[CLIENT_CHALLENGE_RESPONSE] = new ServerAuthHandler(this, allowVersionMismatch);
+	handlerHash[ALIVE] = new ServerAliveHandler();
 }
 
 SyncServer::~SyncServer()
@@ -50,12 +50,12 @@ SyncServer::~SyncServer()
 	stop();
 
 	//delete handlers
-	for (auto* h : handlerList)
+	for (auto* h : std::as_const(handlerHash))
 	{
 		if(h)
 			delete h;
 	}
-	handlerList.clear();
+	handlerHash.clear();
 
 	qCDebug(syncServer)<<"Destroyed";
 }
@@ -78,7 +78,6 @@ bool SyncServer::start(quint16 port)
 		addSender(new SelectionEventSender());
 		addSender(new StelPropertyEventSender());
 		addSender(new ViewEventSender());
-		addSender(new FovEventSender());
 	}
 	else
 		qCCritical(syncServer)<<"Error while starting:"<<qserver->errorString();
@@ -93,7 +92,7 @@ void SyncServer::addSender(SyncServerEventSender *snd)
 
 void SyncServer::broadcastMessage(const SyncMessage &msg)
 {
-	qCDebug(syncServer)<<"Broadcast message"<<msg;
+	qCDebug(syncServer)<<"Broadcast message"<<msg.toString();
 	qint64 size = msg.createFullMessage(broadcastBuffer);
 
 	if(!size)
@@ -107,7 +106,7 @@ void SyncServer::broadcastMessage(const SyncMessage &msg)
 		return;
 	}
 
-	for (auto* client : clients)
+	for (auto* client : std::as_const(clients))
 	{
 		if(client->isAuthenticated())
 		{
@@ -126,7 +125,7 @@ void SyncServer::stop()
 		qserver->close();
 
 		//delete senders
-		for (auto* s : senderList)
+		for (auto* s : std::as_const(senderList))
 		{
 			if(s)
 				delete s;
@@ -148,7 +147,7 @@ void SyncServer::stop()
 
 void SyncServer::update()
 {
-	for (auto* s : senderList)
+	for (auto* s : std::as_const(senderList))
 	{
 		s->update();
 	}
@@ -166,7 +165,7 @@ void SyncServer::timerEvent(QTimerEvent *evt)
 void SyncServer::checkTimeouts()
 {
 	//iterate over the connected clients
-	for (auto* client : clients)
+	for (auto* client : std::as_const(clients))
 	{
 		client->checkTimeout();
 	}
@@ -194,15 +193,15 @@ void SyncServer::handleNewConnection()
 {
 	QTcpSocket* newConn = qserver->nextPendingConnection();
 
-	SyncRemotePeer* newClient = new SyncRemotePeer(newConn,false,handlerList);
-	newClient->peerLog("New client connection");
+	SyncRemotePeer* newClient = new SyncRemotePeer(newConn,false,handlerHash);
+	newClient->peerLog(QtDebugMsg, "New client connection");
 	//add to client list
 	clients.append(newClient);
 
 	qCDebug(syncServer)<<clients.size()<<"current connections";
 
 	//hook up disconnect signal
-	connect(newClient, SIGNAL(disconnected(bool)), this, SLOT(clientDisconnected(bool)));
+	connect(newClient, &SyncRemotePeer::disconnected, this, &SyncServer::clientDisconnected);
 
 	//write challenge
 	ServerChallenge msg;
@@ -213,7 +212,7 @@ void SyncServer::handleNewConnection()
 void SyncServer::clientAuthenticated(SyncRemotePeer &peer)
 {
 	//we have to send the client the current app state
-	for (auto* s : senderList)
+	for (auto* s : std::as_const(senderList))
 	{
 		s->newClientConnected(peer);
 	}
@@ -235,6 +234,6 @@ void SyncServer::clientDisconnected(bool clean)
 
 void SyncServer::connectionError(QAbstractSocket::SocketError err)
 {
-	Q_UNUSED(err);
+	Q_UNUSED(err)
 	qCWarning(syncServer)<<"Could not accept an incoming connection, socket error is: "<<qserver->errorString();
 }

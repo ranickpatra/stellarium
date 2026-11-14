@@ -17,19 +17,23 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <QRegularExpression>
+
 #include "Calendars.hpp"
 #include "CalendarsDialog.hpp"
 #include "ui_calendarsDialog.h"
 
 #include "StelApp.hpp"
-#include "StelLocaleMgr.hpp"
+#include "StelGui.hpp"
 #include "StelModule.hpp"
 #include "StelModuleMgr.hpp"
-#include "StelMainView.hpp"
+#include "StelTranslator.hpp"
 
 // We only need to include calendars when we have to call special functions.
 #include "JulianCalendar.hpp"
+#include "RevisedJulianCalendar.hpp"
 #include "GregorianCalendar.hpp"
+#include "ByzantineCalendar.hpp"
 //#include "MayaHaabCalendar.hpp"
 //#include "MayaTzolkinCalendar.hpp"
 //#include "AztecXihuitlCalendar.hpp"
@@ -38,14 +42,14 @@
 
 CalendarsDialog::CalendarsDialog()
 	: StelDialog("Calendars")
-	, cal(Q_NULLPTR)
+	, cal(nullptr)
 {
 	ui = new Ui_calendarsDialog();
 }
 
 CalendarsDialog::~CalendarsDialog()
 {
-	delete ui;          ui=Q_NULLPTR;
+	delete ui; ui=nullptr;
 }
 
 void CalendarsDialog::retranslate()
@@ -66,38 +70,44 @@ void CalendarsDialog::createDialogContent()
 	kineticScrollingList << ui->aboutTextBrowser;
 	StelGui* gui= static_cast<StelGui*>(StelApp::getInstance().getGui());
 	enableKineticScrolling(gui->getFlagUseKineticScrolling());
-	connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+	connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &CalendarsDialog::enableKineticScrolling);
 
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &CalendarsDialog::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
-	connect(ui->restoreDefaultsButton, SIGNAL(clicked()), this, SLOT(resetCalendarsSettings()));
+	connect(ui->restoreDefaultsButton, &QPushButton::clicked, this, &CalendarsDialog::resetCalendarsSettings);
 	setAboutHtml();
 
-	// DISABLE Chinese for now, TBD!
-	ui->chineseCheckBox->hide();
+#ifdef STELLARIUM_RELEASE_BUILD
+	ui->labelRDvalue->hide();
+	ui->labelRD->hide();
+	// DISABLE handling Chinese etc for now, TBD!
 	ui->tabs->removeTab(2);
-	ui->newHinduLunarCheckBox->hide();
-	ui->newHinduSolarCheckBox->hide();
+#else
+	connect(cal->getCal("Julian"), &JulianCalendar::jdChanged, this, [=](double jd){ui->labelRDvalue->setText(QString::number(Calendar::fixedFromJD(jd, true)));});
+#endif
 
 	// MAKE SURE to connect each calendar's partsChanged to a respective populate... method here.
-	connect(cal->getCal("Julian"),             SIGNAL(partsChanged(QVector<int>)), this, SLOT(populateJulianParts(QVector<int>)));
-	connect(cal->getCal("Gregorian"),          SIGNAL(partsChanged(QVector<int>)), this, SLOT(populateGregorianParts(QVector<int>)));
-	connect(cal->getCal("ISO"),                SIGNAL(partsChanged(QVector<int>)), this, SLOT(populateISOParts(QVector<int>)));
-	connect(cal->getCal("MayaLongCount"),      SIGNAL(partsChanged(QVector<int>)), this, SLOT(populateMayaLongCountParts(QVector<int>)));
-	connect(cal->getCal("MayaHaab"),           SIGNAL(partsChanged(QVector<int>)), this, SLOT(populateMayaHaabParts(QVector<int>)));
-	connect(cal->getCal("MayaTzolkin"),        SIGNAL(partsChanged(QVector<int>)), this, SLOT(populateMayaTzolkinParts(QVector<int>)));
-	connect(cal->getCal("AztecXihuitl"),       SIGNAL(partsChanged(QVector<int>)), this, SLOT(populateAztecXihuitlParts(QVector<int>)));
-	connect(cal->getCal("AztecTonalpohualli"), SIGNAL(partsChanged(QVector<int>)), this, SLOT(populateAztecTonalpohualliParts(QVector<int>)));
-	//connect(cal->getCal("Chinese"), SIGNAL(partsChanged(QVector<int>)), this, SLOT(populateChineseParts(QVector<int>)));
+	connect(cal->getCal("Julian"),             &Calendar::partsChanged, this, &CalendarsDialog::populateJulianParts);
+	connect(cal->getCal("RevisedJulian"),      &Calendar::partsChanged, this, &CalendarsDialog::populateRevisedJulianParts);
+	connect(cal->getCal("Gregorian"),          &Calendar::partsChanged, this, &CalendarsDialog::populateGregorianParts);
+	connect(cal->getCal("Byzantine"),          &Calendar::partsChanged, this, &CalendarsDialog::populateByzantineParts);
+	connect(cal->getCal("ISO"),                &Calendar::partsChanged, this, &CalendarsDialog::populateISOParts);
+	connect(cal->getCal("MayaLongCount"),      &Calendar::partsChanged, this, &CalendarsDialog::populateMayaLongCountParts);
+	connect(cal->getCal("MayaHaab"),           &Calendar::partsChanged, this, &CalendarsDialog::populateMayaHaabParts);
+	connect(cal->getCal("MayaTzolkin"),        &Calendar::partsChanged, this, &CalendarsDialog::populateMayaTzolkinParts);
+	connect(cal->getCal("AztecXihuitl"),       &Calendar::partsChanged, this, &CalendarsDialog::populateAztecXihuitlParts);
+	connect(cal->getCal("AztecTonalpohualli"), &Calendar::partsChanged, this, &CalendarsDialog::populateAztecTonalpohualliParts);
+	//connect(cal->getCal("Chinese"), &Calendar::partsChanged, this, &CalendarsDialog::populateChineseParts);
 
 	connectBoolProperty(ui->julianCheckBox,             "Calendars.flagShowJulian");
-	connectBoolProperty(ui->gregorianCheckBox,          "Calendars.flagShowGregorian");
+	connectBoolProperty(ui->revisedJulianCheckBox,      "Calendars.flagShowRevisedJulian");
 	connectBoolProperty(ui->gregorianCheckBox,          "Calendars.flagShowGregorian");
 	connectBoolProperty(ui->isoCheckBox,                "Calendars.flagShowISO");
 	connectBoolProperty(ui->romanCheckBox,              "Calendars.flagShowRoman");
 	connectBoolProperty(ui->olympicCheckBox,            "Calendars.flagShowOlympic");
+	connectBoolProperty(ui->byzantineCheckBox,          "Calendars.flagShowByzantine");
 	connectBoolProperty(ui->egyptianCheckBox,           "Calendars.flagShowEgyptian");
 	connectBoolProperty(ui->armenianCheckBox,           "Calendars.flagShowArmenian");
 	connectBoolProperty(ui->zoroastrianCheckBox,        "Calendars.flagShowZoroastrian");
@@ -105,39 +115,62 @@ void CalendarsDialog::createDialogContent()
 	connectBoolProperty(ui->ethiopicCheckBox,           "Calendars.flagShowEthiopic");
 	connectBoolProperty(ui->icelandicCheckBox,          "Calendars.flagShowIcelandic");
 	connectBoolProperty(ui->chineseCheckBox,            "Calendars.flagShowChinese");
+	connectBoolProperty(ui->japaneseCheckBox,           "Calendars.flagShowJapanese");
+	connectBoolProperty(ui->koreanCheckBox,             "Calendars.flagShowKorean");
+	connectBoolProperty(ui->vietnameseCheckBox,         "Calendars.flagShowVietnamese");
 	connectBoolProperty(ui->islamicCheckBox,            "Calendars.flagShowIslamic");
 	connectBoolProperty(ui->hebrewCheckBox,             "Calendars.flagShowHebrew");
 	connectBoolProperty(ui->oldHinduSolarCheckBox,      "Calendars.flagShowOldHinduSolar");
 	connectBoolProperty(ui->oldHinduLunarCheckBox,      "Calendars.flagShowOldHinduLunar");
+	connectBoolProperty(ui->newHinduSolarCheckBox,      "Calendars.flagShowNewHinduSolar");
+	connectBoolProperty(ui->newHinduLunarCheckBox,      "Calendars.flagShowNewHinduLunar");
+	connectBoolProperty(ui->astroHinduSolarCheckBox,    "Calendars.flagShowAstroHinduSolar");
+	connectBoolProperty(ui->astroHinduLunarCheckBox,    "Calendars.flagShowAstroHinduLunar");
+	connectBoolProperty(ui->tibetanCheckBox,            "Calendars.flagShowTibetan");
 	connectBoolProperty(ui->mayaLCCheckBox,             "Calendars.flagShowMayaLongCount");
 	connectBoolProperty(ui->mayaHaabCheckBox,           "Calendars.flagShowMayaHaab");
 	connectBoolProperty(ui->mayaTzolkinCheckBox,        "Calendars.flagShowMayaTzolkin");
 	connectBoolProperty(ui->aztecXihuitlCheckBox,       "Calendars.flagShowAztecXihuitl");
 	connectBoolProperty(ui->aztecTonalpohualliCheckBox, "Calendars.flagShowAztecTonalpohualli");
 	connectBoolProperty(ui->balineseCheckBox,           "Calendars.flagShowBalinese");
+	connectBoolProperty(ui->frenchAstronomicalCheckBox, "Calendars.flagShowFrenchAstronomical");
 	connectBoolProperty(ui->frenchArithmeticCheckBox,   "Calendars.flagShowFrenchArithmetic");
 	connectBoolProperty(ui->persianArithmeticCheckBox,  "Calendars.flagShowPersianArithmetic");
+	connectBoolProperty(ui->persianAstronomicalCheckBox,"Calendars.flagShowPersianAstronomical");
+	connectBoolProperty(ui->bahaiArithmeticCheckBox,    "Calendars.flagShowBahaiArithmetic");
+	connectBoolProperty(ui->bahaiAstronomicalCheckBox,  "Calendars.flagShowBahaiAstronomical");
+
+	connectBoolProperty(ui->overrideTextColorCheckBox,  "Calendars.flagTextColorOverride");
+	ui->textcolorToolButton->setup("Calendars.textColor", "Calendars/text_color");
+
+	connect(cal, &Calendars::mayaCorrelationJDChanged, this,  [=](){ui->mayaCorrelationDisplayLabel->setText(QString("0.0.0.0.0 = JD %1").arg(QString::number(cal->getMayaCorrelationJD())));});
 
 	// MAKE SURE to connect all part edit elements respective ...Changed() method here.
-	connect(ui->julianYearSpinBox,      SIGNAL(valueChanged(int)), this, SLOT(julianChanged()));
-	connect(ui->julianMonthSpinBox,     SIGNAL(valueChanged(int)), this, SLOT(julianChanged()));
-	connect(ui->julianDaySpinBox,       SIGNAL(valueChanged(int)), this, SLOT(julianChanged()));
-	connect(ui->gregorianYearSpinBox,   SIGNAL(valueChanged(int)), this, SLOT(gregorianChanged()));
-	connect(ui->gregorianMonthSpinBox,  SIGNAL(valueChanged(int)), this, SLOT(gregorianChanged()));
-	connect(ui->gregorianDaySpinBox,    SIGNAL(valueChanged(int)), this, SLOT(gregorianChanged()));
-	connect(ui->isoYearSpinBox,         SIGNAL(valueChanged(int)), this, SLOT(isoChanged()));
-	connect(ui->isoWeekSpinBox,         SIGNAL(valueChanged(int)), this, SLOT(isoChanged()));
-	connect(ui->isoDaySpinBox,          SIGNAL(valueChanged(int)), this, SLOT(isoChanged()));
-	connect(ui->baktunSpinBox,          SIGNAL(valueChanged(int)), this, SLOT(mayaLongCountChanged()));
-	connect(ui->katunSpinBox,           SIGNAL(valueChanged(int)), this, SLOT(mayaLongCountChanged()));
-	connect(ui->tunSpinBox,             SIGNAL(valueChanged(int)), this, SLOT(mayaLongCountChanged()));
-	connect(ui->uinalSpinBox,           SIGNAL(valueChanged(int)), this, SLOT(mayaLongCountChanged()));
-	connect(ui->kinSpinBox,             SIGNAL(valueChanged(int)), this, SLOT(mayaLongCountChanged()));
+	connect(ui->julianYearSpinBox,        qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::julianChanged);
+	connect(ui->julianMonthSpinBox,       qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::julianChanged);
+	connect(ui->julianDaySpinBox,         qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::julianChanged);
+	connect(ui->revisedJulianYearSpinBox, qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::revisedJulianChanged);
+	connect(ui->revisedJulianMonthSpinBox,qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::revisedJulianChanged);
+	connect(ui->revisedJulianDaySpinBox,  qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::revisedJulianChanged);
+	connect(ui->gregorianYearSpinBox,     qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::gregorianChanged);
+	connect(ui->gregorianMonthSpinBox,    qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::gregorianChanged);
+	connect(ui->gregorianDaySpinBox,      qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::gregorianChanged);
+	connect(ui->byzantineYearSpinBox,     qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::byzantineChanged);
+	connect(ui->byzantineMonthSpinBox,    qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::byzantineChanged);
+	connect(ui->byzantineDaySpinBox,      qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::byzantineChanged);
+	connect(ui->isoYearSpinBox,           qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::isoChanged);
+	connect(ui->isoWeekSpinBox,           qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::isoChanged);
+	connect(ui->isoDaySpinBox,            qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::isoChanged);
+	connect(ui->baktunSpinBox,            qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::mayaLongCountChanged);
+	connect(ui->katunSpinBox,             qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::mayaLongCountChanged);
+	connect(ui->tunSpinBox,               qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::mayaLongCountChanged);
+	connect(ui->uinalSpinBox,             qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::mayaLongCountChanged);
+	connect(ui->kinSpinBox,               qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::mayaLongCountChanged);
 	// TODO: Indirect handling of Haab/Tzolkin and Xihuitl/Tonalpohualli, with going back and forth to dates set in the GUI elements.
-	//connect(ui->haabMonthSpinBox, SIGNAL(valueChanged(int)), this, SLOT(mayaHaabChanged()));
-	//connect(ui->haabDaySpinBox,   SIGNAL(valueChanged(int)), this, SLOT(mayaHaabChanged()));
-	//connect(ui->tzolkinNumberSpinBox, SIGNAL(valueChanged(int)), this, SLOT(mayaTzolkinChanged()));
-	//connect(ui->tzolkinNameSpinBox,   SIGNAL(valueChanged(int)), this, SLOT(mayaTzolkinChanged()));
+	//connect(ui->haabMonthSpinBox, qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::mayaHaabChanged);
+	//connect(ui->haabDaySpinBox,   qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::mayaHaabChanged);
+	//connect(ui->tzolkinNumberSpinBox, qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::mayaTzolkinChanged);
+	//connect(ui->tzolkinNameSpinBox,   qOverload<int>(&QSpinBox::valueChanged), this, &CalendarsDialog::mayaTzolkinChanged);
 	// In the first version, only switch full Tzolkin/Haab/Xihuitl/Tonalpohualli cycles. Later versions should allow configuring a date combination and trigger previous/next.
 	StelCore *core=StelApp::getInstance().getCore();
 	connect(ui->previousHaabButton,          &QPushButton::clicked, this, [=](){ core->addSolarDays(-365.);});
@@ -148,15 +181,16 @@ void CalendarsDialog::createDialogContent()
 	connect(ui->nextXihuitlButton,           &QPushButton::clicked, this, [=](){ core->addSolarDays(365.);});
 	connect(ui->previousTonalpohualliButton, &QPushButton::clicked, this, [=](){ core->addSolarDays(-260.);});
 	connect(ui->nextTonalpohualliButton,     &QPushButton::clicked, this, [=](){ core->addSolarDays(260.);});
+	connectIntProperty(ui->mayaCorrelationSpinBox, "Calendars.mayaCorrelationJD");
 }
 
 void CalendarsDialog::setAboutHtml(void)
 {
 	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
+	static const QRegularExpression a_rx("[{]([^{]*)[}]");
 
 	QString html = "<html><head></head><body>";
-	html += "<h2>" + q_("Calendars Plug-in") + "</h2><table width=\"90%\">";
+	html += "<h2>" + q_("Calendars Plug-in") + "</h2><table class='layout' width=\"90%\">";
 	html += "<tr width=\"30%\"><td><strong>" + q_("Version") + ":</strong></td><td>" + CALENDARS_PLUGIN_VERSION + "</td></tr>";
 	html += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + CALENDARS_PLUGIN_LICENSE + "</td></tr>";
 	html += "<tr><td><strong>" + q_("Author") + ":</strong></td><td>Georg Zotti</td></tr>";
@@ -166,9 +200,11 @@ void CalendarsDialog::setAboutHtml(void)
 	html += "<p>" + q_("The Calendars plugin provides an interface to various calendars used around the world.") + "</p>";
 	html += "<ul><li>" + q_("Julian Calendar") + "</li>";
 	html += "<li>" + q_("Gregorian Calendar") + "</li>";
+	html += "<li>" + q_("Revised Julian Calendar (Milankovi&#x107;)") + "</li>";
 	html += "<li>" + q_("ISO Weeks") + "</li>";
 	html += "<li>" + q_("Icelandic calendar") + "</li>";
 	html += "<li>" + q_("Roman (Julian) calendar") + "</li>";
+	html += "<li>" + q_("Byzantine calendar (Annus Mundi)") + "</li>";
 	html += "<li>" + q_("Olympiad calendar") + "</li>";
 	html += "<li>" + q_("Egyptian calendar") + "</li>";
 	html += "<li>" + q_("Armenian calendar") + "</li>";
@@ -178,25 +214,33 @@ void CalendarsDialog::setAboutHtml(void)
 
 	html += "<li>" + q_("Islamic Calendar (algorithmic)") + "</li>";
 	html += "<li>" + q_("Hebrew Calendar") + "</li>";
+	html += "<li>" + q_("French Revolution calendar (astronomical version of 1793)") + "</li>";
 	html += "<li>" + q_("French Revolution calendar (arithmetic version of 1795)") + "</li>";
 	html += "<li>" + q_("Persian calendar (arithmetic version)") + "</li>";
+	html += "<li>" + q_("Persian calendar (astronomical version)") + "</li>";
+	html += "<li>" + q_("Bahá’í calendar (arithmetic version)") + "</li>";
+	html += "<li>" + q_("Bahá’í calendar (astronomical version)") + "</li>";
 
-//	html += "<li>" + q_("Chinese calendars") + "</li>";
-//	html += "<li>" + q_("Tibetan calendars") + "</li>";
 	html += "<li>" + q_("Old Hindu Solar and Lunar calendars") + "</li>";
-//	html += "<li>" + q_("New Hindu Solar and Lunar calendars") + "</li>";
+	html += "<li>" + q_("New Hindu Solar and Lunar calendars") + "</li>";
+	html += "<li>" + q_("Astronomically 'accurate' Hindu Solar and Lunar calendars") + "</li>";
+	html += "<li>" + q_("Tibetan (Phuglugs, Phug-pa, K&#x101;lacakra) calendar") + "</li>";
+	html += "<li>" + q_("Chinese calendar") + "</li>";
+	html += "<li>" + q_("Japanese calendar") + "</li>";
+	html += "<li>" + q_("Korean calendar") + "</li>";
+	html += "<li>" + q_("Vietnamese calendar") + "</li>";
+	html += "<li>" + q_("Balinese Pawukon calendar") + "</li>";
 	html += "<li>" + q_("Maya calendars") + "</li>";
 	html += "<li>" + q_("Aztec calendars") + "</li>";
-	html += "<li>" + q_("Balinese Pawukon calendar") + "</li>";
 	html += "</ul>";
-	html += "<p>" + q_("The plugin is in an early stage of development. Please cross-check results and report errors.") + "</p>";
+	html += "<p>" + q_("The plugin is still under development. Please cross-check results and report errors.") + "</p>";
 	html += "<p>" + q_("For some calendars, we welcome proper formatting suggestions by actual users.") + "</p>";
 
 	html += "<h3>" + q_("Publications") + "</h3>";
 	html += "<p>"  + q_("If you use this plugin in your publications, please cite:") + "</p>";
 	html += "<p><ul>";
-	html += "<li>" + QString("{Georg Zotti, Susanne Hoffmann, Alexander Wolf, Fabien Chéreau, Guillaume Chéreau: The simulated sky: Stellarium for cultural astronomy research.} Journal for Skyscape Archaeology, 6.2, 2020, pp. XX-XX.")
-			.toHtmlEscaped().replace(a_rx, "<a href=\"https://equinoxpub.com/PATH-TO.pdf\">\\1</a>") + "</li>";
+	html += "<li>" + QString("{Georg Zotti, Susanne M. Hoffmann, Alexander Wolf, Fabien Chéreau, Guillaume Chéreau: The simulated sky: Stellarium for cultural astronomy research.} Journal for Skyscape Archaeology, 6.2, 2021, pp. 221-258.")
+			.toHtmlEscaped().replace(a_rx, "<a href=\"https://doi.org/10.1558/jsa.17822\">\\1</a>") + "</li>";
 	html += "</ul></p>";
 
 	html += "<h3>" + q_("References") + "</h3>";
@@ -210,7 +254,7 @@ void CalendarsDialog::setAboutHtml(void)
 	html += "</body></html>";
 
 	StelGui* gui = dynamic_cast<StelGui*>(StelApp::getInstance().getGui());
-	if(gui!=Q_NULLPTR)
+	if(gui)
 	{
 		QString htmlStyleSheet(gui->getStelStyle().htmlStyleSheet);
 		ui->aboutTextBrowser->document()->setDefaultStyleSheet(htmlStyleSheet);
@@ -241,6 +285,18 @@ void CalendarsDialog::populateJulianParts(QVector<int> parts)
 		ui->julianWeekdayLineEdit->setText(jul->weekday(jul->getJD()));
 }
 
+void CalendarsDialog::populateRevisedJulianParts(QVector<int> parts)
+{
+	ui->revisedJulianYearSpinBox->setValue(parts.at(0));
+	ui->revisedJulianMonthSpinBox->setValue(parts.at(1));
+	ui->revisedJulianDaySpinBox->setValue(parts.at(2));
+
+	// If the GUI wants to show other related data, we can find the sender. (nullptr when this slot is called directly!)
+	RevisedJulianCalendar *rjul=dynamic_cast<RevisedJulianCalendar*>(sender());
+	if (rjul)
+		ui->revisedJulianWeekdayLineEdit->setText(rjul->weekday(rjul->getJD()));
+}
+
 void CalendarsDialog::populateGregorianParts(QVector<int> parts)
 {
 	ui->gregorianYearSpinBox->setValue(parts.at(0));
@@ -250,6 +306,17 @@ void CalendarsDialog::populateGregorianParts(QVector<int> parts)
 	GregorianCalendar *greg=dynamic_cast<GregorianCalendar*>(sender());
 	if (greg)
 		ui->gregorianWeekdayLineEdit->setText(greg->weekday(greg->getJD()));
+}
+
+void CalendarsDialog::populateByzantineParts(QVector<int> parts)
+{
+	ui->byzantineYearSpinBox->setValue(parts.at(0));
+	ui->byzantineMonthSpinBox->setValue(parts.at(1));
+	ui->byzantineDaySpinBox->setValue(parts.at(2));
+
+	ByzantineCalendar *cal=dynamic_cast<ByzantineCalendar*>(sender());
+	if (cal)
+		ui->byzantineWeekdayLineEdit->setText(cal->weekday(cal->getJD()));
 }
 
 void CalendarsDialog::populateISOParts(QVector<int> parts)
@@ -311,23 +378,37 @@ void CalendarsDialog::populateAztecTonalpohualliParts(QVector<int> parts)
 void CalendarsDialog::julianChanged()
 {
 	cal->getCal("Julian")->setDate({ui->julianYearSpinBox->value(),
-					 ui->julianMonthSpinBox->value(),
-					 ui->julianDaySpinBox->value()});
+					ui->julianMonthSpinBox->value(),
+					ui->julianDaySpinBox->value()});
+}
+
+void CalendarsDialog::revisedJulianChanged()
+{
+	cal->getCal("RevisedJulian")->setDate({ui->revisedJulianYearSpinBox->value(),
+					       ui->revisedJulianMonthSpinBox->value(),
+					       ui->revisedJulianDaySpinBox->value()});
 }
 
 void CalendarsDialog::gregorianChanged()
 {
 	cal->getCal("Gregorian")->setDate({ui->gregorianYearSpinBox->value(),
-					    ui->gregorianMonthSpinBox->value(),
-					    ui->gregorianDaySpinBox->value()});
+					   ui->gregorianMonthSpinBox->value(),
+					   ui->gregorianDaySpinBox->value()});
+}
+
+void CalendarsDialog::byzantineChanged()
+{
+	cal->getCal("Byzantine")->setDate({ui->byzantineYearSpinBox->value(),
+					   ui->byzantineMonthSpinBox->value(),
+					   ui->byzantineDaySpinBox->value()});
 }
 
 void CalendarsDialog::isoChanged()
 {
 	// TODO proper handling of ISO weekday combo box.
 	cal->getCal("ISO")->setDate({ui->isoYearSpinBox->value(),
-					ui->isoWeekSpinBox->value(),
-					ui->isoDaySpinBox->value()});
+				     ui->isoWeekSpinBox->value(),
+				     ui->isoDaySpinBox->value()});
 }
 
 void CalendarsDialog::mayaLongCountChanged()
@@ -342,23 +423,23 @@ void CalendarsDialog::mayaLongCountChanged()
 void CalendarsDialog::mayaHaabChanged()
 {
 	cal->getCal("MayaHaab")->setDate({ui->haabMonthSpinBox->value(),
-					   ui->haabDaySpinBox->value()});
+					  ui->haabDaySpinBox->value()});
 }
 
 void CalendarsDialog::mayaTzolkinChanged()
 {
 	cal->getCal("MayaTzolkin")->setDate({ui->tzolkinNumberSpinBox->value(),
-					      ui->tzolkinNameSpinBox->value()});
+					     ui->tzolkinNameSpinBox->value()});
 }
 
 void CalendarsDialog::aztecXihuitlChanged()
 {
 	cal->getCal("AztecXihuitl")->setDate({ui->xihuitlMonthSpinBox->value(),
-					   ui->xihuitlDaySpinBox->value()});
+					      ui->xihuitlDaySpinBox->value()});
 }
 
 void CalendarsDialog::aztecTonalpohualliChanged()
 {
 	cal->getCal("AztecTonalpohualli")->setDate({ui->tonalpohualliNumberSpinBox->value(),
-					      ui->tonalpohualliNameSpinBox->value()});
+						    ui->tonalpohualliNameSpinBox->value()});
 }

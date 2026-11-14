@@ -20,20 +20,19 @@
 #include "LocationSearchService.hpp"
 
 #include "StelApp.hpp"
-#include "StelCore.hpp"
-#include "StelModuleMgr.hpp"
 #include "StelLocationMgr.hpp"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QRegExp>
+#include <QRegularExpression>
 
 LocationSearchService::LocationSearchService(QObject *parent)
 	: AbstractAPIService(parent), locMgr(LocationList())
 {
 	//this is run in the main thread
-	connect(&StelApp::getInstance().getLocationMgr(), SIGNAL(locationListChanged()), this, SLOT(mainLocationManagerUpdated()));
+	connect(&StelApp::getInstance().getLocationMgr(), &StelLocationMgr::locationListChanged,
+	        this, &LocationSearchService::mainLocationManagerUpdated);
 	mainLocationManagerUpdated();
 }
 
@@ -69,14 +68,12 @@ void LocationSearchService::get(const QByteArray& operation, const APIParameters
 		const QList<QString>& list = allItems.keys();
 
 		//use a regexp in wildcard mode, the app does the same
-		QRegExp exp(term,Qt::CaseInsensitive, QRegExp::Wildcard);
-
+		QRegularExpression exp(QRegularExpression::wildcardToRegularExpression(term), QRegularExpression::CaseInsensitiveOption);
 		for(const auto& str : list)
 		{
 			if (str.contains(exp))
 				results.append(str);
 		}
-
 		response.writeJSON(QJsonDocument(results));
 	}
 	else if(operation=="nearby")

@@ -20,58 +20,43 @@
 
 #include <QDebug>
 #include <QMessageBox>
+#include <QRegularExpression>
 #include <cmath>
 #include <limits>
 
 #include "StelCore.hpp"
 #include "StelUtils.hpp"
+#include "StelMainView.hpp"
 #include "StelTranslator.hpp"
 
-bool useJNow(ASCOMDevice::ASCOMEquatorialCoordinateType coordinateType, bool mAscomUseDeviceEqCoordType, Equinox mEquinox)
-{
-	if (mAscomUseDeviceEqCoordType)
-	{
-		return coordinateType == ASCOMDevice::ASCOMEquatorialCoordinateType::Topocentric
-			   // Assume Other as JNow too
-			   || coordinateType == ASCOMDevice::ASCOMEquatorialCoordinateType::Other;
-	}
-	else
-	{
-		return mEquinox == EquinoxJNow;
-	}
-}
-
-bool areSimilar(double a, double b)
-{
-	return std::abs(a - b) < std::numeric_limits<double>::epsilon();
-}
-
-TelescopeClientASCOM::TelescopeClientASCOM(const QString& name, const QString& params, Equinox eq)
-	: TelescopeClient(name)
+TelescopeClientASCOM::TelescopeClientASCOM(const QString& name, const QString& params,
+                                           TelescopeControl::Equinox eq, int slot)
+	: TelescopeClient(name, slot)
 	, mEquinox(eq)
+	, mInterpolatedPosition(1, 0, 0)
+	, mCurrentTargetPosition(1, 0, 0)
 {
-	QRegExp paramRx("^([^:]*):([^:]*)$");
-	if (paramRx.exactMatch(params))
+	static const QRegularExpression paramRx("^([^:]*):([^:]*)$");
+	QRegularExpressionMatch paramMatch=paramRx.match(params);
+	if (paramMatch.hasMatch())
 	{
-		mAscomDeviceId = paramRx.cap(1).trimmed();
-		mAscomUseDeviceEqCoordType = paramRx.cap(2).trimmed() == "true";
+		mAscomDeviceId = paramMatch.captured(1).trimmed();
+		mAscomUseDeviceEqCoordType = paramMatch.captured(2).trimmed() == "true";
 	}
 
-	qDebug() << "TelescopeClientASCOM::TelescopeClientASCOM with telescope name " << name << " and ascomDeviceId " << mAscomDeviceId;
+	qCInfo(Telescopes) << getLogPrefix() << "TelescopeClientASCOM::TelescopeClientASCOM with telescope name "
+	                   << name << " and ascomDeviceId " << mAscomDeviceId;
 
 	mAscomDevice = new ASCOMDevice(this, mAscomDeviceId);
 	mAscomDevice->connect();
 	mDoesRefraction = mAscomDevice->doesRefraction();
 	mCoordinateType = mAscomDevice->getEquatorialCoordinateType();
-
-	mCurrentTargetPosition[0] = mInterpolatedPosition[0] = 1;
-	mCurrentTargetPosition[1] = mInterpolatedPosition[1] = 0;
-	mCurrentTargetPosition[2] = mInterpolatedPosition[2] = 0;
 }
 
 TelescopeClientASCOM::~TelescopeClientASCOM()
 {
 	mAscomDevice->disconnect();
+	delete mAscomDevice;
 }
 
 void TelescopeClientASCOM::performCommunication()
@@ -97,7 +82,7 @@ void TelescopeClientASCOM::performCommunication()
 			  mDoesRefraction ? StelCore::RefractionOff : StelCore::RefractionOn);
 		}
 
-		if (!(areSimilar(mLastCoord.RA, currentCoords.RA) && areSimilar(mLastCoord.DEC, currentCoords.DEC)))
+		if (!(qFuzzyCompare(mLastCoord.RA, currentCoords.RA) && qFuzzyCompare(mLastCoord.DEC, currentCoords.DEC)))
 		{
 			mCurrentTargetPosition = position;
 			mLastCoord.RA = currentCoords.RA;
@@ -108,7 +93,7 @@ void TelescopeClientASCOM::performCommunication()
 	}
 
 	mInterpolatedPosition = mInterpolatedPosition * 10 + mCurrentTargetPosition;
-	const double lq = mInterpolatedPosition.lengthSquared();
+	const double lq = mInterpolatedPosition.normSquared();
 	if (lq > 0.0)
 		mInterpolatedPosition *= (1.0 / std::sqrt(lq));
 	else
@@ -133,7 +118,7 @@ ASCOMDevice::ASCOMCoordinates TelescopeClientASCOM::j2000PosToAscomCoord(const V
 	{
 		const StelCore* core = StelApp::getInstance().getCore();
 		position = core->j2000ToEquinoxEqu(j2000Pos,
-		  // If telescope dones refraction correction, we don't correct for it in Stellarium
+		  // If telescope does refraction correction, we don't correct for it in Stellarium
 		  mDoesRefraction ? StelCore::RefractionOff : StelCore::RefractionOn);
 	}
 
@@ -151,13 +136,13 @@ ASCOMDevice::ASCOMCoordinates TelescopeClientASCOM::j2000PosToAscomCoord(const V
 
 void TelescopeClientASCOM::telescopeGoto(const Vec3d& j2000Pos, StelObjectP selectObject)
 {
-	Q_UNUSED(selectObject);
+	Q_UNUSED(selectObject)
 
 	if (!isConnected()) return;
 
 	if (mAscomDevice->isParked())
 	{
-		QMessageBox::warning(Q_NULLPTR, "Stellarium",
+		QMessageBox::warning(&StelMainView::getInstance(), "Stellarium",
 		  q_("Can't slew a telescope which is parked. Unpark before performing any goto command."));
 		return;
 	}
@@ -168,7 +153,7 @@ void TelescopeClientASCOM::telescopeGoto(const Vec3d& j2000Pos, StelObjectP sele
 
 void TelescopeClientASCOM::telescopeSync(const Vec3d& j2000Pos, StelObjectP selectObject) 
 {
-	Q_UNUSED(selectObject);
+	Q_UNUSED(selectObject)
 	if (!isConnected()) return;
 
 	ASCOMDevice::ASCOMCoordinates coords = j2000PosToAscomCoord(j2000Pos);
@@ -184,6 +169,7 @@ void TelescopeClientASCOM::telescopeAbortSlew()
 
 bool TelescopeClientASCOM::isConnected() const
 {
+        // TODO: This is called once per frame in draw(). Find a solution like for LX200, test stale handle.
 	return mAscomDevice->isDeviceConnected();
 }
 
@@ -192,8 +178,16 @@ bool TelescopeClientASCOM::hasKnownPosition() const
 	return true;
 }
 
-void TelescopeClientASCOM::move(double angle, double speed)
+bool TelescopeClientASCOM::useJNow(ASCOMDevice::ASCOMEquatorialCoordinateType coordinateType, bool ascomUseDeviceEqCoordType, TelescopeControl::Equinox equinox)
 {
-	Q_UNUSED(angle);
-	Q_UNUSED(speed);
+	if (ascomUseDeviceEqCoordType)
+	{
+		return coordinateType == ASCOMDevice::ASCOMEquatorialCoordinateType::Topocentric
+			   // Assume Other as JNow too
+			   || coordinateType == ASCOMDevice::ASCOMEquatorialCoordinateType::Other;
+	}
+	else
+	{
+		return equinox == TelescopeControl::EquinoxJNow;
+	}
 }

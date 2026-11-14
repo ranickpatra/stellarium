@@ -60,23 +60,28 @@ public:
 	      float dustTailBrightnessFact=1.5f
 	);
 
-	virtual ~Comet() Q_DECL_OVERRIDE;
+	~Comet() override;
 
 	//! In addition to Planet::getInfoMap(), Comets provides estimates for
 	//! - tail-length-km
 	//! - coma-diameter-km
 	//! using the formula from Guide found by the GSoC2012 initiative at http://www.projectpluto.com/update7b.htm#comet_tail_formula
-	virtual QVariantMap getInfoMap(const StelCore *core) const Q_DECL_OVERRIDE;
+	QVariantMap getInfoMap(const StelCore *core) const override;
 	//The Comet class inherits the "Planet" type because the SolarSystem class
 	//was not designed to handle different types of objects.
 	//virtual QString getType() const {return "Comet";}
+	//! Override for comets.
+	//! When observer is on an "Observer" planet, the magnitude reported is heliocentric (seen from the Sun).
+	//! This allows observing comets belt from far away while still seeing the tail.
 	//! \todo Find better sources for the g,k system
-	virtual float getVMagnitude(const StelCore* core) const Q_DECL_OVERRIDE;
+	float getVMagnitude(const StelCore* core) const override;
+	//! Override with additional @param eclipseFactor. The factor is ignored.
+	float getVMagnitude(const StelCore* core, const double eclipseFactor) const override;
 	//! sets the nameI18 property with the appropriate translation.
-	//! Function overriden to handle the problem with name conflicts.
-	virtual void translateName(const StelTranslator& trans) Q_DECL_OVERRIDE;
-	virtual QString getEnglishName(void) const Q_DECL_OVERRIDE {return englishName;}
-	virtual QString getNameI18n(void) const Q_DECL_OVERRIDE {return nameI18;}
+	//! Function overridden to handle the problem with name conflicts.
+	void translateName(const StelTranslator& trans) override;
+	//! gets an IAU designation.
+	QString getIAUDesignation() const override { return iauDesignation; }
 
 	//! \brief sets absolute magnitude and slope parameter.
 	//! These are the parameters in the IAU's two-parameter magnitude system
@@ -85,22 +90,51 @@ public:
 	//! as the same parameters in MinorPlanet.
 	void setAbsoluteMagnitudeAndSlope(const float magnitude, const float slope);
 
+	//! sets an IAU designation.
+	void setIAUDesignation(const QString& designation);
+
+	//! set date, discovery and perihelion codes of the comet.
+	void setExtraDesignations(QStringList codes);
+
+	//! set the discovery circumstances of comet
+	//! @param date of discovery
+	//! @param name of discoverer
+	void setDiscoveryData(const QString& date, const QString& name) { discoveryDate = date; discoverer = name; }
+
+	//! renders the subscript in a comet discovery designation with HTML.
+	//! This subscript only ever appears in the super rare case when a comet is first labeled as asteroid.
+	static QString renderDiscoveryDesignationHtml(const QString& plainText);
+
+	//! get list of comet codes
+	QStringList getExtraDesignations() const { return extraDesignations; }
+
 	//! get sidereal period for comet, days, or returns 0 if not possible (parabolic, hyperbolic orbit)
-	virtual double getSiderealPeriod() const Q_DECL_OVERRIDE;
+	double getSiderealPeriod() const override;
 
 	//! re-implementation of Planet's draw()
-	virtual void draw(StelCore* core, float maxMagLabels, const QFont& planetNameFont) Q_DECL_OVERRIDE;
+	void draw(StelCore* core, float maxMagLabels, const QFont& planetNameFont, const double eclipseFactor) override;
 
 	// re-implementation of Planet's update() to prepare tails (extinction etc). @param deltaTime: ms (since last call)
-	virtual void update(int deltaTime) Q_DECL_OVERRIDE;
+	void update(int deltaTime) override;
 
 protected:
 	// components for Planet::getInfoString() that are overridden here:
-	virtual QString getInfoStringAbsoluteMagnitude(const StelCore *core, const InfoStringGroup& flags) const Q_DECL_OVERRIDE;
-	//! Any flag=Size information to be displayed
-	virtual QString getInfoStringSize(const StelCore *core, const InfoStringGroup& flags) const Q_DECL_OVERRIDE;
-	//! Any flag=Extra information to be displayed at the end
-	virtual QString getInfoStringExtra(const StelCore *core, const InfoStringGroup& flags) const Q_DECL_OVERRIDE;
+	//! Any flags&Name information to be displayed
+	QString getInfoStringName(const StelCore *core, const InfoStringGroup& flags) const override;
+	//! Any flags&Name information to be narrated
+	QString getNarrationName(const StelCore *core, const InfoStringGroup& flags) const override;
+	//! Any flags&AbsoluteMagnitude information to be displayed
+	QString getInfoStringAbsoluteMagnitude(const StelCore *core, const InfoStringGroup& flags) const override;
+	//! Any flags&AbsoluteMagnitude information to be narrated
+	QString getNarrationAbsoluteMagnitude(const StelCore *core, const InfoStringGroup& flags) const override;
+	//! Any flags&Size information to be displayed
+	QString getInfoStringSize(const StelCore *core, const InfoStringGroup& flags) const override;
+	//! Any flags&Size information to be narrated
+	QString getNarrationSize(const StelCore *core, const InfoStringGroup& flags) const override;
+	//! Any flags&Extra information to be displayed
+	QString getInfoStringExtra(const StelCore *core, const InfoStringGroup& flags) const override;
+	//! Any flags&Extra information to be narrated
+	QString getNarrationExtra(const StelCore *core, const InfoStringGroup& flags) const override;
 
 private:
 	//! @returns estimates for (Coma diameter [AU], gas tail length [AU]).
@@ -127,7 +161,9 @@ private:
 
 	float slopeParameter;
 	bool isCometFragment;
-	bool nameIsProvisionalDesignation;
+	QString iauDesignation;
+	QStringList extraDesignations;
+	QStringList extraDesignationsHtml;
 
 	//GZ Tail additions
 	Vec2f tailFactors; // result of latest call to getComaDiameterAndTailLengthAU(); Results cached here for infostring. [0]=Coma diameter, [1] gas tail length.
@@ -146,7 +182,6 @@ private:
 	float intensityFovScale; // like for constellations: reduce brightness when zooming in.
 	float intensityMinFov;
 	float intensityMaxFov;
-
 
 	// These are static to avoid having index arrays for each comet when all are equal.
 	static bool createTailIndices;

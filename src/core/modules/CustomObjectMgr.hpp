@@ -24,7 +24,6 @@
 #include "StelTextureTypes.hpp"
 #include "CustomObject.hpp"
 
-#include <QFont>
 #include <QList>
 
 class StelPainter;
@@ -38,16 +37,15 @@ class CustomObjectMgr : public StelObjectModule
 
 public:
 	CustomObjectMgr();
-	virtual ~CustomObjectMgr();
+	~CustomObjectMgr() override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in the StelModule class
-	virtual void init();
-	virtual void deinit();
-	virtual void update(double) {;}
-	virtual void draw(StelCore* core);
+	void init() override;
+	void deinit() override;
+	void draw(StelCore* core) override;
 	virtual void drawPointer(StelCore* core, StelPainter& painter);
-	virtual double getCallOrder(StelModuleActionName actionName) const;
+	double getCallOrder(StelModuleActionName actionName) const override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in StelObjectModule class
@@ -56,25 +54,34 @@ public:
 	//! @param limitFov the field of view around the position v in which to search for objects.
 	//! @param core the StelCore to use for computations.
 	//! @return a list containing the objects located inside the limitFov circle around position v.
-	virtual QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const;
+	QList<StelObjectP> searchAround(const Vec3d& v, double limitFov, const StelCore* core) const override;
 
 	//! @return the matching object's pointer if exists or Q_NULLPTR.
 	//! @param nameI18n The case in-sensitive localized name
-	virtual StelObjectP searchByNameI18n(const QString& nameI18n) const;
+	StelObjectP searchByNameI18n(const QString& nameI18n) const override;
 
 	//! @return the matching object if exists or Q_NULLPTR.
 	//! @param name The case in-sensitive english name
-	virtual StelObjectP searchByName(const QString& name) const;
+	StelObjectP searchByName(const QString& name) const override;
 
-	virtual StelObjectP searchByID(const QString &id) const { return qSharedPointerCast<StelObject>(searchByEnglishName(id)); }
+	StelObjectP searchByID(const QString &id) const override { return qSharedPointerCast<StelObject>(searchByEnglishName(id)); }
 
-	virtual QStringList listAllObjects(bool inEnglish) const;
-	virtual QString getName() const { return "Custom Objects"; }
-	virtual QString getStelObjectType() const { return CustomObject::CUSTOMOBJECT_TYPE; }
+	QVector<QPair<QString,StelObjectP>> listAllObjects(bool inEnglish) const override;
+	QString getName() const override { return "Custom Objects"; }
+	QString getStelObjectType() const override { return CustomObject::CUSTOMOBJECT_TYPE; }
 
 	//! Handle mouse clicks. Please note that most of the interactions will be done through the GUI module.
 	//! @return set the event as accepted if it was intercepted
-	virtual void handleMouseClicks(class QMouseEvent* e);
+	void handleMouseClicks(class QMouseEvent* e) override;
+
+	//! Add persistent object on the sky
+	//! @param designation - designation of custom object
+	//! @param coordinates - coordinates of custom object
+	//! @param objectType - type of custom object (default: "custom object")
+	void addPersistentObject(const QString& designation, Vec3d coordinates, const QString& objectType = "");
+
+	//! Remove all persistent objects
+	void removePersistentObjects();
 
 public slots:
 	///////////////////////////////////////////////////////////////////////////
@@ -88,7 +95,7 @@ public slots:
 	//! @param designation - designation of custom object
 	//! @param coordinates - coordinates of custom object
 	//! @param isVisible - flag of visibility of custom object
-	void addCustomObject(QString designation, Vec3d coordinates, bool isVisible=false);
+	void addCustomObject(const QString& designation, Vec3d coordinates, bool isVisible=false);
 	//! Add custom object on the sky
 	//! @param designation - designation of custom object
 	//! @param ra - right ascension angle (J2000.0) of custom object
@@ -98,7 +105,7 @@ public slots:
 	//! // example of usage in scripts
 	//! CustomObjectMgr.addCustomObject("Marker", "2h10m15s", "60d01m15s", true);
 	//! @endcode
-	void addCustomObject(QString designation, const QString& ra, const QString& dec, bool isVisible=false);
+	void addCustomObject(const QString& designation, const QString& ra, const QString& dec, bool isVisible=false);
 	//! Add custom object on the sky
 	//! @param designation - designation of custom object
 	//! @param ra - right ascension angle (on date) of custom object
@@ -108,7 +115,7 @@ public slots:
 	//! // example of usage in scripts
 	//! CustomObjectMgr.addCustomObjectRaDec("Marker", "2h10m15s", "60d01m15s", true);
 	//! @endcode
-	void addCustomObjectRaDec(QString designation, const QString& ra, const QString& dec, bool isVisible=false);
+	void addCustomObjectRaDec(const QString& designation, const QString& ra, const QString& dec, bool isVisible=false);
 	//! Add custom object on the sky
 	//! @param designation - designation of custom object
 	//! @param alt - altitude of custom object
@@ -118,7 +125,7 @@ public slots:
 	//! // example of usage in scripts
 	//! CustomObjectMgr.addCustomObjectAltAzi("Marker", "2d10m15s", "60d01m15s", true);
 	//! @endcode
-	void addCustomObjectAltAzi(QString designation, const QString& alt, const QString& azi, bool isVisible=false);
+	void addCustomObjectAltAzi(const QString& designation, const QString& alt, const QString& azi, bool isVisible=false);
 	//! Remove all custom objects
 	void removeCustomObjects();
 	//! Remove just one custom object by English name
@@ -127,8 +134,9 @@ public slots:
 	//! Set the color used to draw custom object markers.
 	//! @param c The color of the custom object markers (R,G,B)
 	//! @code
-	//! // example of usage in scripts
-	//! CustomObjectMgr.setMarkersColor(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! CustomObjectMgr.setMarkersColor(c.toVec3f());
 	//! @endcode
 	void setMarkersColor(const Vec3f& c);
 	//! Get the current color used to draw custom object markers.
@@ -161,17 +169,24 @@ private slots:
 	void removeCustomObject(CustomObjectP);
 
 	//! Connect this to StelApp font size.
-	void setFontSize(int s){font.setPixelSize(s);}
+	void setFontSize(int s){fontSize=s;}
 private:
 	// Font used for displaying our text
-	QFont font;
+	int fontSize;
 	QSettings* conf;
 	StelTextureSP texPointer;
-	QList<CustomObjectP> customObjects;
+	QList<CustomObjectP> customObjects, persistentObjects;
 
 	Vec3f hightlightColor;
 	int countMarkers;
 	int radiusLimit;
+	bool echoToLogfile;
+
+	QString persistentCOFile;
+	//! Loading list of saved custom objects (all of them are available in history of Search Tool)
+	void loadPersistentObjects();
+	//! Saving list of found via Search Tool custom objects
+	void savePersistentObjects();
 
 	//! Set the size of active radius around custom object markers.
 	void setActiveRadiusLimit(const int radius);

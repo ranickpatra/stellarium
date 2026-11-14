@@ -37,14 +37,14 @@ class PulsarsDialog : public StelDialog
 
 public:
 	PulsarsDialog();
-	~PulsarsDialog();
+	~PulsarsDialog() override;
 
 protected:
 	//! Initialize the dialog widgets and connect the signals/slots
-	void createDialogContent();
+	void createDialogContent() override;
 
 public slots:
-	void retranslate();
+	void retranslate() override;
 	void refreshUpdateValues(void);
 
 private slots:

@@ -91,19 +91,19 @@ QStringList CopticCalendar::getDateStrings() const
 QString CopticCalendar::getFormattedDateString() const
 {
 	QStringList str=getDateStrings();
-	return QString("%1, %2 - %3 (%4) - %5 %6")
-			.arg(str.at(4)) // dayname
-			.arg(str.at(3)) // day
-			.arg(str.at(1)) // month, numerical
-			.arg(str.at(2)) // month, name
-			.arg(str.at(0)) // year
-			.arg(q_("Era Martyrum"));// year
+	return QString("%1, %2 - %3 (%4) - %5 %6").arg(
+			str.at(4), // dayname
+			str.at(3), // day
+			str.at(1), // month, numerical
+			str.at(2), // month, name
+			str.at(0), // year
+			q_("Era Martyrum"));// year
 }
 
 // set date from a vector of calendar date elements sorted from the largest to the smallest.
 // Year-Month[1...12]-Day[1...30]
 // Time is not changed!
-void CopticCalendar::setDate(QVector<int> parts)
+void CopticCalendar::setDate(const QVector<int> &parts)
 {
 	this->parts=parts;
 
@@ -115,11 +115,11 @@ void CopticCalendar::setDate(QVector<int> parts)
 	emit jdChanged(JD);
 }
 
-int CopticCalendar::fixedFromCoptic(QVector<int> coptic)
+int CopticCalendar::fixedFromCoptic(const QVector<int> &coptic)
 {
-	const int year=coptic.at(0);
-	const int month=coptic.at(1);
-	const int day=coptic.at(2);
+	const int year =coptic.value(0);
+	const int month=coptic.value(1);
+	const int day  =coptic.value(2);
 
 	return copticEpoch - 1 + 365*(year-1) + StelUtils::intFloorDiv(year, 4) + 30*(month-1) + day;
 }

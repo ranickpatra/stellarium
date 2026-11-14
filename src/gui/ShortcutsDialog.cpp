@@ -38,14 +38,22 @@ ShortcutsFilterModel::ShortcutsFilterModel(QObject* parent) :
 
 bool ShortcutsFilterModel::filterAcceptsRow(int source_row, const QModelIndex &source_parent) const
 {
-	if (filterRegExp().isEmpty())
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+	if (filterRegularExpression().pattern().isEmpty())
+#else
+	if (filterRegExp().pattern().isEmpty())
+#endif
 		return true;
 	
 	if (source_parent.isValid())
 	{
-		QModelIndex index = source_parent.child(source_row, filterKeyColumn());
+		QModelIndex index = source_parent.model()->index(source_row, filterKeyColumn(), source_parent);
 		QString data = sourceModel()->data(index, filterRole()).toString();
+#if (QT_VERSION>=QT_VERSION_CHECK(6,0,0))
+		return data.contains(filterRegularExpression());
+#else
 		return data.contains(filterRegExp());
+#endif
 	}
 	else
 	{
@@ -73,13 +81,13 @@ ShortcutsDialog::~ShortcutsDialog()
 {
 	collisionItems.clear();
 	delete ui;
-	ui = Q_NULLPTR;
+	ui = nullptr;
 }
 
 void ShortcutsDialog::drawCollisions()
 {
 	QBrush brush(Qt::red);
-	for (auto* item : collisionItems)
+	for (auto* item : std::as_const(collisionItems))
 	{
 		// change colors of all columns for better visibility
 		item->setForeground(brush);
@@ -92,8 +100,12 @@ void ShortcutsDialog::drawCollisions()
 void ShortcutsDialog::resetCollisions()
 {
 	QBrush brush =
-	        ui->shortcutsTreeView->palette().brush(QPalette::Foreground);
-	for (auto* item : collisionItems)
+#if (QT_VERSION>=QT_VERSION_CHECK(5,15,0))
+		ui->shortcutsTreeView->palette().windowText();
+#else
+		ui->shortcutsTreeView->palette().brush(QPalette::Foreground);
+#endif
+	for (auto* item : std::as_const(collisionItems))
 	{
 		item->setForeground(brush);
 		QModelIndex index = item->index();
@@ -151,7 +163,7 @@ bool ShortcutsDialog::prefixMatchKeySequence(const QKeySequence& ks1,
 	{
 		return false;
 	}
-	for (int i = 0; i < qMin(ks1.count(), ks2.count()); ++i)
+	for (uint i = 0; i < static_cast<uint>(qMin(ks1.count(), ks2.count())); ++i)
 	{
 		if (ks1[i] != ks2[i])
 		{
@@ -280,7 +292,7 @@ void ShortcutsDialog::switchToEditors(const QModelIndex& index)
 void ShortcutsDialog::createDialogContent()
 {
 	ui->setupUi(dialog);
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(ui->titleBar, &TitleBar::movedTo, this, &ShortcutsDialog::handleMovedTo);
 
 	resetModel();
 	filterModel->setSourceModel(mainModel);
@@ -298,28 +310,25 @@ void ShortcutsDialog::createDialogContent()
 	if (gui)
 	{
 		enableKineticScrolling(gui->getFlagUseKineticScrolling());
-		connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+		connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &ShortcutsDialog::enableKineticScrolling);
 	}
 
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->shortcutsTreeView->selectionModel(), SIGNAL(currentChanged(QModelIndex,QModelIndex)),
-		this, SLOT(initEditors()));
-	connect(ui->shortcutsTreeView, SIGNAL(activated(QModelIndex)),
-		this, SLOT(switchToEditors(QModelIndex)));
-	connect(ui->lineEditSearch, SIGNAL(textChanged(QString)),
-	        filterModel, SLOT(setFilterFixedString(QString)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &ShortcutsDialog::retranslate);
+	connect(ui->shortcutsTreeView->selectionModel(), &QItemSelectionModel::currentChanged, this, &ShortcutsDialog::initEditors);
+	connect(ui->shortcutsTreeView, &QTreeView::activated, this, &ShortcutsDialog::switchToEditors);
+	connect(ui->lineEditSearch, &QLineEdit::textChanged, filterModel, &ShortcutsFilterModel::setFilterFixedString);
 	
 	// apply button logic
-	connect(ui->applyButton, SIGNAL(clicked()), this, SLOT(applyChanges()));
+	connect(ui->applyButton, &QPushButton::clicked, this, &ShortcutsDialog::applyChanges);
 	// restore defaults button logic
-	connect(ui->restoreDefaultsButton, SIGNAL(clicked()), this, SLOT(restoreDefaultShortcuts()));
-	connect(ui->restoreAllDefaultsButton, SIGNAL(clicked()), this, SLOT(restoreAllDefaultShortcuts()));
+	connect(ui->restoreDefaultsButton, &QPushButton::clicked, this, &ShortcutsDialog::restoreDefaultShortcuts);
+	connect(ui->restoreAllDefaultsButton, &QPushButton::clicked, this, &ShortcutsDialog::restoreAllDefaultShortcuts);
 	// we need to disable all shortcut actions, so we can enter shortcuts without activating any actions
-	connect(ui->primaryShortcutEdit, SIGNAL(focusChanged(bool)), actionMgr, SLOT(setAllActionsEnabled(bool)));
-	connect(ui->altShortcutEdit, SIGNAL(focusChanged(bool)), actionMgr, SLOT(setAllActionsEnabled(bool)));
+	connect(ui->primaryShortcutEdit, &ShortcutLineEdit::focusChanged, actionMgr, &StelActionMgr::setAllActionsEnabled);
+	connect(ui->altShortcutEdit, &ShortcutLineEdit::focusChanged, actionMgr, &StelActionMgr::setAllActionsEnabled);
 	// handling changes in editors
-	connect(ui->primaryShortcutEdit, SIGNAL(contentsChanged()), this, SLOT(handleChanges()));
-	connect(ui->altShortcutEdit, SIGNAL(contentsChanged()), this, SLOT(handleChanges()));
+	connect(ui->primaryShortcutEdit, &ShortcutLineEdit::contentsChanged, this, &ShortcutsDialog::handleChanges);
+	connect(ui->altShortcutEdit, &ShortcutLineEdit::contentsChanged, this, &ShortcutsDialog::handleChanges);
 
 	QString backspaceChar;
 	backspaceChar.append(QChar(0x232B)); // Erase left
@@ -331,10 +340,8 @@ void ShortcutsDialog::createDialogContent()
 
 	updateTreeData();
 
-	// Let's improve visibility of the text
-	QString style = "QLabel { color: rgb(238, 238, 238); }";
-	ui->primaryLabel->setStyleSheet(style);
-	ui->altLabel->setStyleSheet(style);
+	// set initial focus to action search
+	ui->lineEditSearch->setFocus();
 }
 
 void ShortcutsDialog::polish()
@@ -402,26 +409,26 @@ QStandardItem* ShortcutsDialog::findItemByData(QVariant value, int role, int col
 				return subitem;
 		}
 	}
-	return 0;
+	return nullptr;
 }
 
 void ShortcutsDialog::updateShortcutsItem(StelAction *action,
                                           QStandardItem *shortcutItem)
 {
 	QVariant shortcutId(action->getId());
-	if (shortcutItem == Q_NULLPTR)
+	if (shortcutItem == nullptr)
 	{
 		// search for item
 		shortcutItem = findItemByData(shortcutId, Qt::UserRole, 0);
 	}
 	// we didn't find item, create and add new
-	QStandardItem* groupItem = Q_NULLPTR;
-	if (shortcutItem == Q_NULLPTR)
+	QStandardItem* groupItem = nullptr;
+	if (shortcutItem == nullptr)
 	{
 		// firstly search for group
 		QVariant groupId(action->getGroup());
 		groupItem = findItemByData(groupId, Qt::UserRole, 0);
-		if (groupItem == Q_NULLPTR)
+		if (groupItem == nullptr)
 		{
 			// create and add new group to treeWidget
 			groupItem = updateGroup(action->getGroup());
@@ -488,25 +495,25 @@ void ShortcutsDialog::restoreDefaultShortcuts()
 void ShortcutsDialog::updateTreeData()
 {
 	// Create shortcuts tree
-	QStringList groups = actionMgr->getGroupList();
+	const QStringList groups = actionMgr->getGroupList();
 	for (const auto& group : groups)
 	{
 		updateGroup(group);
 		// display group's shortcuts
-		QList<StelAction*> actions = actionMgr->getActionList(group);
+		const QList<StelAction*> actions = actionMgr->getActionList(group);
 		for (auto* action : actions)
 		{
 			updateShortcutsItem(action);
 		}
 	}
-	// ajust columns
+	// adjust columns
 	for(int i=0; i<3; i++)
 		ui->shortcutsTreeView->resizeColumnToContents(i);
 }
 
 bool ShortcutsDialog::itemIsEditable(QStandardItem *item)
 {
-	if (item == Q_NULLPTR) return false;
+	if (item == nullptr) return false;
 	// non-editable items(not group items) have no Qt::ItemIsSelectable flag
 	return (Qt::ItemIsSelectable & item->flags());
 }

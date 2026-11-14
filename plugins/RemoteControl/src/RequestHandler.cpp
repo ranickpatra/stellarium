@@ -33,9 +33,7 @@
 #include "ViewService.hpp"
 
 #include "StelApp.hpp"
-#include "StelUtils.hpp"
 #include "StelTranslator.hpp"
-#include "StelFileMgr.hpp"
 #include "StelModuleMgr.hpp"
 
 #include <QDir>
@@ -47,11 +45,11 @@ const QByteArray RequestHandler::AUTH_REALM = "Basic realm=\"Stellarium remote c
 class HtmlTranslationProvider : public ITemplateTranslationProvider
 {
 public:
-	HtmlTranslationProvider(StelTranslator* localInstance)
+	HtmlTranslationProvider(StelTranslator* localInstance):
+		rcTranslator(localInstance)
 	{
-		rcTranslator = localInstance;
 	}
-	QString getTranslation(const QString &key) Q_DECL_OVERRIDE
+	QString getTranslation(const QString &key) override
 	{
 		//try to get a RemoteControl specific translation first
 		QString trans = rcTranslator->tryQtranslate(key);
@@ -67,12 +65,12 @@ private:
 class JsTranslationProvider : public ITemplateTranslationProvider
 {
 public:
-	JsTranslationProvider(StelTranslator* localInstance)
+	JsTranslationProvider(StelTranslator* localInstance):
+		rcTranslator(localInstance)
 	{
-		rcTranslator = localInstance;
 	}
 
-	QString getTranslation(const QString &key) Q_DECL_OVERRIDE
+	QString getTranslation(const QString &key) override
 	{
 		//try to get a RemoteControl specific translation first
 		QString trans = rcTranslator->tryQtranslate(key);
@@ -85,7 +83,11 @@ private:
 	StelTranslator* rcTranslator;
 };
 
+#if (QT_VERSION>=QT_VERSION_CHECK(5,14,0))
+RequestHandler::RequestHandler(const StaticFileControllerSettings& settings, QObject* parent) : HttpRequestHandler(parent), usePassword(false), enableCors(false), templateMutex()
+#else
 RequestHandler::RequestHandler(const StaticFileControllerSettings& settings, QObject* parent) : HttpRequestHandler(parent), usePassword(false), enableCors(false), templateMutex(QMutex::Recursive)
+#endif
 {
 	apiController = new APIController(QByteArray("/api/").size(),this);
 
@@ -104,11 +106,11 @@ RequestHandler::RequestHandler(const StaticFileControllerSettings& settings, QOb
 	apiController->registerService(new LocationSearchService(apiController));
 	apiController->registerService(new ViewService(apiController));
 
-	connect(&StelApp::getInstance().getModuleMgr(), SIGNAL(extensionsAdded(QObjectList)), this, SLOT(addExtensionServices(QObjectList)));
+	connect(&StelApp::getInstance().getModuleMgr(), &StelModuleMgr::extensionsAdded, this, &RequestHandler::addExtensionServices);
 	addExtensionServices(StelApp::getInstance().getModuleMgr().getExtensionList());
 
 	staticFiles = new StaticFileController(settings,this);
-	connect(&StelApp::getInstance(),SIGNAL(languageChanged()),this,SLOT(refreshTemplates()));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &RequestHandler::refreshTemplates);
 	refreshTemplates();
 }
 
@@ -279,7 +281,7 @@ void RequestHandler::refreshTemplates()
 				Template tmp(f);
 				tmp.translate(*transProv);
 				//check if the file was correctly loaded
-				if(tmp.size()>0)
+				if(!tmp.isEmpty())
 				{
 					templateMap.insert('/'+line.toUtf8(),tmp);
 				}

@@ -26,10 +26,14 @@
 
 
 #include <cmath>
+#include <cstring>
+#include <iterator>
 #include <limits>
 #include <QString>
+#include <QVector2D>
 #include <QMatrix4x4>
 #include <QColor>
+#include <QRegularExpression>
 
 template<class T> class Vector2;
 template<class T> class Vector3;
@@ -89,9 +93,9 @@ template<class T> class Vector2
 {
 public:
 	//! The vector is not initialized!
-	inline Vector2();
+	//inline Vector2();
 	//! Sets all components of the vector to the same value
-	inline explicit Vector2(T);
+	inline explicit Vector2(T x=0);
 	//! Explicit conversion constructor from an array (copies values)
 	//! @warning Does not check array size, make sure it has at least 2 elements
 	inline explicit Vector2(const T*);
@@ -104,9 +108,6 @@ public:
 	//! Constructor from a QStringList like { "2", "4" } or { "2.1", "4.2", "6.3" }
 	explicit Vector2(QStringList s);
 
-	//! Assignment from array
-	//! @warning Does not check array size, make sure it has at least 2 elements
-	inline Vector2<T>& operator=(const T*);
 	inline void set(T, T);
 
 	inline bool operator==(const Vector2<T>&) const;
@@ -114,8 +115,8 @@ public:
 
 	inline const T& operator[](int x) const;
 	inline T& operator[](int);
-	inline operator const T*() const;
-	inline operator T*();
+	explicit inline operator const T*() const;
+	explicit inline operator T*();
 
 	inline Vector2<T>& operator+=(const Vector2<T>&);
 	inline Vector2<T>& operator-=(const Vector2<T>&);
@@ -152,15 +153,27 @@ public:
 
 	inline T dot(const Vector2<T>&) const;
 
-	inline T length() const;
-	inline T lengthSquared() const;
+	T length() const = delete; // Use norm()
+	T lengthSquared() const = delete; // Use normSquared()
+	//! Norm of the vector, also known as length
+	//
+	// The name "length" is not used to avoid mistakes when porting C++ code to
+	// GLSL, where length() method returns number of elements instead of the
+	// norm (and actual norm is computed by a free function called length).
+	inline T norm() const;
+	//! Square of the norm of the vector, same as dot product with itself
+	inline T normSquared() const;
 	inline void normalize();
 
 	//! Formatted string with brackets
 	inline QString toString() const {return QString("[%1, %2]").arg(v[0]).arg(v[1]);}
+	//! converters to be registered in StelCore
+	static Vector2<T>fromBracketedString(QString s);
 	//! Compact comma-separated string without brackets and spaces.
 	//! The result can be restored into a Vector2 by the Vector2(QString s) constructors.
 	QString toStr() const;
+	//! Convert to a QVector2D.
+	QVector2D toQVector() const;
 
 	T v[2];
 };
@@ -173,9 +186,9 @@ template<class T> class Vector3
 {
 public:
 	//! The vector is not initialized!
-	inline Vector3();
+	//inline Vector3();
 	//! Sets all components of the vector to the same value
-	inline explicit Vector3(T);
+	inline explicit Vector3(T x=0);
 	//! Explicit conversion constructor from an array (copies values)
 	//! @warning Does not check array size, make sure it has at least 3 elements
 	inline explicit Vector3(const T*);
@@ -189,9 +202,6 @@ public:
 
 	//inline Vector3& operator=(const Vector3&);
 
-	//! Assignment from array
-	//! @warning Does not check array size, make sure it has at least 2 elements
-	inline Vector3& operator=(const T*);
 	//template <class T2> inline Vector3& operator=(const Vector3<T2>&);
 	inline void set(T, T, T);
 
@@ -207,8 +217,8 @@ public:
 
 	inline T& operator[](int);
 	inline const T& operator[](int) const;
-	inline operator const T*() const;
-	inline operator T*();
+	explicit inline operator const T*() const;
+	explicit inline operator T*();
 	inline const T* data() const {return v;}
 	inline T* data() {return v;}
 
@@ -239,8 +249,16 @@ public:
 	inline T angle(const Vector3<T>&) const;
 	inline T angleNormalized(const Vector3<T>&) const;
 
-	inline T length() const;
-	inline T lengthSquared() const;
+	T length() const = delete; // Use norm()
+	T lengthSquared() const = delete; // Use normSquared()
+	//! Norm of the vector, also known as length
+	//
+	// The name "length" is not used to avoid mistakes when porting C++ code to
+	// GLSL, where length() method returns number of elements instead of the
+	// norm (and actual norm is computed by a free function called length).
+	inline T norm() const;
+	//! Square of the norm of the vector, same as dot product with itself
+	inline T normSquared() const;
 	inline void normalize();
 
 	inline void transfo4d(const Mat4d&);
@@ -252,8 +270,12 @@ public:
 
 	//! Formatted string with brackets
 	inline QString toString() const {return QString("[%1, %2, %3]").arg(v[0]).arg(v[1]).arg(v[2]);}
+	//! converters to be registered in StelCore (may not work!)
+	static Vector3<T>fromBracketedString(QString s);
+	//! convert from a QVector3D
+	static Vector3<T>fromQVector3D(QVector3D v);
 	//! Compact comma-separated string without brackets and spaces.
-	//! The result can be restored into a Vector2 by the Vector3(QString s) constructors.
+	//! The result can be restored into a Vector3 by the Vector3(QString s) constructors.
 	QString toStr() const;
 	inline QString toStringLonLat() const {return QString("[") + QString::number(longitude()*180./M_PI, 'g', 12) + "," + QString::number(latitude()*180./M_PI, 'g', 12)+"]";}
 	//! Convert a Vec3i/Vec3f/Vec3d to HTML color notation. In case of Vec3i, components are 0...255, else 0...1
@@ -261,7 +283,7 @@ public:
 	//! Convert to a QColor.
 	QColor toQColor() const;
 	//! Convert to a QVector3D.
-	QVector3D toQVector3D() const;
+	QVector3D toQVector() const;
 
 	T v[3];		// The 3 values
 };
@@ -274,9 +296,9 @@ template<class T> class Vector4
 {
 public:
 	//! The vector is not initialized!
-	inline Vector4();
+	//inline Vector4();
 	//! Sets all components of the vector to the same value
-	inline explicit Vector4(T);
+	inline explicit Vector4(T x=0);
 	//! Explicit conversion constructor from an array
 	//! @warning Does not check array size, make sure it has at least 4 elements
 	inline explicit Vector4(const T*);
@@ -297,8 +319,6 @@ public:
 	//! Constructor from a QColor
 	explicit Vector4(QColor c);
 
-	inline Vector4& operator=(const Vector3<T>&);
-	inline Vector4& operator=(const T*);
 	inline void set(T, T, T, T);
 
 	inline bool operator==(const Vector4<T>&) const;
@@ -306,8 +326,8 @@ public:
 
 	inline T& operator[](int);
 	inline const T& operator[](int) const;
-	inline operator T*();
-	inline operator const T*() const;
+	explicit inline operator T*();
+	explicit inline operator const T*() const;
 
 	inline void operator+=(const Vector4<T>&);
 	inline void operator-=(const Vector4<T>&);
@@ -326,19 +346,31 @@ public:
 
 	inline T dot(const Vector4<T>&) const;
 
-	inline T length() const;
-	inline T lengthSquared() const;
+	T length() const = delete; // Use norm()
+	T lengthSquared() const = delete; // Use normSquared()
+	//! Norm of the vector, also known as length
+	//
+	// The name "length" is not used to avoid mistakes when porting C++ code to
+	// GLSL, where length() method returns number of elements instead of the
+	// norm (and actual norm is computed by a free function called length).
+	inline T norm() const;
+	//! Square of the norm of the vector, same as dot product with itself
+	inline T normSquared() const;
 	inline void normalize();
 
 	inline void transfo4d(const Mat4d&);
 
 	//! Formatted string with brackets
 	inline QString toString() const {return QString("[%1, %2, %3, %4]").arg(v[0]).arg(v[1]).arg(v[2]).arg(v[3]);}
+	//! converters to be registered in StelCore
+	static Vector4<T>fromBracketedString(QString s);
 	//! Compact comma-separated string without brackets and spaces.
-	//! The result can be restored into a Vector2 by the Vector4(QString s) constructors.
+	//! The result can be restored into a Vector4 by the Vector4(QString s) constructors.
 	QString toStr() const;
 	//! Convert to a QColor.
 	QColor toQColor() const;
+	//! Convert to a QVector4D.
+	QVector4D toQVector() const;
 
 	T v[4];		// The 4 values
 };
@@ -358,12 +390,15 @@ public:
 	inline void set(T,T,T,T,T,T,T,T,T);
 
 	inline T& operator[](int);
-	inline operator T*();
-	inline operator const T*() const;
+	inline T operator[](int) const;
+	explicit inline operator T*();
+	explicit inline operator const T*() const;
 
 	inline Matrix3 operator-(const Matrix3<T>&) const;
 	inline Matrix3 operator+(const Matrix3<T>&) const;
 	inline Matrix3 operator*(const Matrix3<T>&) const;
+	inline Matrix3 operator*(T) const;
+	inline Matrix3 operator/(T) const;
 
 	inline Vector3<T> operator*(const Vector3<T>&) const;
 
@@ -407,8 +442,9 @@ public:
 	inline void set(T,T,T,T,T,T,T,T,T,T,T,T,T,T,T,T);
 
 	inline T& operator[](int);
-	inline operator T*();
-	inline operator const T*() const;
+	inline T operator[](int) const;
+	explicit inline operator T*();
+	explicit inline operator const T*() const;
 
 	inline Matrix4 operator-(const Matrix4<T>&) const;
 	inline Matrix4 operator+(const Matrix4<T>&) const;
@@ -442,7 +478,7 @@ public:
 	inline Vector4<T> getColumn(const int column) const;
 
 	//Converts to QMatix4x4 (for use in OpenGL or other Qt classes)
-	inline QMatrix4x4 convertToQMatrix() const;
+	inline QMatrix4x4 toQMatrix() const;
 
 	inline void print(void) const;
 	QString toString(int fieldWidth=0, char format='g', int precision=-1) const {return QString("[[%1, %2, %3, %4], [%5, %6, %7, %8], [%9, %10, %11, %12], [%13, %14, %15, %16]]")
@@ -489,11 +525,11 @@ template <class T> inline bool fuzzyEquals(T a, T b, T eps = std::numeric_limits
 
 ////////////////////////// Vector2 class methods ///////////////////////////////
 
-template<class T> Vector2<T>::Vector2() {}
+//template<class T> Vector2<T>::Vector2() {}
 
 template<class T> Vector2<T>::Vector2(T x)
 {
-        v[0]=x; v[1]=x;
+	v[0]=x; v[1]=x;
 }
 
 template<class T> Vector2<T>::Vector2(const T* x)
@@ -509,12 +545,6 @@ template <class T> template <class T2> Vector2<T>::Vector2(const Vector2<T2>& ot
 template<class T> Vector2<T>::Vector2(T x, T y)
 {
 	v[0]=x; v[1]=y;
-}
-
-template<class T> Vector2<T>& Vector2<T>::operator=(const T* a)
-{
-	v[0]=a[0]; v[1]=a[1];
-	return *this;
 }
 
 template<class T> void Vector2<T>::set(T x, T y)
@@ -651,12 +681,12 @@ template<class T> T Vector2<T>::dot(const Vector2<T>& b) const
 }
 
 
-template<class T> T Vector2<T>::length() const
+template<class T> T Vector2<T>::norm() const
 {
 	return static_cast<T>(std::sqrt(v[0] * v[0] + v[1] * v[1]));
 }
 
-template<class T> T Vector2<T>::lengthSquared() const
+template<class T> T Vector2<T>::normSquared() const
 {
 	return v[0] * v[0] + v[1] * v[1];
 }
@@ -675,7 +705,7 @@ template<class T> void Vector2<T>::normalize()
 
 ////////////////////////// Vector3 class methods ///////////////////////////////
 
-template<class T> Vector3<T>::Vector3() {}
+//template<class T> Vector3<T>::Vector3() {}
 
 //template<class T> Vector3<T>::Vector3(const Vector3& a)
 //{
@@ -713,12 +743,6 @@ template<class T> Vector3<T>::Vector3(T x, T y, T z)
 //	v[0]=a.v[0]; v[1]=a.v[1]; v[2]=a.v[2];
 //	return *this;
 //}
-
-template<class T> Vector3<T>& Vector3<T>::operator=(const T* a)
-{
-	v[0]=a[0]; v[1]=a[1]; v[2]=a[2];
-	return *this;
-}
 
 template<class T> void Vector3<T>::set(T x, T y, T z)
 {
@@ -829,7 +853,7 @@ template<class T> Vector3<T> Vector3<T>::operator^(const Vector3<T>& b) const
 // Angle in radian between two vectors
 template<class T> T Vector3<T>::angle(const Vector3<T>& b) const
 {
-	const T cosAngle = dot(b)/std::sqrt(lengthSquared()*b.lengthSquared());
+	const T cosAngle = dot(b)/std::sqrt(normSquared()*b.normSquared());
 	return cosAngle>=1 ? 0 : (cosAngle<=-1 ? M_PI : std::acos(cosAngle));
 }
 
@@ -840,12 +864,12 @@ template<class T> T Vector3<T>::angleNormalized(const Vector3<T>& b) const
 	return cosAngle>=1 ? 0 : (cosAngle<=-1 ? M_PI : std::acos(cosAngle));
 }
 
-template<class T> T Vector3<T>::length() const
+template<class T> T Vector3<T>::norm() const
 {
 	return static_cast<T>(std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]));
 }
 
-template<class T> T Vector3<T>::lengthSquared() const
+template<class T> T Vector3<T>::normSquared() const
 {
 	return v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
 }
@@ -889,7 +913,7 @@ template<class T> Vec3d Vector3<T>::toVec3d() const
 // Return latitude in rad
 template<class T> T Vector3<T>::latitude() const
 {
-	return std::asin(v[2]/length());
+	return std::asin(v[2]/norm());
 }
 
 // Return longitude in rad
@@ -901,7 +925,7 @@ template<class T> T Vector3<T>::longitude() const
 
 ////////////////////////// Vector4 class methods ///////////////////////////////
 
-template<class T> Vector4<T>::Vector4() {}
+//template<class T> Vector4<T>::Vector4() {}
 
 template<class T> Vector4<T>::Vector4(T x)
 {
@@ -936,18 +960,6 @@ template<class T> Vector4<T>::Vector4(T x, T y, T z)
 template<class T> Vector4<T>::Vector4(T x, T y, T z, T a)
 {
 	v[0]=x; v[1]=y; v[2]=z; v[3]=a;
-}
-
-template<class T> Vector4<T>& Vector4<T>::operator=(const Vector3<T>& a)
-{
-	v[0]=a.v[0]; v[1]=a.v[1]; v[2]=a.v[2]; v[3]=1;
-	return *this;
-}
-
-template<class T> Vector4<T>& Vector4<T>::operator=(const T* a)
-{
-	v[0]=a[0]; v[1]=a[1]; v[2]=a[2]; v[3]=a[3];
-	return *this;
 }
 
 template<class T> void Vector4<T>::set(T x, T y, T z, T a)
@@ -1040,12 +1052,12 @@ template<class T> T Vector4<T>::dot(const Vector4<T>& b) const
 	return v[0] * b.v[0] + v[1] * b.v[1] + v[2] * b.v[2] + v[3] * b.v[3];
 }
 
-template<class T> T Vector4<T>::length() const
+template<class T> T Vector4<T>::norm() const
 {
 	return static_cast<T>(std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]));
 }
 
-template<class T> T Vector4<T>::lengthSquared() const
+template<class T> T Vector4<T>::normSquared() const
 {
 	return v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3];
 }
@@ -1075,7 +1087,7 @@ template<class T> Matrix3<T>::Matrix3() {}
 
 template<class T> Matrix3<T>::Matrix3(const T* m)
 {
-	memcpy(r,m,sizeof(T)*9);
+	std::memcpy(r,m,sizeof(T)*9);
 }
 
 template<class T> Matrix3<T>::Matrix3(const Vector3<T>& v0, const Vector3<T>& v1, const Vector3<T>& v2)
@@ -1100,6 +1112,11 @@ template<class T> void Matrix3<T>::set(T a, T b, T c, T d, T e, T f, T g, T h, T
 }
 
 template<class T> T& Matrix3<T>::operator[](int n)
+{
+	return r[n];
+}
+
+template<class T> T Matrix3<T>::operator[](int n) const
 {
 	return r[n];
 }
@@ -1145,6 +1162,25 @@ template<class T> Matrix3<T> Matrix3<T>::operator*(const Matrix3<T>& a) const
 #undef MATMUL
 }
 
+template<class T> Matrix3<T> Matrix3<T>::operator*(T a) const
+{
+	return Matrix3(r[0]*a, r[1]*a, r[2]*a,
+	               r[3]*a, r[4]*a, r[5]*a,
+	               r[6]*a, r[7]*a, r[8]*a);
+}
+
+template<class T> Matrix3<T> operator*(T a, const Matrix3<T>& m)
+{
+	return m * a;
+}
+
+template<class T> Matrix3<T> Matrix3<T>::operator/(T a) const
+{
+	return Matrix3(r[0]/a, r[1]/a, r[2]/a,
+	               r[3]/a, r[4]/a, r[5]/a,
+	               r[6]/a, r[7]/a, r[8]/a);
+}
+
 
 template<class T> Matrix3<T> Matrix3<T>::operator+(const Matrix3<T>& a) const
 {
@@ -1188,9 +1224,9 @@ template<class T> Matrix3<T> Matrix3<T>::inverse() const
 
 	/* choose pivot - or die */
 	if (fabs(r2[0]) > fabs(r1[0]))
-		SWAP_ROWS(r2, r1);
+		SWAP_ROWS(r2, r1)
 	if (fabs(r1[0]) > fabs(r0[0]))
-		SWAP_ROWS(r1, r0);
+		SWAP_ROWS(r1, r0)
 	if (0.0 == r0[0])
 		return Matrix3<T>();
 
@@ -1224,7 +1260,7 @@ template<class T> Matrix3<T> Matrix3<T>::inverse() const
 
 	/* choose pivot - or die */
 	if (fabs(r2[1]) > fabs(r1[1]))
-		SWAP_ROWS(r2, r1);
+		SWAP_ROWS(r2, r1)
 	if (0.0 == r1[1])
 		return Matrix3<T>();
 
@@ -1288,7 +1324,7 @@ template<class T> Matrix4<T>::Matrix4() {}
 
 template<class T> Matrix4<T>::Matrix4(const T* m)
 {
-	memcpy(r,m,sizeof(T)*16);
+	std::memcpy(r,m,sizeof(T)*16);
 }
 
 template<class T> Matrix4<T>::Matrix4(const Vector4<T>& v0,
@@ -1328,6 +1364,11 @@ template<class T> void Matrix4<T>::set(T a, T b, T c, T d, T e, T f, T g, T h, T
 }
 
 template<class T> T& Matrix4<T>::operator[](int n)
+{
+	return r[n];
+}
+
+template<class T> T Matrix4<T>::operator[](int n) const
 {
 	return r[n];
 }
@@ -1438,7 +1479,7 @@ template<class T> Vector3<T> Matrix4<T>::multiplyWithoutTranslation(const Vector
 			  r[2]*a.v[0] + r[6]*a.v[1] + r[10]*a.v[2]);
 }
 
-// multiply column vector by a 4x4 matrix in homogeneous coordinate (considere a[3]=1)
+// multiply column vector by a 4x4 matrix in homogeneous coordinate (consider a[3]=1)
 template<class T> Vector4<T> Matrix4<T>::operator*(const Vector4<T>& a) const
 {
 	return Vector4<T>(r[0]*a.v[0] + r[4]*a.v[1] +  r[8]*a.v[2] + r[12]*a.v[3],
@@ -1524,11 +1565,11 @@ template<class T> Matrix4<T> Matrix4<T>::inverse() const
 
 	/* choose pivot - or die */
 	if (fabs(r3[0]) > fabs(r2[0]))
-		SWAP_ROWS(r3, r2);
+		SWAP_ROWS(r3, r2)
 	if (fabs(r2[0]) > fabs(r1[0]))
-		SWAP_ROWS(r2, r1);
+		SWAP_ROWS(r2, r1)
 	if (fabs(r1[0]) > fabs(r0[0]))
-		SWAP_ROWS(r1, r0);
+		SWAP_ROWS(r1, r0)
 	if (0.0 == r0[0])
 		return Matrix4<T>();
 
@@ -1575,9 +1616,9 @@ template<class T> Matrix4<T> Matrix4<T>::inverse() const
 
 	/* choose pivot - or die */
 	if (fabs(r3[1]) > fabs(r2[1]))
-		SWAP_ROWS(r3, r2);
+		SWAP_ROWS(r3, r2)
 	if (fabs(r2[1]) > fabs(r1[1]))
-		SWAP_ROWS(r2, r1);
+		SWAP_ROWS(r2, r1)
 	if (0.0 == r1[1])
 		return Matrix4<T>();
 
@@ -1611,7 +1652,7 @@ template<class T> Matrix4<T> Matrix4<T>::inverse() const
 
 	/* choose pivot - or die */
 	if (fabs(r3[2]) > fabs(r2[2]))
-		SWAP_ROWS(r3, r2);
+		SWAP_ROWS(r3, r2)
 	if (0.0 == r2[2])
 		return Matrix4<T>();
 
@@ -1693,7 +1734,7 @@ template<class T> Vector4<T> Matrix4<T>::getColumn(const int column) const
 	return Vector4<T>(r[0 + column * 4], r[1 + column * 4], r[2 + column * 4], r[3 + column * 4]);
 }
 
-template<class T> QMatrix4x4 Matrix4<T>::convertToQMatrix() const
+template<class T> QMatrix4x4 Matrix4<T>::toQMatrix() const
 {
 	return QMatrix4x4( r[0], r[4], r[8],r[12],
 			   r[1], r[5], r[9],r[13],
@@ -1748,6 +1789,20 @@ template<class T> inline
 Vector4<T> operator*(T s,const Vector4<T>&v)
 {
 	return Vector4<T>(s*v[0],s*v[1],s*v[2],s*v[3]);
+}
+
+template<class T>
+Matrix3<T> outerProduct(const Vector3<T>& a, const Vector3<T>& b)
+{
+	return Matrix3<T>(a[0]*b[0], a[1]*b[0], a[2]*b[0],
+	                  a[0]*b[1], a[1]*b[1], a[2]*b[1],
+	                  a[0]*b[2], a[1]*b[2], a[2]*b[2]);
+}
+
+template<class T>
+T dot(const Vector3<T>& a, const Vector3<T>& b)
+{
+	return a.dot(b);
 }
 
 //Make Qt handle the classes as primitive type. This optimizes performance with Qt's container classes
@@ -1823,6 +1878,59 @@ inline QVector3D operator*(const QMatrix3x3& mat, const QVector3D& vec)
 		vec.y() * mat(2,1) +
 		vec.z() * mat(2,2);
 	return QVector3D(x,y,z);
+}
+
+inline Mat3f toMat3f(const Mat3d& md)
+{
+	Mat3f out;
+	for(size_t n = 0; n < std::size(md.r); ++n)
+		out.r[n] = static_cast<float>(md.r[n]);
+	return out;
+}
+
+inline Mat3d toMat3d(const Mat3f& md)
+{
+	Mat3d out;
+	for(size_t n = 0; n < std::size(md.r); ++n)
+		out.r[n] = static_cast<double>(md.r[n]);
+	return out;
+}
+
+inline Mat4f toMat4f(const Mat4d& md)
+{
+	Mat4f out;
+	for(size_t n = 0; n < std::size(md.r); ++n)
+		out.r[n] = static_cast<float>(md.r[n]);
+	return out;
+}
+
+inline Mat4d toMat4d(const Mat4f& md)
+{
+	Mat4d out;
+	for(size_t n = 0; n < std::size(md.r); ++n)
+		out.r[n] = static_cast<double>(md.r[n]);
+	return out;
+}
+
+template<typename T> Vector2<T> normalize(const Vector2<T>& v)
+{
+	auto vn = v;
+	vn.normalize();
+	return vn;
+}
+
+template<typename T> Vector3<T> normalize(const Vector3<T>& v)
+{
+	auto vn = v;
+	vn.normalize();
+	return vn;
+}
+
+template<typename T> Vector4<T> normalize(const Vector4<T>& v)
+{
+	auto vn = v;
+	vn.normalize();
+	return vn;
 }
 
 #endif // VECMATH_HPP

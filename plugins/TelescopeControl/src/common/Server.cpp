@@ -2,7 +2,7 @@
 The stellarium telescope library helps building
 telescope server programs, that can communicate with stellarium
 by means of the stellarium TCP telescope protocol.
-It also contains smaple server classes (dummy, Meade LX200).
+It also contains sample server classes (dummy, Meade LX200).
 
 Author and Copyright of this file and of the stellarium telescope library:
 Johannes Gajdosik, 2006
@@ -25,7 +25,6 @@ Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA  02110-1335, USA.
 #include "Server.hpp"
 #include "Socket.hpp"
 //#include "Listener.hpp"
-#include "LogFile.hpp"
 
 void Server::SocketList::clear(void)
 {
@@ -36,7 +35,8 @@ void Server::SocketList::clear(void)
 	list<Socket*>::clear();
 }
 
-Server::Server(int)
+Server::Server(int, int slot)
+	: logSlot(slot)
 {
 	//Socket *listener = new Listener(*this, port);
 	//socket_list.push_back(listener);
@@ -67,24 +67,20 @@ void Server::step(long long int timeout_micros)
 		timeout_micros = 0;
 	tv.tv_sec = static_cast<long>(timeout_micros / 1000000);
 	tv.tv_usec = static_cast<long>(timeout_micros % 1000000);
-	const int select_rc = select(fd_max+1, &read_fds, &write_fds, Q_NULLPTR, &tv);
+	const int select_rc = select(fd_max+1, &read_fds, &write_fds, nullptr, &tv);
 	if (select_rc > 0)
 	{
-		auto it = socket_list.begin();
-		while (it != socket_list.end())
+		// Note: a connection that has become closed is intentionally NOT
+		// deleted here. A device client (e.g. TelescopeClientDirectLx200)
+		// keeps a pointer to its connection for its whole lifetime; deleting
+		// the object here would leave that pointer dangling and cause a
+		// use-after-free (e.g. a crash after a TCP connection drops). Closed
+		// connections stay in the list (their prepareSelectFds()/
+		// handleSelectFds() become no-ops once the socket is invalid) and are
+		// freed when the Server itself is destroyed.
+		for (auto* socket : socket_list)
 		{
-			(*it)->handleSelectFds(read_fds, write_fds);
-			if ((*it)->isClosed())
-			{
-				auto tmp = it;
-				it++;
-				delete (*tmp);
-				socket_list.erase(tmp);
-			}
-			else
-			{
-				it++;
-			}
+			socket->handleSelectFds(read_fds, write_fds);
 		}
 	}
 }

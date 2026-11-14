@@ -24,7 +24,6 @@
 #include "StelFileMgr.hpp"
 #include "StelModuleMgr.hpp"
 #include "StelLocationMgr.hpp"
-#include "StelLocaleMgr.hpp"
 #include "StelTranslator.hpp"
 #include "SolarSystem.hpp"
 
@@ -35,12 +34,12 @@
 #include <QJsonObject>
 #include <QStringListModel>
 
-LocationService::LocationService(QObject *parent) : AbstractAPIService(parent)
+LocationService::LocationService(QObject *parent) : AbstractAPIService(parent),
+	core(StelApp::getInstance().getCore()),
+	locMgr(&StelApp::getInstance().getLocationMgr()),
+	ssys(GETSTELMODULE(SolarSystem))
 {
 	//this is run in the main thread
-	core = StelApp::getInstance().getCore();
-	locMgr = &StelApp::getInstance().getLocationMgr();
-	ssys = GETSTELMODULE(SolarSystem);
 }
 
 void LocationService::get(const QByteArray& operation, const APIParameters &parameters, APIServiceResponse &response)
@@ -55,13 +54,15 @@ void LocationService::get(const QByteArray& operation, const APIParameters &para
 
 		response.writeJSON(QJsonDocument(list));
 	}
-	else if(operation == "countrylist")
+	else if(operation == "regionlist")
 	{
 		const StelTranslator& trans = *StelTranslator::globalTranslator;
 
-		QStringList allCountries = StelApp::getInstance().getLocaleMgr().getAllCountryNames();
+		// Read and use the planet parameter
+		QString planet = parameters.value("planet",  "");
+		QStringList allRegions = StelApp::getInstance().getLocationMgr().getRegionNames(planet);
 		QJsonArray list;
-		for (auto str : allCountries)
+		for (const auto &str : std::as_const(allRegions))
 		{
 			QJsonObject obj;
 			obj.insert("name",str);
@@ -117,13 +118,13 @@ void LocationService::get(const QByteArray& operation, const APIParameters &para
 	else
 	{
 		//TODO some sort of service description?
-		response.writeRequestError("unsupported operation. GET: list, countrylist, planetlist, planetimage");
+		response.writeRequestError("unsupported operation. GET: list, regionlist, planetlist, planetimage");
 	}
 }
 
 void LocationService::post(const QByteArray& operation, const APIParameters &parameters, const QByteArray &data, APIServiceResponse &response)
 {
-	Q_UNUSED(data);
+	Q_UNUSED(data)
 
 	if (operation == "setlocationfields")
 	{
@@ -144,7 +145,6 @@ void LocationService::post(const QByteArray& operation, const APIParameters &par
 				QMetaObject::invokeMethod(core, "moveObserverTo", SERVICE_DEFAULT_INVOKETYPE,
 							  Q_ARG(StelLocation, loc),
 							  Q_ARG(double,0.0) );
-
 				response.setData("ok");
 				return;
 			}
@@ -164,22 +164,33 @@ void LocationService::post(const QByteArray& operation, const APIParameters &par
 		QString sAltitude = QString::fromUtf8(parameters.value("altitude"));
 
 		QString name = QString::fromUtf8(parameters.value("name"));
-		QString country = QString::fromUtf8(parameters.value("country"));
+		//QString country = QString::fromUtf8(parameters.value("country"));
+		QString region = QString::fromUtf8(parameters.value("region"));
 		QString planet = QString::fromUtf8(parameters.value("planet"));
 
 		//check each field
 		bool doneSomething = false;
 		bool ok = false;
 		float latitude = sLatitude.toFloat(&ok);
-		if(ok && (latitude - loc.latitude) != 0.0f)
+		if (!ok)
 		{
-			loc.latitude = latitude;
+			sLatitude.replace(",", ".");
+			latitude = sLatitude.toFloat(&ok);
+		}
+		if(ok && (latitude - loc.getLatitude()) != 0.0f)
+		{
+			loc.setLatitude(latitude);
 			doneSomething = true;
 		}
 		float longitude = sLongitude.toFloat(&ok);
-		if(ok && (longitude - loc.longitude) != 0.0f)
+		if (!ok)
 		{
-			loc.longitude = longitude;
+			sLongitude.replace(",", ".");
+			longitude = sLongitude.toFloat(&ok);
+		}
+		if(ok && (longitude - loc.getLongitude()) != 0.0f)
+		{
+			loc.setLongitude(longitude);
 			doneSomething = true;
 		}
 		int altitude = sAltitude.toInt(&ok);
@@ -193,9 +204,13 @@ void LocationService::post(const QByteArray& operation, const APIParameters &par
 			loc.name = name;
 			doneSomething = true;
 		}
-		if(!country.isEmpty() && country != loc.country)
+		else if (!parameters.contains("name"))
 		{
-			loc.country = country;
+			loc.name=QString("%1, %2").arg(loc.getLatitude()).arg(loc.getLongitude()); // Force a preliminary name
+		}
+		if(!region.isEmpty() && region != loc.region)
+		{
+			loc.region = region;
 			doneSomething = true;
 		}
 

@@ -1,7 +1,8 @@
 #include "StelPropertyMgr.hpp"
-#include "StelApp.hpp"
 #include <QtDebug>
 #include <QApplication>
+
+Q_LOGGING_CATEGORY(Property,"stel.Properties", QtInfoMsg)
 
 StelProperty::StelProperty(const QString &id, QObject *target, const QMetaProperty& prop)
 	: id(id), target(target), prop(prop)
@@ -45,7 +46,11 @@ QMetaType::Type StelProperty::getType() const
 	//Qt is quite funky when it comes to QVariant::Type vs QMetaType::Type, see
 	//https://doc.qt.io/qt-5/qvariant.html#type
 	//and https://stackoverflow.com/questions/31290606/qmetatypefloat-not-in-qvarianttype
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+	return static_cast<QMetaType::Type>(prop.typeId());
+#else
 	return static_cast<QMetaType::Type>(prop.type());
+#endif
 }
 
 void StelProperty::propertyChanged()
@@ -82,7 +87,7 @@ StelProperty* StelPropertyMgr::registerProperty(const QString &id, QObject *targ
 	stelProp->setParent(this);
 
 	//react to the property changed event
-	connect(stelProp,SIGNAL(changed(QVariant)),this,SLOT(onStelPropChanged(QVariant)));
+	connect(stelProp, &StelProperty::changed, this, &StelPropertyMgr::onStelPropChanged);
 
 	//check if the property is valid, crash otherwise
 	//this may reveal if a qRegisterMetaType or similar is needed
@@ -117,10 +122,7 @@ StelProperty* StelPropertyMgr::getProperty(const QString &id, const bool noWarni
 void StelPropertyMgr::onStelPropChanged(const QVariant &val)
 {
 	StelProperty* prop = qobject_cast<StelProperty*>(sender());
-#ifndef NDEBUG
-	if (qApp->property("verbose") == true)
-		qDebug()<<"StelProperty"<<prop->getId()<<"changed, value"<<val;
-#endif
+	qCDebug(Property)<<"StelProperty"<<prop->getId()<<"changed, value"<<val;
 	emit stelPropertyChanged(prop, val);
 }
 
@@ -139,10 +141,10 @@ void StelPropertyMgr::registerObject(QObject *obj)
 	if(!registeredObjects.contains(name))
 	{
 		//just a sanity check that we dont have the same object registered under a different name
-		Q_ASSERT(!registeredObjects.values().contains(obj));
+		Q_ASSERT(registeredObjects.key(obj).isEmpty());
 
 #ifndef NDEBUG
-		qDebug()<<"[StelPropertyMgr] Registering object"<<name;
+		qCDebug(Property)<<"[StelPropertyMgr] Registering object"<<name;
 #endif
 
 		//iterate and store the static properties, dynamic ones are skipped
@@ -169,9 +171,9 @@ QVariant StelPropertyMgr::getStelPropertyValue(const QString &id, const bool noW
 	return QVariant();
 }
 
-bool StelPropertyMgr::setStelPropertyValue(const QString &id, const QVariant &value) const
+bool StelPropertyMgr::setStelPropertyValue(const QString &id, const QVariant &value, const bool noWarning) const
 {
-	StelProperty* prop = getProperty(id);
+	StelProperty* prop = getProperty(id, noWarning);
 	if(prop)
 	{
 		return prop->setValue(value);
@@ -196,8 +198,8 @@ StelPropertyProxy::StelPropertyProxy(StelProperty *prop, QObject *parent)
 	connect(prop, &StelProperty::changed, this, &StelPropertyProxy::onPropertyChanged);
 }
 
-StelPropertyIntProxy::StelPropertyIntProxy(StelProperty *prop, QObject *parent)
-	: StelPropertyProxy(prop,parent)
+StelPropertyIntProxy::StelPropertyIntProxy(StelProperty *pr, QObject *parent)
+	: StelPropertyProxy(pr,parent)
 {
 }
 
@@ -206,8 +208,8 @@ void StelPropertyIntProxy::onPropertyChanged(const QVariant &value)
 	emit propertyChanged(value.toInt());
 }
 
-StelPropertyBoolProxy::StelPropertyBoolProxy(StelProperty *prop, QObject *parent)
-	: StelPropertyProxy(prop,parent)
+StelPropertyBoolProxy::StelPropertyBoolProxy(StelProperty *pr, QObject *parent)
+	: StelPropertyProxy(pr,parent)
 {
 }
 
@@ -216,8 +218,8 @@ void StelPropertyBoolProxy::onPropertyChanged(const QVariant &value)
 	emit propertyChanged(value.toBool());
 }
 
-StelPropertyDoubleProxy::StelPropertyDoubleProxy(StelProperty *prop, QObject *parent)
-	: StelPropertyProxy(prop,parent)
+StelPropertyDoubleProxy::StelPropertyDoubleProxy(StelProperty *pr, QObject *parent)
+	: StelPropertyProxy(pr,parent)
 {
 }
 
@@ -226,8 +228,8 @@ void StelPropertyDoubleProxy::onPropertyChanged(const QVariant &value)
 	emit propertyChanged(value.toDouble());
 }
 
-StelPropertyStringProxy::StelPropertyStringProxy(StelProperty *prop, QObject *parent)
-	: StelPropertyProxy(prop,parent)
+StelPropertyStringProxy::StelPropertyStringProxy(StelProperty *pr, QObject *parent)
+	: StelPropertyProxy(pr,parent)
 {
 }
 

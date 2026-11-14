@@ -30,6 +30,8 @@
 #include "SpecialMarkersMgr.hpp"
 #include "CustomObjectMgr.hpp"
 #include "SolarSystem.hpp"
+#include "NomenclatureMgr.hpp"
+#include "StelSkyCultureMgr.hpp"
 
 #include "StelObjectMgr.hpp"
 #include "StelGui.hpp"
@@ -60,7 +62,16 @@
 #include <QDialog>
 #include <QAbstractItemModel>
 
-#include "SimbadSearcher.hpp"
+namespace
+{
+enum ModelRole
+{
+	ObjectNameRole = Qt::UserRole,
+	SearchableTypeRole,
+	UserVisibleTypeRole,
+	ObjectRole,
+};
+}
 
 // Start of members for class CompletionListModel
 CompletionListModel::CompletionListModel(QObject* parent):
@@ -79,19 +90,19 @@ CompletionListModel::~CompletionListModel()
 {
 }
 
-void CompletionListModel::setValues(const QStringList& v, const QStringList& rv)
+void CompletionListModel::setValues(const QVector<ObjectFound>& v, const QVector<ObjectFound>& rv)
 {
 	values=v;
 	recentValues=rv;
 	updateText();
 }
 
-void CompletionListModel::appendRecentValues(const QStringList& v)
+void CompletionListModel::appendRecentValues(const QVector<ObjectFound>& v)
 {
 	recentValues+=v;
 }
 
-void CompletionListModel::appendValues(const QStringList& v)
+void CompletionListModel::appendValues(const QVector<ObjectFound>& v)
 {
 	values+=v;
 	updateText();
@@ -106,10 +117,9 @@ void CompletionListModel::clearValues()
 	updateText();
 }
 
-QString CompletionListModel::getSelected() const
+ObjectFound CompletionListModel::getSelected() const
 {
-	if (values.isEmpty())
-		return QString();
+	if (values.isEmpty()) return {};
 	return values.at(selectedIdx);
 }
 
@@ -137,7 +147,10 @@ void CompletionListModel::selectFirst()
 
 void CompletionListModel::updateText()
 {
-	this->setStringList(values);
+	QStringList lst;
+	for (const auto& v : std::as_const(values))
+		lst << v.name;
+	setStringList(lst);
 }
 
 QVariant CompletionListModel::data(const QModelIndex &index, int role) const
@@ -145,31 +158,59 @@ QVariant CompletionListModel::data(const QModelIndex &index, int role) const
 	if (!index.isValid())
 	    return QVariant();
 
-	// Bold recent objects
-	if(role == Qt::FontRole)
+	const auto obj = values.value(index.row());
+
+	switch(role)
 	{
-	    QFont font;
-	    bool toBold = recentValues.contains(index.data(Qt::DisplayRole).toString()) ?
-				    true : false;
-	    font.setBold(toBold);
-	    return font;
+	case Qt::DisplayRole:
+		if(obj.isSimbad)
+		{
+			if(obj.userVisibleType.isEmpty())
+				return QString("%1 (SIMBAD)").arg(obj.name);
+			else
+				return QString("%1 (SIMBAD; %2)").arg(obj.name, qc_(obj.userVisibleType, "SIMBAD object type"));
+		}
+		else
+		{
+			return QString("%1 (%2)").arg(obj.name, obj.userVisibleType);
+		}
+	case ObjectNameRole:
+		return obj.name;
+	case UserVisibleTypeRole:
+		return obj.userVisibleType;
+	case SearchableTypeRole:
+		return obj.searchableType;
+	case ObjectRole:
+		return QVariant::fromValue(obj);
+	case Qt::FontRole:
+	{
+		// Bold recent objects
+		auto font = QGuiApplication::font();
+		const bool toBold = recentValues.contains(obj);
+		font.setBold(toBold);
+		return font;
+	}
+	case Qt::EditRole:
+		// For EditRole, return the original name too
+		return obj.name;
 	}
 
-	return QStringListModel::data(index, role);
+	return QVariant();
 }
 
 // Start of members for class SearchDialog
 
-const char* SearchDialog::DEF_SIMBAD_URL = "https://simbad.u-strasbg.fr/";
-SearchDialog::SearchDialogStaticData SearchDialog::staticData;
+const char* SearchDialog::DEF_SIMBAD_URL = "https://simbad.cds.unistra.fr/";
+//SearchDialog::SearchDialogStaticData SearchDialog::staticData;
 QString SearchDialog::extSearchText = "";
 
 SearchDialog::SearchDialog(QObject* parent)
 	: StelDialog("Search", parent)
-	, simbadReply(Q_NULLPTR)
-	, listModel(Q_NULLPTR)
-	, proxyModel(Q_NULLPTR)
+	, simbadReply(nullptr)
+	, listModel(nullptr)
+	, proxyModel(nullptr)
 	, flagHasSelectedText(false)
+	, shiftPressed(false)
 {
 	setObjectName("SearchDialog");
 	ui = new Ui_searchDialogForm;
@@ -179,29 +220,30 @@ SearchDialog::SearchDialog(QObject* parent)
 
 	StelApp::getInstance().getStelPropertyManager()->registerObject(this);
 	conf = StelApp::getInstance().getSettings();
-	enableSimbadSearch(conf->value("search/flag_search_online", true).toBool());
-	useStartOfWords = conf->value("search/flag_start_words", false).toBool();
-	useLockPosition = conf->value("search/flag_lock_position", true).toBool();
-	useFOVCenterMarker = conf->value("search/flag_fov_center_marker", true).toBool();
+	enableSimbadSearch(conf->value("search/flag_search_online", useSimbad).toBool());
+	useStartOfWords = conf->value("search/flag_start_words", useStartOfWords).toBool();
+	useLengthSorting = conf->value("search/flag_sorting_length", useLengthSorting).toBool();
+	useLockPosition = conf->value("search/flag_lock_position", useLockPosition).toBool();
+	useFOVCenterMarker = conf->value("search/flag_fov_center_marker", useFOVCenterMarker).toBool();
 	fovCenterMarkerState = GETSTELMODULE(SpecialMarkersMgr)->getFlagFOVCenterMarker();
 	simbadServerUrl = conf->value("search/simbad_server_url", DEF_SIMBAD_URL).toString();
+	useAutoClosing = conf->value("search/flag_auto_closing", useAutoClosing).toBool();
 	setCurrentCoordinateSystemKey(conf->value("search/coordinate_system", "equatorialJ2000").toString());	
 
-	setSimbadQueryDist( conf->value("search/simbad_query_dist",  30).toInt());
-	setSimbadQueryCount(conf->value("search/simbad_query_count",  3).toInt());
-	setSimbadGetsIds(   conf->value("search/simbad_query_IDs",        true ).toBool());
-	setSimbadGetsSpec(  conf->value("search/simbad_query_spec",       false).toBool());
-	setSimbadGetsMorpho(conf->value("search/simbad_query_morpho",     false).toBool());
-	setSimbadGetsTypes( conf->value("search/simbad_query_types",      false).toBool());
-	setSimbadGetsDims(  conf->value("search/simbad_query_dimensions", false).toBool());
-
-	shiftPressed = false;
+	setSimbadQueryDist( conf->value("search/simbad_query_dist",       simbadDist).toInt());
+	setSimbadQueryCount(conf->value("search/simbad_query_count",      simbadCount).toInt());
+	setSimbadGetsIds(   conf->value("search/simbad_query_IDs",        simbadGetIds).toBool());
+	setSimbadGetsSpec(  conf->value("search/simbad_query_spec",       simbadGetSpec).toBool());
+	setSimbadGetsMorpho(conf->value("search/simbad_query_morpho",     simbadGetMorpho).toBool());
+	setSimbadGetsTypes( conf->value("search/simbad_query_types",      simbadGetTypes).toBool());
+	setSimbadGetsDims(  conf->value("search/simbad_query_dimensions", simbadGetDims).toBool());
 
 	// Init CompletionListModel
 	searchListModel = new CompletionListModel();
+	searchListModel->setObjectMgr(objectMgr);
 
 	// Find recent object search data file
-	recentObjectSearchesJsonPath = StelFileMgr::findFile("data", (StelFileMgr::Flags)(StelFileMgr::Directory | StelFileMgr::Writable)) + "/recentObjectSearches.json";
+	recentObjectSearchesJsonPath = StelFileMgr::findFile("data", static_cast<StelFileMgr::Flags>(StelFileMgr::Directory | StelFileMgr::Writable)) + "/recentObjectSearches.json";
 }
 
 SearchDialog::~SearchDialog()
@@ -210,7 +252,7 @@ SearchDialog::~SearchDialog()
 	if (simbadReply)
 	{
 		simbadReply->deleteLater();
-		simbadReply = Q_NULLPTR;
+		simbadReply = nullptr;
 	}
 }
 
@@ -231,7 +273,7 @@ void SearchDialog::retranslate()
 
 void SearchDialog::setCurrentCoordinateSystemKey(QString key)
 {
-	const QMetaEnum& en = metaObject()->enumerator(metaObject()->indexOfEnumerator("CoordinateSystem"));
+	const QMetaEnum& en = SearchDialog::metaObject()->enumerator(SearchDialog::metaObject()->indexOfEnumerator("CoordinateSystem"));
 	CoordinateSystem coordSystem = static_cast<CoordinateSystem>(en.keyToValue(key.toLatin1().data()));
 	if (coordSystem<0)
 	{
@@ -273,10 +315,18 @@ void SearchDialog::populateCoordinateSystemsList()
 	csys->blockSignals(false);
 }
 
+void SearchDialog::populateCoordinateData()
+{
+	setCenterOfScreenCoordinates();
+	populateCoordinateAxis();
+}
+
 void SearchDialog::populateCoordinateAxis()
 {
-	bool withDecimalDegree = StelApp::getInstance().getFlagShowDecimalDegrees();
+	bool withDecimalDegree = StelApp::getInstance().getFlagUseDecDegreesCoords();
+	bool usePolarDistance = StelApp::getInstance().getFlagPolarDistanceUsage();
 	bool xnormal = true;
+	QPair<double, double> minMaxLimits = usePolarDistance ? qMakePair(0., 180.) : qMakePair(-90., 90.);
 
 	ui->AxisXSpinBox->setDecimals(2);
 	ui->AxisYSpinBox->setDecimals(2);
@@ -285,8 +335,8 @@ void SearchDialog::populateCoordinateAxis()
 	ui->AxisXSpinBox->setMinimum(  0., true);
 	ui->AxisXSpinBox->setMaximum(360., true);
 	ui->AxisXSpinBox->setWrapping(true);
-	ui->AxisYSpinBox->setMinimum(-90., true);
-	ui->AxisYSpinBox->setMaximum( 90., true);
+	ui->AxisYSpinBox->setMinimum(minMaxLimits.first, true);
+	ui->AxisYSpinBox->setMaximum(minMaxLimits.second, true);
 	ui->AxisYSpinBox->setWrapping(false);
 
 	switch (getCurrentCoordinateSystem()) {		
@@ -296,7 +346,7 @@ void SearchDialog::populateCoordinateAxis()
 			ui->AxisXLabel->setText(q_("Right ascension"));
 			ui->AxisXSpinBox->setDisplayFormat(AngleSpinBox::HMSLetters);
 			ui->AxisXSpinBox->setPrefixType(AngleSpinBox::Normal);
-			ui->AxisYLabel->setText(q_("Declination"));
+			ui->AxisYLabel->setText(usePolarDistance ? q_("Polar distance") : q_("Declination"));
 			ui->AxisYSpinBox->setDisplayFormat(AngleSpinBox::DMSSymbols);
 			ui->AxisYSpinBox->setPrefixType(AngleSpinBox::NormalPlus);
 			xnormal = true;
@@ -352,24 +402,26 @@ void SearchDialog::setCoordinateSystem(int csID)
 	ui->AxisXSpinBox->setRadians(0.);
 	ui->AxisYSpinBox->setRadians(0.);
 	conf->setValue("search/coordinate_system", currentCoordinateSystemID);
+	setCenterOfScreenCoordinates();
 }
 
 // Initialize the dialog widgets and connect the signals/slots
 void SearchDialog::createDialogContent()
 {
 	ui->setupUi(dialog);
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(&StelApp::getInstance(), SIGNAL(flagShowDecimalDegreesChanged(bool)), this, SLOT(populateCoordinateAxis()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
-	connect(ui->lineEditSearchSkyObject, SIGNAL(textChanged(const QString&)), this, SLOT(onSearchTextChanged(const QString&)));
-	connect(ui->simbadCooQueryButton, SIGNAL(clicked()), this, SLOT(lookupCoordinates()));
-	connect(GETSTELMODULE(StelObjectMgr), SIGNAL(selectedObjectChanged(StelModule::StelModuleSelectAction)), this, SLOT(clearSimbadText(StelModule::StelModuleSelectAction)));
-	connect(ui->pushButtonGotoSearchSkyObject, SIGNAL(clicked()), this, SLOT(gotoObject()));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &SearchDialog::retranslate);
+	connect(&StelApp::getInstance(), &StelApp::flagUseDecDegreesCoordsChanged, this, &SearchDialog::populateCoordinateAxis);
+	connect(&StelApp::getInstance(), &StelApp::flagUsePolarDistanceChanged,   this, &SearchDialog::populateCoordinateData);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &SearchDialog::handleMovedTo);
+	connect(ui->lineEditSearchSkyObject, &QLineEdit::textChanged, this, &SearchDialog::onSearchTextChanged);
+	connect(ui->simbadCooQueryButton, &QPushButton::clicked, this, &SearchDialog::lookupCoordinates);
+	connect(GETSTELMODULE(StelObjectMgr), &StelObjectMgr::selectedObjectChanged, this, &SearchDialog::clearSimbadText);
+	connect(ui->pushButtonGotoSearchSkyObject, &QPushButton::clicked, this, qOverload<>(&SearchDialog::gotoObject));
 	onSearchTextChanged(ui->lineEditSearchSkyObject->text());
-	connect(ui->lineEditSearchSkyObject, SIGNAL(returnPressed()), this, SLOT(gotoObject()));
-	connect(ui->lineEditSearchSkyObject, SIGNAL(selectionChanged()), this, SLOT(setHasSelectedFlag()));
-	connect(ui->lineEditSearchSkyObject, SIGNAL(customContextMenuRequested(QPoint)), this, SLOT(showContextMenu(QPoint)));
+	connect(ui->lineEditSearchSkyObject, &QLineEdit::returnPressed, this, qOverload<>(&SearchDialog::gotoObject));
+	connect(ui->lineEditSearchSkyObject, &QLineEdit::selectionChanged, this, &SearchDialog::setHasSelectedFlag);
+	connect(ui->lineEditSearchSkyObject, &QLineEdit::customContextMenuRequested, this, &SearchDialog::showContextMenu);
 
 	ui->lineEditSearchSkyObject->installEventFilter(this);	
 
@@ -379,7 +431,7 @@ void SearchDialog::createDialogContent()
 	if (gui)
 	{
 		enableKineticScrolling(gui->getFlagUseKineticScrolling());
-		connect(gui, SIGNAL(flagUseKineticScrollingChanged(bool)), this, SLOT(enableKineticScrolling(bool)));
+		connect(gui, &StelGui::flagUseKineticScrollingChanged, this, &SearchDialog::enableKineticScrolling);
 	}
 
 	populateCoordinateSystemsList();
@@ -388,36 +440,40 @@ void SearchDialog::createDialogContent()
 	if (idx==-1) // Use equatorialJ2000 as default
 		idx = ui->coordinateSystemComboBox->findData(QVariant("equatorialJ2000"), Qt::UserRole, Qt::MatchCaseSensitive);
 	ui->coordinateSystemComboBox->setCurrentIndex(idx);
-	connect(ui->coordinateSystemComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(setCoordinateSystem(int)));
-	connect(ui->AxisXSpinBox, SIGNAL(valueChanged()), this, SLOT(manualPositionChanged()));
-	connect(ui->AxisYSpinBox, SIGNAL(valueChanged()), this, SLOT(manualPositionChanged()));
+	connect(ui->coordinateSystemComboBox, qOverload<int>(&QComboBox::currentIndexChanged), this, &SearchDialog::setCoordinateSystem);
+	connect(ui->AxisXSpinBox, &AngleSpinBox::valueChanged, this, &SearchDialog::manualPositionChanged);
+	connect(ui->AxisYSpinBox, &AngleSpinBox::valueChanged, this, &SearchDialog::manualPositionChanged);
+	connect(ui->goPushButton, &QToolButton::clicked, this, &SearchDialog::manualPositionChanged);
+	// following the current direction of FOV
+	connect(GETSTELMODULE(StelMovementMgr), &StelMovementMgr::currentDirectionChanged, this, &SearchDialog::setCenterOfScreenCoordinates);
+	setCenterOfScreenCoordinates();
 	
-	connect(ui->alphaPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->betaPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->gammaPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->deltaPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->epsilonPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->zetaPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->etaPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->thetaPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->iotaPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->kappaPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->lambdaPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->muPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->nuPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->xiPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->omicronPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->piPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->rhoPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->sigmaPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->tauPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->upsilonPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->phiPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->chiPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->psiPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
-	connect(ui->omegaPushButton, SIGNAL(clicked(bool)), this, SLOT(greekLetterClicked()));
+	connect(ui->alphaPushButton,   &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->betaPushButton,    &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->gammaPushButton,   &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->deltaPushButton,   &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->epsilonPushButton, &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->zetaPushButton,    &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->etaPushButton,     &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->thetaPushButton,   &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->iotaPushButton,    &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->kappaPushButton,   &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->lambdaPushButton,  &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->muPushButton,      &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->nuPushButton,      &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->xiPushButton,      &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->omicronPushButton, &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->piPushButton,      &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->rhoPushButton,     &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->sigmaPushButton,   &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->tauPushButton,     &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->upsilonPushButton, &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->phiPushButton,     &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->chiPushButton,     &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->psiPushButton,     &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
+	connect(ui->omegaPushButton,   &QPushButton::clicked, this, &SearchDialog::greekLetterClicked);
 
-	connectBoolProperty(ui->simbadGroupBox, "SearchDialog.useSimbad");	
+        connectBoolProperty(ui->simbadGroupBox,        "SearchDialog.useSimbad");
 	connectIntProperty(ui->searchRadiusSpinBox,    "SearchDialog.simbadDist");
 	connectIntProperty(ui->resultsSpinBox,         "SearchDialog.simbadCount");
 	connectBoolProperty(ui->allIDsCheckBox,        "SearchDialog.simbadGetIds");
@@ -431,16 +487,21 @@ void SearchDialog::createDialogContent()
 	if (idx==-1) // Use University of Strasbourg as default
 		idx = ui->serverListComboBox->findData(QVariant(DEF_SIMBAD_URL), Qt::UserRole, Qt::MatchCaseSensitive);
 	ui->serverListComboBox->setCurrentIndex(idx);
-	connect(ui->serverListComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(selectSimbadServer(int)));
+	connect(ui->serverListComboBox, qOverload<int>(&QComboBox::currentIndexChanged), this, &SearchDialog::selectSimbadServer);
 
-	connect(ui->checkBoxUseStartOfWords, SIGNAL(clicked(bool)), this, SLOT(enableStartOfWordsAutofill(bool)));
+	connect(ui->checkBoxUseStartOfWords, &QCheckBox::clicked, this, &SearchDialog::enableStartOfWordsAutofill);
 	ui->checkBoxUseStartOfWords->setChecked(useStartOfWords);
+	connect(ui->checkBoxUseSortingByLength, &QCheckBox::clicked, this, &SearchDialog::enableSortingByLength);
+	ui->checkBoxUseSortingByLength->setChecked(useLengthSorting);
 
-	connect(ui->checkBoxFOVCenterMarker, SIGNAL(clicked(bool)), this, SLOT(enableFOVCenterMarker(bool)));
+	connect(ui->checkBoxFOVCenterMarker, &QCheckBox::clicked, this, &SearchDialog::enableFOVCenterMarker);
 	ui->checkBoxFOVCenterMarker->setChecked(useFOVCenterMarker);
 
-	connect(ui->checkBoxLockPosition, SIGNAL(clicked(bool)), this, SLOT(enableLockPosition(bool)));
+	connect(ui->checkBoxLockPosition, &QCheckBox::clicked, this, &SearchDialog::enableLockPosition);
 	ui->checkBoxLockPosition->setChecked(useLockPosition);
+
+        connect(ui->checkBoxAutoClosing, &QCheckBox::clicked, this, &SearchDialog::enableAutoClosing);
+        ui->checkBoxAutoClosing->setChecked(useAutoClosing);
 
 	// list views initialization
 	listModel = new QStringListModel(this);
@@ -450,40 +511,34 @@ void SearchDialog::createDialogContent()
 	proxyModel->setFilterCaseSensitivity(Qt::CaseInsensitive);
 	ui->objectsListView->setModel(proxyModel);
 
-	connect(ui->objectTypeComboBox, SIGNAL(activated(int)), this, SLOT(updateListView(int)));
-	connect(ui->searchInListLineEdit, SIGNAL(textChanged(const QString&)), proxyModel, SLOT(setFilterWildcard(const QString&)));
-	connect(ui->searchInEnglishCheckBox, SIGNAL(toggled(bool)), this, SLOT(updateListTab()));
+	connect(ui->objectTypeComboBox, qOverload<int>(&QComboBox::activated), this, &SearchDialog::updateListView);
+	connect(ui->searchInListLineEdit, &QLineEdit::textChanged, proxyModel, &QSortFilterProxyModel::setFilterWildcard);
+	connect(ui->searchInEnglishCheckBox, &QCheckBox::toggled, this, &SearchDialog::updateListTab);
 	QAction *clearAction = ui->searchInListLineEdit->addAction(QIcon(":/graphicGui/uieBackspaceInputButton.png"), QLineEdit::ActionPosition::TrailingPosition);
-	connect(clearAction, SIGNAL(triggered()), this, SLOT(searchListClear()));
+	connect(clearAction, &QAction::triggered, this, &SearchDialog::searchListClear);
 	updateListTab();
 
-	connect(ui->tabWidget, SIGNAL(currentChanged(int)), this, SLOT(changeTab(int)));
-	// Set the focus directly on the line editDe	if (ui->tabWidget->currentIndex()==0)
-	ui->lineEditSearchSkyObject->setFocus();
-
-	connect(StelApp::getInstance().getCore(), SIGNAL(updateSearchLists()), this, SLOT(updateListTab()));
-
-	QString style = "QLabel { color: rgb(238, 238, 238); }";
-	ui->simbadStatusLabel->setStyleSheet(style);
-	ui->labelGreekLetterTitle->setStyleSheet(style);
-	ui->simbadCooStatusLabel->setStyleSheet(style);
+	connect(ui->tabWidget, &QTabWidget::currentChanged, this, &SearchDialog::changeTab);
+	connect(this, &SearchDialog::visibleChanged, this, &SearchDialog::refreshFocus);
+	connect(StelApp::getInstance().getCore(), &StelCore::updateSearchLists, this, &SearchDialog::updateListTab);
+	connect(GETSTELMODULE(NomenclatureMgr), &NomenclatureMgr::flagShowNomenclatureChanged, this, &SearchDialog::updateListTab);
+	connect(&StelApp::getInstance().getSkyCultureMgr(), &StelSkyCultureMgr::currentSkyCultureIDChanged, this, &SearchDialog::updateListTab);
 
 	// Get data from previous session
 	loadRecentSearches();
 
 	// Create list model view
 	ui->searchListView->setModel(searchListModel);
-	searchListModel->setStringList(searchListModel->getValues());
 
 	// Auto display recent searches
-	QStringList recentMatches = listMatchingRecentObjects("", recentObjectSearchesData.maxSize, useStartOfWords);
+	const auto recentMatches = listMatchingRecentObjects("", recentObjectSearchesData.maxSize, useStartOfWords);
 	resetSearchResultDisplay(recentMatches, recentMatches);
 	setPushButtonGotoSearch();
 
 	// Update max size of "recent object searches"
-	connect(ui->recentSearchSizeSpinBox, SIGNAL(editingFinished()), this, SLOT(recentSearchSizeEditingFinished()));
+	connect(ui->recentSearchSizeSpinBox, &QSpinBox::editingFinished, this, &SearchDialog::recentSearchSizeEditingFinished);
 	// Clear data from recent search object
-	connect(ui->recentSearchClearDataPushButton, SIGNAL(clicked()), this, SLOT(recentSearchClearDataClicked()));
+	connect(ui->recentSearchClearDataPushButton, &QToolButton::clicked, this, &SearchDialog::recentSearchClearDataClicked);
 	populateRecentSearch();
 }
 
@@ -501,6 +556,12 @@ void SearchDialog::populateRecentSearch()
 	setRecentSearchClearDataPushButton();
 }
 
+void SearchDialog::refreshFocus(bool state)
+{
+	if (state)
+		ui->lineEditSearchSkyObject->setFocus();
+}
+
 void SearchDialog::changeTab(int index)
 {
 	if (index==0) // Search Tab
@@ -508,6 +569,7 @@ void SearchDialog::changeTab(int index)
 
 	if (index==2) // Position
 	{
+		setCenterOfScreenCoordinates();
 		if (useFOVCenterMarker)
 			GETSTELMODULE(SpecialMarkersMgr)->setFlagFOVCenterMarker(true);
 	}
@@ -589,7 +651,7 @@ void SearchDialog::recentSearchSizeEditingFinished()
 	// Update max size in dialog and user data
 	int maxSize = ui->recentSearchSizeSpinBox->value();
 	setRecentSearchSize(maxSize);
-	maxSize = recentObjectSearchesData.maxSize; // Might not be the same
+	// maxSize = recentObjectSearchesData.maxSize; // Might not be the same. BUT USELESS call, dead store!
 
 	// Save maxSize to user's data
 	saveRecentSearches();
@@ -606,18 +668,20 @@ void SearchDialog::recentSearchClearDataClicked()
 	// Save empty list to user's data file
 	saveRecentSearches();
 
+	// Remove all SIMBAD's objects and save empty list to user's data file
+	GETSTELMODULE(CustomObjectMgr)->removePersistentObjects();
+
 	// Update search result on "Object" tab
 	onSearchTextChanged(ui->lineEditSearchSkyObject->text());
 }
 
 void SearchDialog::setRecentSearchClearDataPushButton()
 {
-	// Enable clear button if recent list is greater than 0
-	bool toEnable = recentObjectSearchesData.recentList.size() > 0;
+	// Enable clear button if recent list is not empty
+	bool toEnable = !recentObjectSearchesData.recentList.isEmpty();
 	ui->recentSearchClearDataPushButton->setEnabled(toEnable);
 	// Tool tip depends on recent list size
-	QString toolTipText;
-	toolTipText = toEnable ? q_("Clear search history: delete all search objects data") : q_("Clear search history: no data to delete");
+	QString toolTipText = toEnable ? q_("Clear search history: delete all search objects data") : q_("Clear search history: no data to delete");
 	ui->recentSearchClearDataPushButton->setToolTip(toolTipText);
 }
 
@@ -630,10 +694,25 @@ void SearchDialog::enableStartOfWordsAutofill(bool enable)
 	onSearchTextChanged(ui->lineEditSearchSkyObject->text());
 }
 
+void SearchDialog::enableSortingByLength(bool enable)
+{
+	useLengthSorting = enable;
+	conf->setValue("search/flag_sorting_length", useLengthSorting);
+
+	// Update search result on "Object" tab
+	onSearchTextChanged(ui->lineEditSearchSkyObject->text());
+}
+
 void SearchDialog::enableLockPosition(bool enable)
 {
 	useLockPosition = enable;
 	conf->setValue("search/flag_lock_position", useLockPosition);
+}
+
+void SearchDialog::enableAutoClosing(bool enable)
+{
+        useAutoClosing = enable;
+        conf->setValue("search/flag_auto_closing", useAutoClosing);
 }
 
 void SearchDialog::enableFOVCenterMarker(bool enable)
@@ -655,14 +734,86 @@ void SearchDialog::setSimpleStyle()
 	ui->coordinateSystemComboBox->setVisible(false);
 }
 
+void SearchDialog::setCenterOfScreenCoordinates()
+{
+	StelCore *core = StelApp::getInstance().getCore();
+	bool usePolarDistance = StelApp::getInstance().getFlagPolarDistanceUsage();
+        const auto projector = core->getProjection(StelCore::FrameJ2000, StelCore::RefractionMode::RefractionOff);
+	Vector2<qreal> cpos = projector->getViewportCenter();
+	Vec3d centerPos;
+	projector->unProject(cpos[0], cpos[1], centerPos);
+	double spinLong =0., spinLat = 0.;
+
+	// Getting coordinates (in radians) of position of the center of the screen
+	switch (getCurrentCoordinateSystem())
+	{
+		case equatorialJ2000:
+		{
+			StelUtils::rectToSphe(&spinLong, &spinLat, centerPos);
+			if (usePolarDistance)
+				spinLat = M_PI_2 - spinLat;
+			break;
+		}
+		case equatorial:
+		{
+			StelUtils::rectToSphe(&spinLong, &spinLat, core->j2000ToEquinoxEqu(centerPos, StelCore::RefractionOff));
+			if (usePolarDistance)
+				spinLat = M_PI_2 - spinLat;
+			break;
+		}
+		case galactic:
+			StelUtils::rectToSphe(&spinLong, &spinLat, core->j2000ToGalactic(centerPos));
+			break;
+		case supergalactic:
+			StelUtils::rectToSphe(&spinLong, &spinLat, core->j2000ToSupergalactic(centerPos));
+			break;
+		case horizontal:
+		{
+			StelUtils::rectToSphe(&spinLong, &spinLat, core->j2000ToAltAz(centerPos, StelCore::RefractionAuto));
+			spinLong = 3.*M_PI - spinLong; // N is zero, E is 90 degrees
+			if (StelApp::getInstance().getFlagSouthAzimuthUsage())
+				spinLong+=M_PI;
+			spinLong=StelUtils::fmodpos(spinLong, 2.*M_PI);
+			break;
+		}
+		case eclipticJ2000:
+		{
+			double lambda, beta;
+			StelUtils::rectToSphe(&spinLong, &spinLat, centerPos);
+			StelUtils::equToEcl(spinLong, spinLat, GETSTELMODULE(SolarSystem)->getEarth()->getRotObliquity(2451545.0), &lambda, &beta);
+			if (lambda<0) lambda+=2.0*M_PI;
+			spinLong = lambda;
+			spinLat = beta;
+			break;
+		}
+		case ecliptic:
+		{
+			double lambda, beta;
+			StelUtils::rectToSphe(&spinLong, &spinLat, core->j2000ToEquinoxEqu(centerPos, StelCore::RefractionOff));
+			StelUtils::equToEcl(spinLong, spinLat, GETSTELMODULE(SolarSystem)->getEarth()->getRotObliquity(core->getJDE()), &lambda, &beta);
+			if (lambda<0) lambda+=2.0*M_PI;
+			spinLong = lambda;
+			spinLat = beta;
+			break;
+		}
+	}
+
+	// Block spinbox signals locally, just until end of method.
+	const QSignalBlocker blockX(ui->AxisXSpinBox);
+	const QSignalBlocker blockY(ui->AxisYSpinBox);
+
+	// set coordinates in spinboxes
+	ui->AxisXSpinBox->setRadians(spinLong);
+	ui->AxisYSpinBox->setRadians(spinLat);
+}
 
 void SearchDialog::manualPositionChanged()
 {
 	searchListModel->clearValues();
 	StelCore* core = StelApp::getInstance().getCore();
+	bool usePolarDistance = StelApp::getInstance().getFlagPolarDistanceUsage();
 	StelMovementMgr* mvmgr = GETSTELMODULE(StelMovementMgr);	
-	Vec3d pos;
-	Vec3d aimUp;
+	Vec3d pos;	
 	double spinLong=ui->AxisXSpinBox->valueRadians();
 	double spinLat=ui->AxisYSpinBox->valueRadians();
 
@@ -670,13 +821,15 @@ void SearchDialog::manualPositionChanged()
 	// However, if those are identical, we have a problem when we want to look right into the pole. (e.g. zenith), which requires a special up vector.
 	// aimUp depends on MovementMgr::MountMode mvmgr->mountMode!
 	mvmgr->setViewUpVector(Vec3d(0., 0., 1.));
-	aimUp=mvmgr->getViewUpVectorJ2000();
+	Vec3d aimUp = mvmgr->getViewUpVectorJ2000();
 	StelMovementMgr::MountMode mountMode=mvmgr->getMountMode();
 
 	switch (getCurrentCoordinateSystem())
 	{
 		case equatorialJ2000:
 		{
+			if (usePolarDistance)
+				spinLat = M_PI_2 - spinLat;
 			StelUtils::spheToRect(spinLong, spinLat, pos);
 			if ( (mountMode==StelMovementMgr::MountEquinoxEquatorial) && (fabs(spinLat)> (0.9*M_PI_2)) )
 			{
@@ -689,6 +842,8 @@ void SearchDialog::manualPositionChanged()
 		}
 		case equatorial:
 		{
+			if (usePolarDistance)
+				spinLat = M_PI_2 - spinLat;
 			StelUtils::spheToRect(spinLong, spinLat, pos);
 			pos = core->equinoxEquToJ2000(pos, StelCore::RefractionOff);
 
@@ -704,8 +859,8 @@ void SearchDialog::manualPositionChanged()
 		{
 			double cx;
 			cx = 3.*M_PI - spinLong; // N is zero, E is 90 degrees
-			if (cx > 2.*M_PI)
-				cx -= 2.*M_PI;
+			if (StelApp::getInstance().getFlagSouthAzimuthUsage())
+				cx -= M_PI;
 			StelUtils::spheToRect(cx, spinLat, pos);
 			pos = core->altAzToJ2000(pos, StelCore::RefractionOff);
 			core->setTimeRate(0.);
@@ -772,9 +927,9 @@ void SearchDialog::onSearchTextChanged(const QString& text)
 	{
 		if (simbadReply)
 		{
-			disconnect(simbadReply, SIGNAL(statusChanged()), this, SLOT(onSimbadStatusChanged()));
+			disconnect(simbadReply, &SimbadLookupReply::statusChanged, this, &SearchDialog::onSimbadStatusChanged);
 			delete simbadReply;
-			simbadReply=Q_NULLPTR;
+			simbadReply=nullptr;
 		}
 		simbadResults.clear();
 	}
@@ -788,7 +943,7 @@ void SearchDialog::onSearchTextChanged(const QString& text)
 
 		maxNbItem = recentObjectSearchesData.maxSize;
 		// Auto display recent searches
-		QStringList recentMatches = listMatchingRecentObjects(trimmedText, maxNbItem, useStartOfWords);
+		const auto recentMatches = listMatchingRecentObjects(trimmedText, maxNbItem, useStartOfWords);
 		resetSearchResultDisplay(recentMatches, recentMatches);
 
 		ui->simbadStatusLabel->setText("");
@@ -801,22 +956,22 @@ void SearchDialog::onSearchTextChanged(const QString& text)
 		{
 			simbadReply = simbadSearcher->lookup(simbadServerUrl, trimmedText, 4);
 			onSimbadStatusChanged();
-			connect(simbadReply, SIGNAL(statusChanged()), this, SLOT(onSimbadStatusChanged()));
+			connect(simbadReply, &SimbadLookupReply::statusChanged, this, &SearchDialog::onSimbadStatusChanged);
 		}
 
 		// Get possible objects
-		QStringList matches;
-		QStringList recentMatches;
-		QStringList allMatches;
+		QVector<QPair<QString,StelObjectP>> matchesWithPointers;
+		QVector<ObjectFound> matches;
+		QVector<ObjectFound> recentMatches;
 
-		QString greekText = substituteGreek(trimmedText);
+		QString greekText = StelUtils::substituteGreek(trimmedText);
 
-		int trimmedTextMaxNbItem = 13;
+		int trimmedTextMaxNbItem = 50;
 		int greekTextMaxMbItem = 0;
 
 		if(greekText != trimmedText)
 		{
-			trimmedTextMaxNbItem = 8;
+			trimmedTextMaxNbItem = 50;
 			greekTextMaxMbItem = 18;
 
 			// Get recent matches
@@ -827,28 +982,31 @@ void SearchDialog::onSearchTextChanged(const QString& text)
 
 			// Get rest of matches
 			// trimmedText
-			matches = objectMgr->listMatchingObjects(trimmedText, trimmedTextMaxNbItem, useStartOfWords);
+			matchesWithPointers = objectMgr->listMatchingObjects(trimmedText, trimmedTextMaxNbItem, useStartOfWords);
 			// greekText
-			matches += objectMgr->listMatchingObjects(greekText, (greekTextMaxMbItem - matches.size()), useStartOfWords);
+			matchesWithPointers += objectMgr->listMatchingObjects(greekText, (greekTextMaxMbItem - matches.size()), useStartOfWords);
 		}
 		else
 		{
-			trimmedTextMaxNbItem = 13;
+			trimmedTextMaxNbItem = 50;
 
 			// Get recent matches
 			recentMatches = listMatchingRecentObjects(trimmedText, trimmedTextMaxNbItem, useStartOfWords);
 
 			// Get rest of matches
-			matches  = objectMgr->listMatchingObjects(trimmedText, trimmedTextMaxNbItem, useStartOfWords);
+			matchesWithPointers = objectMgr->listMatchingObjects(trimmedText, trimmedTextMaxNbItem, useStartOfWords);
 		}
 		// Check in case either number changes since they were
 		// hard coded
 		maxNbItem  = qMax(greekTextMaxMbItem, trimmedTextMaxNbItem);
 
-		// Clean up matches
-		adjustMatchesResult(allMatches, recentMatches, matches, maxNbItem);
+		for (const auto& [name,obj] : std::as_const(matchesWithPointers))
+			matches.append({name, obj->getType(), obj->getObjectTypeI18n()});
 
-		// Updates values
+		// Clean up matches
+		const auto allMatches = combineMatches(recentMatches, matches, maxNbItem);
+
+		// Updates values - module info will be fetched on-demand
 		resetSearchResultDisplay(allMatches, recentMatches);
 
 		// Update push button enabled state
@@ -856,23 +1014,27 @@ void SearchDialog::onSearchTextChanged(const QString& text)
 	}
 
 	// Goto object when clicking in list
-	connect(ui->searchListView, SIGNAL(clicked(const QModelIndex&)), this, SLOT(gotoObject(const QModelIndex&)), Qt::UniqueConnection);
-	connect(ui->searchListView, SIGNAL(activated(const QModelIndex&)), this, SLOT(gotoObject(const QModelIndex&)), Qt::UniqueConnection);
+	connect(ui->searchListView, &QListView::clicked, this,
+	        qOverload<const QModelIndex&>(&SearchDialog::gotoObjectFromSearchResults),
+	        Qt::UniqueConnection);
+	connect(ui->searchListView, &QListView::activated, this,
+	        qOverload<const QModelIndex&>(&SearchDialog::gotoObjectFromSearchResults),
+	        Qt::UniqueConnection);
 }
 
-void SearchDialog::updateRecentSearchList(const QString &nameI18n)
+void SearchDialog::updateRecentSearchList(const ObjectFound& obj)
 {
-	if(nameI18n.isEmpty())
+	if(obj.name.isEmpty())
 		return;
 
 	// Prepend & remove duplicates
-	recentObjectSearchesData.recentList.prepend(nameI18n);
-	recentObjectSearchesData.recentList.removeDuplicates();
+	recentObjectSearchesData.recentList.prepend(obj);
+	StelUtils::removeDuplicates(recentObjectSearchesData.recentList);
 
 	adjustRecentList(recentObjectSearchesData.maxSize);
 
 	// Auto display recent searches
-	QStringList recentMatches = listMatchingRecentObjects("", recentObjectSearchesData.maxSize, useStartOfWords);
+	const auto recentMatches = listMatchingRecentObjects("", recentObjectSearchesData.maxSize, useStartOfWords);
 	resetSearchResultDisplay(recentMatches, recentMatches);
 }
 
@@ -892,46 +1054,35 @@ void SearchDialog::adjustRecentList(int maxSize)
 		recentObjectSearchesData.recentList = recentObjectSearchesData.recentList.mid(0, spinBoxMaxSize);
 }
 
-void SearchDialog::adjustMatchesResult(QStringList &allMatches, QStringList& recentMatches, QStringList& matches, int maxNbItem)
+QVector<ObjectFound> SearchDialog::combineMatches(QVector<ObjectFound>& recentMatches, QVector<ObjectFound>& matches, const int maxItemCount) const
 {
-	int tempSize;
-	QStringList tempMatches; // unsorted matches use for calculation
-	// not displaying
-
 	// remove possible duplicates from completion list
-	matches.removeDuplicates();
+	StelUtils::removeDuplicates(matches);
 
-	matches.sort(Qt::CaseInsensitive);
+	// FIXME: why do we do this before the next (unstable) sorting?
+	std::sort(matches.begin(), matches.end(), [](auto& a, auto& b){ return a.name.compare(b.name, Qt::CaseInsensitive) < 0; });
+
 	// objects with short names should be searched first
 	// examples: Moon, Hydra (moon); Jupiter, Ghost of Jupiter
-	stringLengthCompare comparator;
-	std::sort(matches.begin(), matches.end(), comparator);
+	std::sort(matches.begin(), matches.end(), [](auto& a, auto& b){ return a.name.length() < b.name.length(); });
 
-	// Adjust recent matches to prefered max size
+	// Adjust recent matches to preferred max size
 	recentMatches = recentMatches.mid(0, recentObjectSearchesData.maxSize);
 
-	// Find total size of both matches
-	tempMatches << recentMatches << matches; // unsorted
-	tempMatches.removeDuplicates();
-	tempSize = tempMatches.size();
-
-	// Adjust match size to be within range
-	if(tempSize>maxNbItem)
-	{
-		int i = tempSize - maxNbItem;
-		matches = matches.mid(0, matches.size() - i);
-	}
-
+	QVector<ObjectFound> allMatches;
 	// Combine list: ordered by recent searches then relevance
 	allMatches << recentMatches << matches;
 
-	// Remove possible duplicates from both listQSt
-	allMatches.removeDuplicates();
+	StelUtils::removeDuplicates(allMatches);
+
+	if(allMatches.size() > maxItemCount)
+		allMatches.resize(maxItemCount);
+
+	return allMatches;
 }
 
 
-void SearchDialog::resetSearchResultDisplay(QStringList allMatches,
-					       QStringList recentMatches)
+void SearchDialog::resetSearchResultDisplay(const QVector<ObjectFound>& allMatches, const QVector<ObjectFound>& recentMatches)
 {
 	// Updates values
 	searchListModel->appendValues(allMatches);
@@ -991,7 +1142,60 @@ void SearchDialog::loadRecentSearches()
 			ui->recentSearchSizeSpinBox->setValue(recentObjectSearchesData.maxSize);
 
 			// Get user's recentList data (if possible)
-			recentObjectSearchesData.recentList = recentSearchData.value("recentList").toStringList();
+			for (const auto& entry : recentSearchData.value("recentList").toList())
+			{
+				const auto map = entry.toMap();
+				// We only support the map, the legacy name-only entry is ignored
+				if(map.isEmpty()) continue;
+
+				const auto name = map["name"].toString();
+				const auto searchableType = map["searchableType"].toString();
+				const auto userVisibleType = map["userVisibleType"].toString();
+				const auto isSimbad = map["isSIMBAD"].toBool();
+				if (name.isEmpty())
+				{
+					qWarning().nospace() << "Bad recent search entry: name=" << name
+					                     << ", searchableType=" << searchableType
+					                     << ", userVisibleType=" << userVisibleType
+					                     << ", isSIMBAD=" << isSimbad;
+					continue;
+				}
+				if (isSimbad)
+				{
+					const auto pos = map["position"].toList();
+					bool good = true;
+					if(pos.size() == 3)
+					{
+						bool okX = false, okY = false, okZ = false;
+						const auto x = pos[0].toDouble(&okX);
+						const auto y = pos[1].toDouble(&okY);
+						const auto z = pos[2].toDouble(&okZ);
+						good = okX && okY && okZ;
+						if (good)
+						{
+							recentObjectSearchesData.recentList.append({name, searchableType, userVisibleType, Vec3d(x,y,z)});
+						}
+					}
+					else
+					{
+						good = false;
+					}
+
+					if (!good)
+					{
+						qWarning().nospace() << "Bad recent search entry: name=" << name
+						                     << ", searchableType=" << searchableType
+						                     << ", userVisibleType=" << userVisibleType
+						                     << ", isSIMBAD=" << isSimbad
+						                     << ", pos=" << pos;
+						continue;
+					}
+				}
+				else
+				{
+					recentObjectSearchesData.recentList.append({name, searchableType, userVisibleType});
+				}
+			}
 		}
 		catch (std::runtime_error &e)
 		{
@@ -1020,8 +1224,24 @@ void SearchDialog::saveRecentSearches()
 
 	QVariantMap rslDataList;
 	rslDataList.insert("maxSize", recentObjectSearchesData.maxSize);
-	rslDataList.insert("recentList", recentObjectSearchesData.recentList);
-	
+	QVariantList recentList;
+	for(const auto& entry : std::as_const(recentObjectSearchesData.recentList))
+	{
+		QVariantMap map;
+		map["name"] = entry.name;
+		map["searchableType"] = entry.searchableType;
+		map["userVisibleType"] = entry.userVisibleType;
+		map["isSIMBAD"] = entry.isSimbad;
+		if(entry.isSimbad)
+		{
+			QVariantList xyz;
+			xyz << entry.position[0] << entry.position[1] << entry.position[2];
+			map["position"] = QVariant::fromValue(xyz);
+		}
+		recentList.append(map);
+	}
+	rslDataList.insert("recentList", recentList);
+
 	QVariantMap rsList;
 	rsList.insert("recentObjectSearches", rslDataList);
 
@@ -1031,9 +1251,9 @@ void SearchDialog::saveRecentSearches()
 	jsonFile.close();
 }
 
-QStringList SearchDialog::listMatchingRecentObjects(const QString& objPrefix, int maxNbItem, bool useStartOfWords) const
+QVector<ObjectFound> SearchDialog::listMatchingRecentObjects(const QString& objPrefix, int maxNbItem, bool useStartOfWords) const
 {
-	QStringList result;
+	QVector<ObjectFound> result;
 
 	if(maxNbItem <= 0)
 		return result;
@@ -1041,8 +1261,8 @@ QStringList SearchDialog::listMatchingRecentObjects(const QString& objPrefix, in
 	// For all recent objects:
 	for (int i = 0; i < recentObjectSearchesData.recentList.size(); i++)
 	{
-		bool toAppend = useStartOfWords ? recentObjectSearchesData.recentList[i].startsWith(objPrefix, Qt::CaseInsensitive)
-						: recentObjectSearchesData.recentList[i].contains(objPrefix, Qt::CaseInsensitive);
+		bool toAppend = useStartOfWords ? recentObjectSearchesData.recentList[i].name.startsWith(objPrefix, Qt::CaseInsensitive)
+		                                : recentObjectSearchesData.recentList[i].name.contains(objPrefix, Qt::CaseInsensitive);
 
 		if(toAppend)
 			result.append(recentObjectSearchesData.recentList[i]);
@@ -1050,6 +1270,12 @@ QStringList SearchDialog::listMatchingRecentObjects(const QString& objPrefix, in
 		if (result.size() >= maxNbItem)
 			break;
 	}
+
+	if (useLengthSorting)
+	{
+		std::sort(result.begin(), result.end(), [](auto& a, auto& b){ return a.name.length() < b.name.length(); });
+	}
+
 	return result;
 }
 
@@ -1070,7 +1296,7 @@ void SearchDialog::lookupCoordinates()
 						   getSimbadQueryDist(), getSimbadGetsIds(), getSimbadGetsTypes(),
 						   getSimbadGetsSpec(), getSimbadGetsMorpho(), getSimbadGetsDims());
 	onSimbadStatusChanged();
-	connect(simbadReply, SIGNAL(statusChanged()), this, SLOT(onSimbadStatusChanged()));
+	connect(simbadReply, &SimbadLookupReply::statusChanged, this, &SearchDialog::onSimbadStatusChanged);
 }
 
 void SearchDialog::clearSimbadText(StelModule::StelModuleSelectAction)
@@ -1086,14 +1312,14 @@ void SearchDialog::onSimbadStatusChanged()
 	QString info;
 	if (simbadReply->getCurrentStatus()==SimbadLookupReply::SimbadLookupErrorOccured)
 	{
-		info = QString("%1: %2").arg(q_("Simbad Lookup Error")).arg(simbadReply->getErrorString());
+		info = QString("%1: %2").arg(q_("Simbad Lookup Error"), simbadReply->getErrorString());
 		index==1 ? ui->simbadCooStatusLabel->setText(info) : ui->simbadStatusLabel->setText(info);
 		setPushButtonGotoSearch();
 		ui->simbadCooResultsTextBrowser->clear();
 	}
 	else
 	{
-		info = QString("%1: %2").arg(q_("Simbad Lookup")).arg(simbadReply->getCurrentStatusString());
+		info = QString("%1: %2").arg(q_("Simbad Lookup"), simbadReply->getCurrentStatusString());
 		index==1 ? ui->simbadCooStatusLabel->setText(info) : ui->simbadStatusLabel->setText(info);
 		// Query not over, don't disable button
 		ui->pushButtonGotoSearchSkyObject->setEnabled(true);
@@ -1102,7 +1328,13 @@ void SearchDialog::onSimbadStatusChanged()
 	if (simbadReply->getCurrentStatus()==SimbadLookupReply::SimbadLookupFinished)
 	{
 		simbadResults = simbadReply->getResults();
-		searchListModel->appendValues(simbadResults.keys());
+		
+		QVector<ObjectFound> objs;
+		
+		for (const auto& obj : simbadResults)
+			objs.append({obj.name, "", obj.type, obj.position});
+		
+		searchListModel->appendValues(objs);
 		// Update push button enabled state
 		setPushButtonGotoSearch();
 	}
@@ -1115,9 +1347,9 @@ void SearchDialog::onSimbadStatusChanged()
 
 	if (simbadReply->getCurrentStatus()!=SimbadLookupReply::SimbadLookupQuerying)
 	{
-		disconnect(simbadReply, SIGNAL(statusChanged()), this, SLOT(onSimbadStatusChanged()));
+		disconnect(simbadReply, &SimbadLookupReply::statusChanged, this, &SearchDialog::onSimbadStatusChanged);
 		delete simbadReply;
-		simbadReply=Q_NULLPTR;
+		simbadReply=nullptr;
 
 		// Update push button enabled state
 		setPushButtonGotoSearch();
@@ -1126,7 +1358,7 @@ void SearchDialog::onSimbadStatusChanged()
 
 void SearchDialog::greekLetterClicked()
 {
-	QPushButton *sender = reinterpret_cast<QPushButton *>(this->sender());
+	QPushButton *sender = qobject_cast<QPushButton *>(this->sender());
 	QLineEdit* sso = ui->lineEditSearchSkyObject;
 	QString text;
 	if (sender)
@@ -1143,29 +1375,63 @@ void SearchDialog::greekLetterClicked()
 	sso->setFocus();
 }
 
-void SearchDialog::gotoObject()
+void SearchDialog::gotoObjectFromObjectsList(const QModelIndex &modelIndex)
 {
-	gotoObject(searchListModel->getSelected());
+	QString objType, objClass = ui->objectTypeComboBox->currentData(Qt::UserRole).toString();
+	if (objClass.contains(":"))
+	{
+		#if (QT_VERSION>=QT_VERSION_CHECK(5, 14, 0))
+		QStringList list = objClass.split(":", Qt::SkipEmptyParts);
+		#else
+		QStringList list = objClass.split(":", QString::SkipEmptyParts);
+		#endif
+		objType = list.at(0);
+	}
+	else
+		objType = objClass;
+
+	objType.replace("Mgr","");
+	objType.replace("SolarSystem","Planet");
+	objType.replace("Nomenclature","NomenclatureItem");
+	// plug-ins
+	objType.replace("Supernovae","Supernova");
+	objType.replace("Satellites","Satellite");
+	objType.replace("Novae","Nova");
+	objType.replace("Exoplanets","Exoplanet");
+	objType.replace("Pulsars","Pulsar");
+	objType.replace("Quasars","Quasar");
+	objType.replace("MeteorShowers","MeteorShower");
+
+	const auto name = modelIndex.model()->data(modelIndex, Qt::DisplayRole).toString();
+	gotoObject(ObjectFound{name, objType, ""});
 }
 
-void SearchDialog::gotoObject(const QString &nameI18n)
+void SearchDialog::gotoObject()
 {
-	if (nameI18n.isEmpty())
+	const auto obj = searchListModel->getSelected();
+	gotoObject(obj);
+}
+
+void SearchDialog::gotoObject(const ObjectFound& obj)
+{
+	if (obj.name.isEmpty())
 		return;
 
-	// Save recent search list
-	updateRecentSearchList(nameI18n);
-	saveRecentSearches();
-
+	bool recentsUpdated = false;
 	StelMovementMgr* mvmgr = GETSTELMODULE(StelMovementMgr);
-	if (simbadResults.contains(nameI18n))
+	if (obj.isSimbad)
 	{
-		if (objectMgr->findAndSelect(nameI18n))
+		updateRecentSearchList(obj);
+		saveRecentSearches();
+		recentsUpdated = true;
+
+		if (objectMgr->findAndSelect(obj.name))
 		{
 			const QList<StelObjectP> newSelected = objectMgr->getSelectedObject();
 			if (!newSelected.empty())
 			{
-				close();
+                                if (useAutoClosing)
+                                        close();
 				ui->lineEditSearchSkyObject->setText(""); // https://wiki.qt.io/Technical_FAQ#Why_does_the_memory_keep_increasing_when_repeatedly_pasting_text_and_calling_clear.28.29_in_a_QLineEdit.3F
 
 				// Can't point to home planet
@@ -1180,11 +1446,12 @@ void SearchDialog::gotoObject(const QString &nameI18n)
 		}
 		else
 		{
-			close();
-			GETSTELMODULE(CustomObjectMgr)->addCustomObject(nameI18n, simbadResults[nameI18n]);
+                        if (useAutoClosing)
+                                close();
+			GETSTELMODULE(CustomObjectMgr)->addPersistentObject(obj.name, obj.position, QString("SIMBAD; %1").arg(qc_(obj.userVisibleType, "SIMBAD object type")));
 			ui->lineEditSearchSkyObject->clear();
 			searchListModel->clearValues();
-			if (objectMgr->findAndSelect(nameI18n))
+			if (objectMgr->findAndSelect(obj.name))
 			{
 				const QList<StelObjectP> newSelected = objectMgr->getSelectedObject();
 				// Can't point to home planet
@@ -1198,13 +1465,14 @@ void SearchDialog::gotoObject(const QString &nameI18n)
 			}
 		}
 	}
-	else if (objectMgr->findAndSelectI18n(nameI18n) || objectMgr->findAndSelect(nameI18n))
+	else if (objectMgr->findAndSelectI18n(obj.name, obj.searchableType) || objectMgr->findAndSelect(obj.name, obj.searchableType))
 	{
 		const QList<StelObjectP> newSelected = objectMgr->getSelectedObject();
 		if (!newSelected.empty())
 		{
-			close();
-			ui->lineEditSearchSkyObject->clear();
+                        if (useAutoClosing)
+                                close();
+			ui->lineEditSearchSkyObject->setText(""); // https://wiki.qt.io/Technical_FAQ#Why_does_the_memory_keep_increasing_when_repeatedly_pasting_text_and_calling_clear.28.29_in_a_QLineEdit.3F
 			
 			// Can't point to home planet
 			if (newSelected[0]->getEnglishName()!=StelApp::getInstance().getCore()->getCurrentLocation().planetName)
@@ -1214,14 +1482,31 @@ void SearchDialog::gotoObject(const QString &nameI18n)
 			}
 			else
 				GETSTELMODULE(StelObjectMgr)->unSelect();
+
+			if (obj.userVisibleType.isEmpty())
+			{
+				auto updatedObj = obj;
+				updatedObj.userVisibleType = newSelected[0]->getObjectTypeI18n();
+				updateRecentSearchList(updatedObj);
+				saveRecentSearches();
+				recentsUpdated = true;
+			}
 		}
 	}
-	simbadResults.clear();
+
+	if (!recentsUpdated)
+	{
+		updateRecentSearchList(obj);
+		saveRecentSearches();
+		recentsUpdated = true;
+	}
 }
 
-void SearchDialog::gotoObject(const QModelIndex &modelIndex)
+void SearchDialog::gotoObjectFromSearchResults(const QModelIndex &modelIndex)
 {
-	gotoObject(modelIndex.model()->data(modelIndex, Qt::DisplayRole).toString());
+	const auto model = modelIndex.model();
+	const auto obj = model->data(modelIndex, ObjectRole).value<ObjectFound>();
+	gotoObject(obj);
 }
 
 void SearchDialog::searchListClear()
@@ -1283,42 +1568,6 @@ bool SearchDialog::eventFilter(QObject*, QEvent *event)
 	return false;
 }
 
-QString SearchDialog::substituteGreek(const QString& keyString)
-{
-	if (!keyString.contains(' '))
-		return getGreekLetterByName(keyString);
-	else
-	{
-		#if (QT_VERSION>=QT_VERSION_CHECK(5, 14, 0))
-		QStringList nameComponents = keyString.split(" ", Qt::SkipEmptyParts);
-		#else
-		QStringList nameComponents = keyString.split(" ", QString::SkipEmptyParts);
-		#endif
-		if(!nameComponents.empty())
-			nameComponents[0] = getGreekLetterByName(nameComponents[0]);
-		return nameComponents.join(" ");
-	}
-}
-
-QString SearchDialog::getGreekLetterByName(const QString& potentialGreekLetterName)
-{
-	if(staticData.greekLetters.contains(potentialGreekLetterName))
-		return staticData.greekLetters[potentialGreekLetterName];
-
-	// There can be indices (e.g. "α1 Cen" instead of "α Cen A"), so strip
-	// any trailing digit.
-	int lastCharacterIndex = potentialGreekLetterName.length()-1;
-	if(potentialGreekLetterName.at(lastCharacterIndex).isDigit())
-	{
-		QChar digit = potentialGreekLetterName.at(lastCharacterIndex);
-		QString name = potentialGreekLetterName.left(lastCharacterIndex);
-		if(staticData.greekLetters.contains(name))
-			return staticData.greekLetters[name] + digit;
-	}
-
-	return potentialGreekLetterName;
-}
-
 void SearchDialog::populateSimbadServerList()
 {
 	Q_ASSERT(ui->serverListComboBox);
@@ -1330,8 +1579,9 @@ void SearchDialog::populateSimbadServerList()
 	QVariant selectedUrl = servers->itemData(index);
 	servers->clear();
 	//For each server, display the localized description and store the URL as user data.
-	servers->addItem(q_("University of Strasbourg (France)"), DEF_SIMBAD_URL);
-	servers->addItem(q_("Harvard University (USA)"), "http://simbad.harvard.edu/");
+	servers->addItem(q_("Strasbourg Astronomical Data Center (France)"), DEF_SIMBAD_URL);
+	servers->addItem(q_("Harvard-Smithsonian Center for Astrophysics (USA)"), "https://simbad.cfa.harvard.edu/");
+	servers->addItem(q_("The Institute for Data Intensive Astronomy (South Africa)"), "https://simbad.idia.ac.za/");
 
 	//Restore the selection
 	index = servers->findData(selectedUrl, Qt::UserRole, Qt::MatchCaseSensitive);
@@ -1360,23 +1610,25 @@ void SearchDialog::updateListView(int index)
 	ui->searchInListLineEdit->setText(""); // https://wiki.qt.io/Technical_FAQ#Why_does_the_memory_keep_increasing_when_repeatedly_pasting_text_and_calling_clear.28.29_in_a_QLineEdit.3F
 	ui->objectsListView->blockSignals(true);
 	ui->objectsListView->reset();
-	listModel->setStringList(objectMgr->listAllModuleObjects(moduleId, englishNames));
+	QStringList moduleObjs;
+	for (const auto& [name,obj] : objectMgr->listAllModuleObjects(moduleId, englishNames))
+		moduleObjs << name;
+	listModel->setStringList(moduleObjs);
 	proxyModel->setSourceModel(listModel);
 	proxyModel->sort(0, Qt::AscendingOrder);
 	ui->objectsListView->blockSignals(false);
 	//bugfix: prevent multiple connections, which seems to have happened before
-	connect(ui->objectsListView, SIGNAL(clicked(const QModelIndex&)), this, SLOT(gotoObject(const QModelIndex&)), Qt::UniqueConnection);
+	connect(ui->objectsListView, &QListView::clicked, this,
+	        qOverload<const QModelIndex&>(&SearchDialog::gotoObjectFromObjectsList), Qt::UniqueConnection);
 }
 
 void SearchDialog::updateListTab()
 {
 	QVariant selectedObjectId;
+	QVariant defaultObjectId = QVariant("ConstellationMgr"); // Let's enable "Constellations" by default!
 	QComboBox* objects = ui->objectTypeComboBox;
 	int index = objects->currentIndex();
-	if (index < 0)
-		selectedObjectId = QVariant("AsterismMgr"); // Let's enable "Asterisms" by default!
-	else
-		selectedObjectId = objects->itemData(index, Qt::UserRole);
+	selectedObjectId = (index < 0) ? defaultObjectId : objects->itemData(index, Qt::UserRole);
 
 	if (StelApp::getInstance().getLocaleMgr().getAppLanguage().startsWith("en"))
 		ui->searchInEnglishCheckBox->hide(); // hide "names in English" checkbox
@@ -1390,6 +1642,8 @@ void SearchDialog::updateListTab()
 		// List of objects is not empty, let's add name of module or section!
 		if (!objectMgr->listAllModuleObjects(it.key(), ui->searchInEnglishCheckBox->isChecked()).isEmpty())
 			objects->addItem(q_(it.value()), QVariant(it.key()));
+		else if (it.key()==selectedObjectId) // empty list is selected...
+			selectedObjectId = defaultObjectId; // ...switch to default list
 	}
 	index = objects->findData(selectedObjectId, Qt::UserRole, Qt::MatchCaseSensitive);
 	objects->setCurrentIndex(index);
@@ -1413,7 +1667,7 @@ void SearchDialog::showContextMenu(const QPoint &pt)
 		clipText = "\t(" + clipText + ")";
 	}
 
-	menu->addAction(q_("Paste and Search") + clipText, this, SLOT(pasteAndGo()));
+	menu->addAction(q_("Paste and Search") + clipText, this, &SearchDialog::pasteAndGo);
 	menu->exec(ui->lineEditSearchSkyObject->mapToGlobal(pt));
 	delete menu;
 }
@@ -1423,5 +1677,17 @@ void SearchDialog::pasteAndGo()
 	// https://wiki.qt.io/Technical_FAQ#Why_does_the_memory_keep_increasing_when_repeatedly_pasting_text_and_calling_clear.28.29_in_a_QLineEdit.3F
 	ui->lineEditSearchSkyObject->setText(""); // clear current text
 	ui->lineEditSearchSkyObject->paste(); // paste text from clipboard
-	gotoObject(); // go to first finded object
+	gotoObject(); // go to first found object
+}
+
+void SearchDialog::setVisible(bool v)
+{
+	StelDialog::setVisible(v);
+
+	// if from a previous search action, the first tab is shown but input line is not in focus,
+	// force focus on input line.
+	if (v && (ui->tabWidget->currentIndex()==0))
+	{
+		ui->lineEditSearchSkyObject->setFocus(Qt::PopupFocusReason);
+	}
 }

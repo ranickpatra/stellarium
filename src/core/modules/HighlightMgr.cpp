@@ -99,18 +99,18 @@ StelObjectP HighlightMgr::searchByID(const QString& id) const
 	return Q_NULLPTR;
 }
 
-QStringList HighlightMgr::listMatchingObjects(const QString& objPrefix, int maxNbItem, bool useStartOfWords) const
+QVector<QPair<QString,StelObjectP>> HighlightMgr::listMatchingObjects(const QString& objPrefix, int maxNbItem, bool useStartOfWords) const
 {
 	Q_UNUSED(objPrefix)
 	Q_UNUSED(maxNbItem)
 	Q_UNUSED(useStartOfWords)	
-	return QStringList();
+	return {};
 }
 
-QStringList HighlightMgr::listAllObjects(bool inEnglish) const
+QVector<QPair<QString,StelObjectP>> HighlightMgr::listAllObjects(bool inEnglish) const
 {
 	Q_UNUSED(inEnglish)
-	return QStringList();
+	return {};
 }
 
 void HighlightMgr::setColor(const Vec3f& c)
@@ -149,8 +149,8 @@ void HighlightMgr::drawHighlights(StelCore* core, StelPainter& painter)
 
 	if (!highlightList.empty())
 	{
-		Vec3d screenpos;
-		for (const auto& hlObj : qAsConst(highlightList))
+		Vec3f screenpos;
+		for (const auto& hlObj : std::as_const(highlightList))
 		{
 			// Compute 2D pos and return if outside screen
 			if (!painter.getProjector()->project(hlObj, screenpos))
@@ -159,19 +159,19 @@ void HighlightMgr::drawHighlights(StelCore* core, StelPainter& painter)
 			painter.setColor(hightlightColor);
 			texPointer->bind();
 			painter.setBlending(true);
-			painter.drawSprite2dMode(screenpos[0], screenpos[1], markerSize, StelApp::getInstance().getTotalRunTime()*40.f);
+			painter.drawSprite2dMode(screenpos[0], screenpos[1], markerSize, static_cast<float>(StelApp::getInstance().getTotalRunTime())*40.f);
 		}
 	}
 }
 
 void HighlightMgr::addPoint(const QString &ra, const QString &dec)
 {
-	Vec3d J2000;
+	Vec3d j2000;
 	double dRa = StelUtils::getDecAngle(ra);
 	double dDec = StelUtils::getDecAngle(dec);
-	StelUtils::spheToRect(dRa, dDec, J2000);
+	StelUtils::spheToRect(dRa, dDec, j2000);
 
-	highlightList.append(J2000);
+	highlightList.append(j2000);
 }
 
 void HighlightMgr::addPointRaDec(const QString& ra, const QString& dec)

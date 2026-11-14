@@ -1,0 +1,205 @@
+/*
+ * Sky Culture Maker plug-in for Stellarium
+ *
+ * Copyright (C) 2025 Vincent Gerlach
+ * Copyright (C) 2025 Luca-Philipp Grumbach
+ * Copyright (C) 2025 Fabian Hofer
+ * Copyright (C) 2025 Mher Mnatsakanyan
+ * Copyright (C) 2025 Richard Hofmann
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#include "ScmStartDialog.hpp"
+#include "ScmSCLoader.hpp"
+#include "StelFileMgr.hpp"
+#include "ui_scmStartDialog.h"
+#include <cassert>
+#include <QDebug>
+
+#ifdef SCM_CONVERTER_ENABLED_CPP
+# include "ScmConvertDialog.hpp"
+#endif // SCM_CONVERTER_ENABLED_CPP
+
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QLabel>
+#include <QVBoxLayout>
+
+ScmStartDialog::ScmStartDialog(SkyCultureMaker *maker)
+	: StelDialog("ScmStartDialog")
+	, maker(maker)
+{
+	assert(maker != nullptr);
+	ui = new Ui_scmStartDialog;
+}
+
+ScmStartDialog::~ScmStartDialog()
+{
+	if (ui != nullptr)
+	{
+		delete ui;
+	}
+
+	qDebug() << "SkyCultureMaker: Unloaded the ScmStartDialog";
+}
+
+void ScmStartDialog::retranslate()
+{
+	if (dialog)
+	{
+		ui->retranslateUi(dialog);
+	}
+}
+
+void ScmStartDialog::createDialogContent()
+{
+	ui->setupUi(dialog);
+	ui->welcomeLabel->setText(q_("Welcome to the Sky Culture Maker!"));
+
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &ScmStartDialog::retranslate);
+	connect(&StelApp::getInstance(), &StelApp::fontChanged, this, &ScmStartDialog::handleFontChanged);
+	connect(&StelApp::getInstance(), &StelApp::guiFontSizeChanged, this, &ScmStartDialog::handleFontChanged);
+
+	// Buttons
+	connect(ui->scmStartCancelpushButton, &QPushButton::clicked, this, &ScmStartDialog::close); // Cancel
+	connect(ui->scmStartCreatepushButton, &QPushButton::clicked, this,
+	        &ScmStartDialog::startScmCreationProcess); // Create
+	connect(ui->scmStartEditpushButton, &QPushButton::clicked, this,
+	        &ScmStartDialog::startScmEditingProcess); // Edit
+
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &ScmStartDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &ScmStartDialog::handleMovedTo);
+	// Init the correct font
+	handleFontChanged();
+
+/* =============================================== SkyCultureConverter ============================================== */
+#ifdef SCM_CONVERTER_ENABLED_CPP
+	ui->scmStartConvertpushButton->setToolTip(
+	        q_("Convert sky cultures from the legacy (fab) format to the new (json) format"));
+	connect(ui->scmStartConvertpushButton, &QPushButton::clicked, this,
+	        [this]()
+	        {
+			if (!converterDialog)
+			{
+				converterDialog = new ScmConvertDialog(maker);
+			}
+			maker->stopScm(); // Stop SCM if running
+			converterDialog->setVisible(true);
+		});
+#else   // SCM_CONVERTER_ENABLED_CPP is not defined
+	// Converter is disabled, so hide the button
+	ui->scmStartConvertpushButton->setVisible(false);
+#endif  // SCM_CONVERTER_ENABLED_CPP
+	/* ================================================================================================================== */
+}
+
+void ScmStartDialog::handleFontChanged()
+{
+	// Set welcome label font size
+	QFont welcomeLabelFont = QApplication::font();
+	welcomeLabelFont.setPixelSize(welcomeLabelFont.pixelSize() + 4);
+	welcomeLabelFont.setBold(true);
+	ui->welcomeLabel->setFont(welcomeLabelFont);
+}
+
+void ScmStartDialog::startScmCreationProcess()
+{
+	maker->setNewSkyCulture();
+	maker->setDialogVisibility(scm::DialogID::StartDialog, false);
+	maker->setDialogVisibility(scm::DialogID::SkyCultureDialog, true);
+
+	maker->hideCoreConstellationDisplay();
+	SkyCultureMaker::setActionToggle("actionShow_Ground", false);
+	SkyCultureMaker::setActionToggle("actionShow_Atmosphere", false);
+	SkyCultureMaker::setActionToggle("actionShow_MeteorShowers", false);
+	SkyCultureMaker::setActionToggle("actionShow_Satellite_Hints", false);
+}
+
+void ScmStartDialog::startScmEditingProcess()
+{
+	const QString defaultPath = StelFileMgr::getUserDir() + "/skycultures";
+	QDir().mkpath(defaultPath);
+	QString errorMsg;
+	QStringList unrecognizedHeadings;
+	scm::ScmSkyCulture *sc = ScmSCLoader::selectAndLoad(nullptr, defaultPath, &errorMsg, &unrecognizedHeadings);
+	if (sc == nullptr)
+	{
+		if (!errorMsg.isEmpty())
+			maker->showUserErrorMessage(q_("Edit Sky Culture"), errorMsg);
+		return; // user cancelled or load failed
+	}
+
+	if (!unrecognizedHeadings.isEmpty())
+	{
+		const QString msg = q_("The following top-level sections in description.md were not recognized and "
+		                       "have been merged into the description. Please review and move their content "
+		                       "to a suitable section:\n\n%1")
+		                            .arg(unrecognizedHeadings.join("\n"));
+		maker->showUserWarningMessage(q_("Edit Sky Culture"), msg);
+	}
+
+	maker->setSkyCulture(sc);
+	maker->setDialogVisibility(scm::DialogID::StartDialog, false);
+	maker->setDialogVisibility(scm::DialogID::SkyCultureDialog, true);
+	maker->populateSkyCultureDialog();
+
+	maker->hideCoreConstellationDisplay();
+	SkyCultureMaker::setActionToggle("actionShow_Ground", false);
+	SkyCultureMaker::setActionToggle("actionShow_Atmosphere", false);
+	SkyCultureMaker::setActionToggle("actionShow_MeteorShowers", false);
+	SkyCultureMaker::setActionToggle("actionShow_Satellite_Hints", false);
+}
+
+void ScmStartDialog::close()
+{
+	maker->stopScm();
+}
+
+bool ScmStartDialog::isConverterDialogVisible()
+{
+#ifdef SCM_CONVERTER_ENABLED_CPP
+	if (converterDialog != nullptr)
+	{
+		return converterDialog->visible();
+	}
+	else
+	{
+		return false;
+	}
+#else
+	return false; // Converter dialog is not available
+#endif
+}
+
+void ScmStartDialog::setConverterDialogVisibility(bool b)
+{
+#ifdef SCM_CONVERTER_ENABLED_CPP
+	if (converterDialog != nullptr)
+	{
+		if (b != converterDialog->visible())
+		{
+			converterDialog->setVisible(b);
+		}
+	}
+	else
+	{
+		qWarning() << "SkyCultureMaker: Converter dialog is not initialized!";
+	}
+#else
+	Q_UNUSED(b);
+	qWarning() << "SkyCultureMaker: Converter dialog is not available in this build!";
+#endif // SCM_CONVERTER_ENABLED_CPP
+}

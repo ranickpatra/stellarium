@@ -2,21 +2,26 @@
 add_subdirectory(external)
 
 IF(ENABLE_SPOUT)
-    SET(spout_SRCS
-     external/SpoutLibrary.h
-     core/SpoutSender.hpp
-     core/SpoutSender.cpp
-	 )
+     SET(spout_SRCS
+          external/SpoutLibrary.h
+          core/SpoutSender.hpp
+          core/SpoutSender.cpp
+     )
 ENDIF()
 
 SET(stellarium_lib_SRCS
+     core/BlueNoiseTriangleRemapped.hpp
+     core/StelSRGB.hpp
+     core/StelSRGB.cpp
      core/Dithering.hpp
+     core/Dithering.cpp
      core/SaturationShader.hpp
-     core/healpix.c
      core/StelAudioMgr.hpp
      core/StelAudioMgr.cpp
      core/StelVideoMgr.hpp
      core/StelVideoMgr.cpp
+     core/StelSpeechMgr.hpp
+     core/StelSpeechMgr.cpp
      core/StelGeodesicGrid.cpp
      core/StelGeodesicGrid.hpp
      core/StelMovementMgr.cpp
@@ -41,8 +46,8 @@ SET(stellarium_lib_SRCS
      core/MultiLevelJsonBase.cpp
      core/StelSkyImageTile.hpp
      core/StelSkyImageTile.cpp
-     core/StelSkyPolygon.hpp
-     core/StelSkyPolygon.cpp
+     core/SolarEclipseComputer.hpp
+     core/SolarEclipseComputer.cpp
      core/SphericMirrorCalculator.cpp
      core/SphericMirrorCalculator.hpp
      core/StelApp.cpp
@@ -70,6 +75,8 @@ SET(stellarium_lib_SRCS
      core/StelRegionObject.hpp
      core/StelSkyCultureMgr.cpp
      core/StelSkyCultureMgr.hpp
+     core/StelSkyCultureSkyPartition.cpp
+     core/StelSkyCultureSkyPartition.hpp
      core/StelTextureMgr.cpp
      core/StelTextureMgr.hpp
      core/StelTexture.cpp
@@ -127,6 +134,10 @@ SET(stellarium_lib_SRCS
      core/StelOpenGLArray.cpp
      core/StelHips.hpp
      core/StelHips.cpp
+     core/StelHealpix.hpp
+     core/StelHealpix.cpp
+     core/TextureAverageComputer.hpp
+     core/TextureAverageComputer.cpp
 
      ${spout_SRCS}
 
@@ -148,8 +159,6 @@ SET(stellarium_lib_SRCS
      core/planetsephems/precession.h
      core/planetsephems/sidereal_time.c
      core/planetsephems/sidereal_time.h
-     #core/planetsephems/stellplanet.c   # replaced by EphemWrapper during de430 work
-     #core/planetsephems/stellplanet.h
      core/planetsephems/jpl_int.h
      core/planetsephems/jpleph.h
      core/planetsephems/jpleph.cpp
@@ -163,7 +172,18 @@ SET(stellarium_lib_SRCS
      core/planetsephems/de430.hpp
      core/planetsephems/de431.cpp
      core/planetsephems/de431.hpp
-     core/modules/Atmosphere.cpp
+     core/planetsephems/de440.cpp
+     core/planetsephems/de440.hpp
+     core/planetsephems/de441.cpp
+     core/planetsephems/de441.hpp
+     core/planetsephems/htc20b.c
+     core/planetsephems/htc20b.h
+     core/modules/AtmosphereLightweight.cpp
+     core/modules/AtmosphereLightweight.hpp
+     core/modules/AtmospherePreetham.cpp
+     core/modules/AtmospherePreetham.hpp
+     core/modules/AtmosphereShowMySky.cpp
+     core/modules/AtmosphereShowMySky.hpp
      core/modules/Atmosphere.hpp
      core/modules/Asterism.cpp
      core/modules/Asterism.hpp
@@ -173,6 +193,8 @@ SET(stellarium_lib_SRCS
      core/modules/Constellation.hpp
      core/modules/ConstellationMgr.cpp
      core/modules/ConstellationMgr.hpp
+     core/modules/CoordObject.cpp
+     core/modules/CoordObject.hpp
      core/modules/CustomObject.cpp
      core/modules/CustomObject.hpp
      core/modules/CustomObjectMgr.cpp
@@ -240,37 +262,34 @@ SET(stellarium_lib_SRCS
      core/modules/ZoneData.hpp
      core/modules/SpecialMarkersMgr.cpp
      core/modules/SpecialMarkersMgr.hpp
+     core/modules/SpecificTimeMgr.cpp
+     core/modules/SpecificTimeMgr.hpp
      StelMainView.hpp
      StelMainView.cpp
      StelSplashScreen.hpp
      StelSplashScreen.cpp
      StelLogger.hpp
      StelLogger.cpp
+     StelSystemInfo.hpp
+     StelSystemInfo.cpp
      CLIProcessor.hpp
      CLIProcessor.cpp
      translations.h
-     translations_countries.h
+     translations_regions.h
 )
 
-### CMake < 3.0 does not AUTOMOC Q_GADGET which some files use, so we have to manually add it
-### Wrap it in an IF to prevent some linker warnings about symbols defined twice (on MSVC13 at least)
-### Q_GADGET is required force the Qt MOC to run on some specific files,
-### because they do not contain QObjects, but require a MOC for Q_FLAGS or similar
-IF("${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION}" LESS 3.0)
-     QT5_WRAP_CPP(stellarium_lib_moc_SRCS
-         core/StelObject.hpp
-         core/StelRegionObject.hpp
-         core/modules/Nebula.hpp
-     )
+IF(ENABLE_PCH)
      SET(stellarium_lib_SRCS ${stellarium_lib_SRCS}
-          ${stellarium_lib_moc_SRCS}
+          stelMain_pch.hpp
      )
-ENDIF()
+ENDIF(ENABLE_PCH)
 
 IF(ENABLE_SCRIPTING)
      SET(stellarium_lib_SRCS ${stellarium_lib_SRCS}
           scripting/StelScriptOutput.hpp
           scripting/StelScriptOutput.cpp
+          scripting/V3d.cpp
+          scripting/V3d.hpp
           scripting/StelScriptMgr.cpp
           scripting/StelScriptMgr.hpp
           scripting/ScreenImageMgr.hpp
@@ -286,8 +305,11 @@ SET(stellarium_exe_SRCS main.cpp)
 
 ################# compiles resources files ############
 SET(stellarium_RES ${CMAKE_SOURCE_DIR}/data/mainRes.qrc)
-QT5_ADD_RESOURCES(stellarium_RES_CXX ${stellarium_RES})
-
+IF(${QT_VERSION_MAJOR} EQUAL "5")
+     QT5_ADD_RESOURCES(stellarium_RES_CXX ${stellarium_RES})
+ELSE()
+     QT_ADD_RESOURCES(stellarium_RES_CXX ${stellarium_RES})
+ENDIF()
 #############################################################################################
 ############################# Standard GUI plugin compilation ###############################
 #############################################################################################
@@ -308,8 +330,14 @@ IF(STELLARIUM_GUI_MODE STREQUAL "Standard")
           gui/ShortcutsDialog.cpp
           gui/Dialog.hpp
           gui/Dialog.cpp
-          gui/MapLabel.hpp
-          gui/MapLabel.cpp
+          gui/MapWidget.hpp
+          gui/MapWidget.cpp
+          gui/SkyCultureMapGraphicsView.hpp
+          gui/SkyCultureMapGraphicsView.cpp
+          gui/SkyCulturePolygonItem.hpp
+          gui/SkyCulturePolygonItem.cpp
+          gui/SeparatorListWidgetItem.hpp
+          gui/SeparatorListWidgetItem.cpp
           gui/AngleSpinBox.hpp
           gui/AngleSpinBox.cpp
           gui/LocationDialog.hpp
@@ -318,6 +346,10 @@ IF(STELLARIUM_GUI_MODE STREQUAL "Standard")
           gui/DateTimeDialog.cpp
           gui/ViewDialog.hpp
           gui/ViewDialog.cpp
+          gui/LightPollutionWidget.hpp
+          gui/LightPollutionWidget.cpp
+          gui/LogarithmicSpinBox.hpp
+          gui/LogarithmicSpinBox.cpp
           gui/SearchDialog.hpp
           gui/SearchDialog.cpp
           gui/ConfigurationDialog.hpp
@@ -334,19 +366,35 @@ IF(STELLARIUM_GUI_MODE STREQUAL "Standard")
           gui/GreatRedSpotDialog.cpp
           gui/CustomDeltaTEquationDialog.hpp
           gui/CustomDeltaTEquationDialog.cpp
+          gui/ConfigureScreenshotsDialog.hpp
+          gui/ConfigureScreenshotsDialog.cpp
           gui/AstroCalcDialog.hpp
           gui/AstroCalcDialog.cpp
+          gui/AstroCalcChart.hpp
+          gui/AstroCalcChart.cpp
           gui/AstroCalcExtraEphemerisDialog.hpp
           gui/AstroCalcExtraEphemerisDialog.cpp
           gui/AstroCalcCustomStepsDialog.hpp
           gui/AstroCalcCustomStepsDialog.cpp
+          gui/AstroCalcAlmanacWidget.hpp
+          gui/AstroCalcAlmanacWidget.cpp
           gui/ObsListDialog.hpp
           gui/ObsListDialog.cpp
-          gui/ObsListCreateEditDialog.hpp
-          gui/ObsListCreateEditDialog.cpp
           gui/StelDialog.hpp
           gui/StelDialog_p.hpp
           gui/StelDialog.cpp
+          gui/StelDialogSeparate.hpp
+          gui/StelDialogSeparate.cpp
+          gui/TonemappingDialog.hpp
+          gui/TonemappingDialog.cpp
+          gui/SkylightDialog.hpp
+          gui/SkylightDialog.cpp
+          gui/ContributorsList.hpp
+          gui/StelCloseButton.hpp
+          gui/StelCloseButton.cpp
+          gui/ColorButton.hpp
+          gui/ColorButton.cpp
+          gui/ExternalStepSpinBox.hpp
      )
 
      ################# compiles .ui files ############
@@ -356,19 +404,23 @@ IF(STELLARIUM_GUI_MODE STREQUAL "Standard")
           gui/shortcutsDialog.ui
           gui/dateTimeDialogGui.ui
           gui/viewDialog.ui
+          gui/lightPollutionWidget.ui
           gui/searchDialogGui.ui
           gui/configurationDialog.ui
           gui/atmosphereDialog.ui
           gui/greatRedSpotDialog.ui
           gui/customDeltaTEquationDialog.ui
+          gui/configureScreenshotsDialog.ui
           gui/astroCalcDialog.ui
           gui/astroCalcExtraEphemerisDialog.ui
           gui/astroCalcCustomStepsDialog.ui
+          gui/astroCalcAlmanacWidget.ui
           gui/obsListDialog.ui
-          gui/obsListCreateEditDialog.ui
           gui/addRemoveLandscapesDialog.ui
           gui/dsoColorsDialog.ui
           gui/orbitColorsDialog.ui
+          gui/tonemappingDialog.ui
+          gui/skylightDialog.ui
      )
 
      IF(ENABLE_SCRIPTING)
@@ -385,11 +437,19 @@ IF(STELLARIUM_GUI_MODE STREQUAL "Standard")
           ENDIF()
      ENDIF()
 
-     QT5_WRAP_UI(stellarium_UIS_H ${stellarium_UIS})
+     IF(${QT_VERSION_MAJOR} EQUAL "5")
+          QT5_WRAP_UI(stellarium_UIS_H ${stellarium_UIS})
+     ELSE()
+          QT_WRAP_UI(stellarium_UIS_H ${stellarium_UIS})
+     ENDIF()
 
      # compiles resources files
      SET(stellarium_gui_RES ${CMAKE_SOURCE_DIR}/data/gui/guiRes.qrc)
-     QT5_ADD_RESOURCES(stellarium_gui_RES_CXX ${stellarium_gui_RES})
+     IF(${QT_VERSION_MAJOR} EQUAL "5")
+          QT5_ADD_RESOURCES(stellarium_gui_RES_CXX ${stellarium_gui_RES})
+     ELSE()
+          QT_ADD_RESOURCES(stellarium_gui_RES_CXX ${stellarium_gui_RES})
+     ENDIF()
 
      SET(stellarium_lib_SRCS ${stellarium_lib_SRCS} ${stellarium_gui_SRCS} ${stellarium_UIS_H} ${stellarium_gui_RES_CXX})
 ENDIF()
@@ -398,7 +458,7 @@ ENDIF()
 ################################ No GUI plugin compilation ##################################
 #############################################################################################
 IF (STELLARIUM_GUI_MODE STREQUAL "None")
-    ADD_DEFINITIONS(-DNO_GUI)
+     ADD_DEFINITIONS(-DNO_GUI)
 ENDIF()
 
 
@@ -430,8 +490,11 @@ ENDIF()
 #############################################################################################
 
 IF(WIN32)
-    # This library is required for some native methods used in a fix in main.cpp
+     # This library is required for some native methods used in a fix in main.cpp
      SET(winMMLib winmm)
+     # This part is required to apply qt.conf for stellarium.exe when it's starting via QtCreator
+     SET(QT_CONF ${CMAKE_SOURCE_DIR}/data/qt.conf CACHE FILEPATH "The path to the qt.conf file")
+     CONFIGURE_FILE(${QT_CONF} ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
 ENDIF()
 
 IF(WIN32 AND ENABLE_WINDOWS_EXE_ICON)
@@ -447,16 +510,53 @@ IF(WIN32 AND ENABLE_WINDOWS_EXE_ICON)
      ENDIF()
 ENDIF()
 
-# Setup Qt5 dependencies
-SET(STELLARIUM_QT_LIBRARIES Qt5::Core Qt5::Concurrent Qt5::Gui ${STEL_GLES_LIBS} Qt5::Network Qt5::Widgets)
+# Setup Qt5/6 dependencies
+SET(STELLARIUM_QT_LIBRARIES Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::OpenGL Qt${QT_VERSION_MAJOR}::Concurrent Qt${QT_VERSION_MAJOR}::Gui ${STEL_GLES_LIBS} Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Svg Qt${QT_VERSION_MAJOR}::Charts Qt${QT_VERSION_MAJOR}::Positioning)
+
+IF(Qt6_FOUND)
+     # Qt6 needs SvgWidgets, for Qt5 it's included in Svg
+     LIST(APPEND STELLARIUM_QT_LIBRARIES Qt6::SvgWidgets)
+     IF(Qt6_VERSION VERSION_GREATER_EQUAL 6.10)
+          LIST(APPEND STELLARIUM_QT_LIBRARIES Qt6::GuiPrivate)
+     ENDIF()
+ENDIF()
+
+IF(NOT USE_BUNDLED_QTCOMPRESS)
+     SET(STELLARIUM_QT_LIBRARIES ${STELLARIUM_QT_LIBRARIES} Qt${QT_VERSION_MAJOR}::GuiPrivate)
+ENDIF()
+IF(MACOS AND Qt6_FOUND)
+     SET(STELLARIUM_QT_LIBRARIES ${STELLARIUM_QT_LIBRARIES} Qt${QT_VERSION_MAJOR}::DBus)
+ENDIF()
 IF(ENABLE_MEDIA)
-     SET(STELLARIUM_QT_LIBRARIES ${STELLARIUM_QT_LIBRARIES} Qt5::Multimedia Qt5::MultimediaWidgets)
-ENDIF()
+     SET(STELLARIUM_QT_LIBRARIES ${STELLARIUM_QT_LIBRARIES} Qt${QT_VERSION_MAJOR}::Multimedia Qt${QT_VERSION_MAJOR}::MultimediaWidgets)
+     IF(Qt6_FOUND AND Qt6Core_VERSION VERSION_GREATER_EQUAL 6.4.0)
+          find_package(Qt6 COMPONENTS TextToSpeech)
+          IF(Qt6TextToSpeech_VERSION VERSION_GREATER_EQUAL 6.4.0)
+               SET(STELLARIUM_QT_LIBRARIES ${STELLARIUM_QT_LIBRARIES} Qt6::TextToSpeech)
+               MESSAGE(STATUS "Adding Speech output.")
+          ELSE()
+                    MESSAGE(STATUS "Qt::TextToSpeech not found or <6.4. You will not have Speech output!")
+                    SET(ENABLE_SPEECH 0)
+          ENDIF()
+     ELSE()
+          MESSAGE(STATUS "Qt<6.4 found. You will not have Speech output!")
+          SET(ENABLE_SPEECH 0)
+     ENDIF()
+     IF(ENABLE_SPEECH)
+          ADD_DEFINITIONS(-DENABLE_SPEECH)
+     ENDIF(ENABLE_SPEECH)
+ENDIF(ENABLE_MEDIA)
+
 IF(ENABLE_SCRIPTING)
-     SET(STELLARIUM_QT_LIBRARIES ${STELLARIUM_QT_LIBRARIES} Qt5::Script)
+     IF(ENABLE_SCRIPT_QML)
+          SET(STELLARIUM_QT_LIBRARIES ${STELLARIUM_QT_LIBRARIES} Qt${QT_VERSION_MAJOR}::Qml)
+     ELSE(ENABLE_SCRIPT_QML)
+          SET(STELLARIUM_QT_LIBRARIES ${STELLARIUM_QT_LIBRARIES} Qt5::Script)
+     ENDIF(ENABLE_SCRIPT_QML)
 ENDIF()
-IF(ENABLE_GPS)
-     SET(STELLARIUM_QT_LIBRARIES ${STELLARIUM_QT_LIBRARIES} Qt5::Positioning Qt5::SerialPort)
+
+IF(ENABLE_GPS OR USE_PLUGIN_TELESCOPECONTROL)
+     SET(STELLARIUM_QT_LIBRARIES ${STELLARIUM_QT_LIBRARIES} Qt${QT_VERSION_MAJOR}::SerialPort)
 ENDIF()
 
 IF(ENABLE_SPOUT AND SPOUT_LIBRARY_DLL)
@@ -464,30 +564,97 @@ IF(ENABLE_SPOUT AND SPOUT_LIBRARY_DLL)
      CONFIGURE_FILE(${SPOUT_LIBRARY_DLL} ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)
 ENDIF()
 
-SET(STELMAIN_DEPS ${ZLIB_LIBRARIES} qtcompress_stel glues_stel qcustomplot_stel qxlsx_stel ${STELLARIUM_STATIC_PLUGINS_LIBRARIES} ${STELLARIUM_QT_LIBRARIES} ${SPOUT_LIBRARY})
+SET(STELMAIN_DEPS ${MD4C_STEL_LIBRARIES} ${ZLIB_LIBRARIES} glues_stel ${STELLARIUM_STATIC_PLUGINS_LIBRARIES} ${STELLARIUM_QT_LIBRARIES} ${SPOUT_LIBRARY} ${STD_EXECUTION_LIBS})
+IF(USE_BUNDLED_QTCOMPRESS)
+     SET(STELMAIN_DEPS ${STELMAIN_DEPS} qtcompress_stel)
+ENDIF()
 IF(ENABLE_LIBGPS)
      SET(STELMAIN_DEPS ${STELMAIN_DEPS} ${GPS_LIBRARY})
+ENDIF()
+IF(ENABLE_XLSX)
+     SET(STELMAIN_DEPS ${STELMAIN_DEPS} QXlsx::QXlsx)
+ENDIF()
+
+IF(CMAKE_HOST_SOLARIS)
+     SET(STELMAIN_DEPS ${STELMAIN_DEPS} kstat)
+ENDIF()
+
+IF(HAIKU)
+     SET(STELMAIN_DEPS ${STELMAIN_DEPS} network)
+ENDIF()
+
+IF(WIN32 AND NOT MSVC)
+     # explicit link to wbemuuid for mingw setup, otherwise CLSID_WbemLocator and IID_IWbemLocator are undefined.
+     SET(STELMAIN_DEPS ${STELMAIN_DEPS} wbemuuid)
+ENDIF()
+
+IF(ANDROID)
+     SET(stellarium_exe_SRCS
+          ${stellarium_exe_SRCS}
+          ${CMAKE_SOURCE_DIR}/android/AndroidManifest.xml
+     )
 ENDIF()
 
 # Main executable/library setup
 IF(GENERATE_STELMAINLIB)
      ADD_LIBRARY(stelMain SHARED ${stellarium_lib_SRCS} ${stellarium_RES_CXX})
-     TARGET_LINK_LIBRARIES(stelMain ${STELMAIN_DEPS})
-     INSTALL(TARGETS stelMain DESTINATION lib)
+     TARGET_LINK_LIBRARIES(stelMain PUBLIC ${STELMAIN_DEPS})
+     INSTALL(TARGETS stelMain DESTINATION bin)
      # WIN32 creates a windows app without console, no effect on non-win platforms
-     ADD_EXECUTABLE(stellarium WIN32 ${stellarium_exe_SRCS})
+     IF(${QT_VERSION_MAJOR} EQUAL "5")
+          ADD_EXECUTABLE(stellarium WIN32 ${stellarium_exe_SRCS})
+     ELSE()
+          qt_add_executable(stellarium WIN32 ${stellarium_exe_SRCS})
+     ENDIF()
      #stelMain should be after the plug-ins, otherwise the build crashes
-     TARGET_LINK_LIBRARIES(stellarium stelMain ${winMMLib})
+     TARGET_LINK_LIBRARIES(stellarium PUBLIC stelMain ${winMMLib})
 ELSE()
      ADD_LIBRARY(stelMain STATIC ${stellarium_lib_SRCS} ${stellarium_RES_CXX})
-     TARGET_LINK_LIBRARIES(stelMain ${STELMAIN_DEPS})
-     ADD_EXECUTABLE(stellarium WIN32 ${stellarium_exe_SRCS})
-     TARGET_LINK_LIBRARIES(stellarium ${winMMLib} ${STELMAIN_DEPS} stelMain)
+     TARGET_LINK_LIBRARIES(stelMain PUBLIC ${STELMAIN_DEPS})
+     IF(${QT_VERSION_MAJOR} EQUAL "5")
+          ADD_EXECUTABLE(stellarium WIN32 ${stellarium_exe_SRCS})
+     ELSE()
+          qt_add_executable(stellarium WIN32 ${stellarium_exe_SRCS})
+     ENDIF()
+     TARGET_LINK_LIBRARIES(stellarium PUBLIC ${winMMLib} ${STELMAIN_DEPS} stelMain)
 
-     IF(APPLE)
+     IF(MACOS)
           SET_TARGET_PROPERTIES(stellarium PROPERTIES LINK_FLAGS " -framework Cocoa -framework OpenGL")
      ENDIF()
 ENDIF()
+SET_TARGET_PROPERTIES(stellarium PROPERTIES QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android")
+
+IF(ANDROID AND NOT ("${ANDROID_SSL_PATH}" STREQUAL "NONE"))
+     IF(ANDROID_SSL_PATH)
+          INCLUDE("${ANDROID_SSL_PATH}/android_openssl.cmake")
+     ELSE()
+          CPMAddPackage(NAME android_openssl
+                        URL https://github.com/KDAB/android_openssl/archive/b71f1470962019bd89534a2919f5925f93bc5779.tar.gz
+                        URL_HASH SHA256=6c1dfff0af367bba2f2c2a27f1c2061019537524dc7892ee8efbdc8e1c6224fa
+                        DOWNLOAD_ONLY yes)
+          INCLUDE("${android_openssl_SOURCE_DIR}/android_openssl.cmake")
+     ENDIF()
+     add_android_openssl_libraries(stellarium)
+ENDIF()
+
+IF(ENABLE_PCH)
+     # prepend an include to each cpp file which itself includes the most frequently used includes.
+     target_precompile_headers(stelMain PRIVATE
+          $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/stelMain_pch.hpp>)
+     IF(CMAKE_VERSION VERSION_GREATER_EQUAL 3.19)
+          SET(CMAKE_PCH_INSTANTIATE_TEMPLATES ON)
+     ENDIF()
+ENDIF(ENABLE_PCH)
+IF(ENABLE_SHOWMYSKY)
+     TARGET_INCLUDE_DIRECTORIES(stelMain PRIVATE "${ShowMySky_INCLUDE_DIRECTORIES}")
+ENDIF()
+TARGET_INCLUDE_DIRECTORIES(stelMain PRIVATE "${md4c_SOURCE_DIR}/src")
+
+IF(HAIKU)
+     TARGET_INCLUDE_DIRECTORIES(stelMain PRIVATE "/boot/system/develop/headers/private/shared")
+ENDIF()
+
+SET_TARGET_PROPERTIES(stellarium PROPERTIES ENABLE_EXPORTS TRUE)
 
 ADD_DEPENDENCIES(stellarium AllStaticPlugins)
 
@@ -501,62 +668,105 @@ IF(MSVC)
      )
 ENDIF(MSVC)
 
-IF(APPLE)
+IF(MACOS)
      INSTALL(TARGETS stellarium DESTINATION MacOS)
      INSTALL(CODE
-        "
-         EXECUTE_PROCESS(
-             COMMAND \"${MACDEPLOYQT_COMMAND}\"
-                     \"\${CMAKE_CURRENT_BINARY_DIR}/Stellarium.app\"
-             WORKING_DIRECTORY \"\${CMAKE_CURRENT_BINARY_DIR}\"
-             OUTPUT_FILE \"\${CMAKE_CURRENT_BINARY_DIR}/macdeployqt.log\"
-             ERROR_FILE \"\${CMAKE_CURRENT_BINARY_DIR}/macdeployqt.err\"
-         )
-         MESSAGE(\"Running macdeployqt...\")
-        "
+          "
+          EXECUTE_PROCESS(
+               COMMAND \"${MACDEPLOYQT_COMMAND}\"
+                    \"\${CMAKE_CURRENT_BINARY_DIR}/Stellarium.app\"
+               WORKING_DIRECTORY \"\${CMAKE_CURRENT_BINARY_DIR}\"
+               OUTPUT_FILE \"\${CMAKE_CURRENT_BINARY_DIR}/macdeployqt.log\"
+               ERROR_FILE \"\${CMAKE_CURRENT_BINARY_DIR}/macdeployqt.err\"
+          )
+          MESSAGE(STATUS \"Running macdeployqt...\")
+          "
      )
-    INSTALL(CODE
-        "
-        EXECUTE_PROCESS(
-             COMMAND \"../../util/macfix.sh\"
-        )
-        MESSAGE(\"Fixing Qt' paths for macOS bundle...\")
-        "
+     # for backward compatibility
+     IF(ENABLE_SHOWMYSKY AND EXISTS ${ShowMySky_LIBRARY})
+          GET_FILENAME_COMPONENT(_sms_lib_dir "${ShowMySky_LIBRARY}" DIRECTORY)
+          INSTALL(DIRECTORY ${_sms_lib_dir}/ DESTINATION Frameworks
+               PATTERN "*.dylib"
+               PATTERN "ShowMySky*" EXCLUDE
+          )
+     ENDIF()
+     # workaround for https://bugreports.qt.io/browse/QTBUG-105984
+     IF(ENABLE_MEDIA AND (${QT_VERSION} VERSION_EQUAL "6.4.0"))
+          GET_FILENAME_COMPONENT(_qt_bin_dir "${MACDEPLOYQT_COMMAND}" DIRECTORY)
+          INSTALL(FILES ${_qt_bin_dir}/../plugins/multimedia/libdarwinmediaplugin.dylib DESTINATION PlugIns/multimedia)
+     ENDIF()
+     INSTALL(CODE
+          "
+          EXECUTE_PROCESS(
+               COMMAND \"../../util/macfix.sh\"
+          )
+          MESSAGE(STATUS \"Fixing Qt' paths for macOS bundle...\")
+          "
      )
+ELSEIF(ANDROID)
+     INSTALL(TARGETS stellarium DESTINATION lib)
 ELSE()
      INSTALL(TARGETS stellarium DESTINATION bin)
 ENDIF()
 IF(WIN32)
+     IF((${QT_VERSION_MAJOR} EQUAL "5") AND (Qt5Core_VERSION VERSION_LESS "5.15"))
+          SET(VIRTUAL_KBD_SETTING "")
+     ELSE()
+          SET(VIRTUAL_KBD_SETTING "--no-virtualkeyboard")
+     ENDIF()
+
+     IF(STELLARIUM_BUILD_ARM64)
+          #cmake_path(APPEND QT_PATHS ${QT6_INSTALL_PREFIX} "bin" "qtpaths.bat")
+          FIND_PROGRAM(QT_PATHS qtpaths.bat HINTS "${_qt_bin_dir}")
+     ENDIF()
+     IF(QT_PATHS)
+          SET(_qt_paths "--qtpaths \"${QT_PATHS}\"")
+     ELSE()
+          SET(_qt_paths "")
+     ENDIF()
+
      INSTALL(CODE
-        "
-         EXECUTE_PROCESS(
-             COMMAND \"${WINDEPLOYQT_COMMAND}\"
-                     --dir \"\${CMAKE_INSTALL_PREFIX}/qt5stuff\"
-                     --no-translations
-                     --compiler-runtime
-                     \"\${CMAKE_INSTALL_PREFIX}/bin/stellarium.exe\"
-             WORKING_DIRECTORY \"\${CMAKE_INSTALL_PRERIX}/bin\"
-             OUTPUT_FILE \"\${CMAKE_CURRENT_BINARY_DIR}/windeployqt.log\"
-             ERROR_FILE \"\${CMAKE_CURRENT_BINARY_DIR}/windeployqt.err\"
-         )
-         MESSAGE(\"Running windeployqt...\")
-        "
+          "
+          EXECUTE_PROCESS(
+               COMMAND \"${WINDEPLOYQT_COMMAND}\"
+                    --dir \"\${CMAKE_INSTALL_PREFIX}/qtstuff\"
+                    --no-translations
+                    --verbose 1
+                    ${VIRTUAL_KBD_SETTING}
+                    ${_qt_paths}
+                    --compiler-runtime
+                    \"\${CMAKE_INSTALL_PREFIX}/bin/stellarium.exe\"
+               WORKING_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/bin\"
+               OUTPUT_FILE \"\${CMAKE_CURRENT_BINARY_DIR}/windeployqt.log\"
+               ERROR_FILE \"\${CMAKE_CURRENT_BINARY_DIR}/windeployqt.err\"
+          )
+          MESSAGE(STATUS \"Running windeployqt...\")
+          "
      )
      IF(GENERATE_STELMAINLIB)
           INSTALL(CODE
-             "
-              EXECUTE_PROCESS(
-                  COMMAND \"${WINDEPLOYQT_COMMAND}\"
-                          --dir \"\${CMAKE_INSTALL_PREFIX}/qt5stuff\"
-                          --no-translations
-                          --compiler-runtime
-                          \"\${CMAKE_INSTALL_PREFIX}/lib/libstelMain.dll\"
-                  WORKING_DIRECTORY \"\${CMAKE_INSTALL_PRERIX}/bin\"
-                  OUTPUT_FILE \"\${CMAKE_CURRENT_BINARY_DIR}/windeployqt-dll.log\"
-                  ERROR_FILE \"\${CMAKE_CURRENT_BINARY_DIR}/windeployqt-dll.err\"
-         )
-        "
+               "
+               EXECUTE_PROCESS(
+                    COMMAND \"${WINDEPLOYQT_COMMAND}\"
+                         --dir \"\${CMAKE_INSTALL_PREFIX}/qtstuff\"
+                         --no-translations
+                         --verbose 1
+                         ${VIRTUAL_KBD_SETTING}
+                         ${_qt_paths}
+                         --compiler-runtime
+                         \"\${CMAKE_INSTALL_PREFIX}/lib/libstelMain.dll\"
+                    WORKING_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/bin\"
+                    OUTPUT_FILE \"\${CMAKE_CURRENT_BINARY_DIR}/windeployqt-dll.log\"
+                    ERROR_FILE \"\${CMAKE_CURRENT_BINARY_DIR}/windeployqt-dll.err\"
+               )
+               MESSAGE(STATUS \"Running windeployqt for mainlib...\")
+               "
      )
+     ENDIF()
+     # workaround for https://bugreports.qt.io/browse/QTBUG-105984
+     IF(ENABLE_MEDIA AND (${QT_VERSION} VERSION_EQUAL "6.4.0"))
+          GET_FILENAME_COMPONENT(_qt_bin_dir "${WINDEPLOYQT_COMMAND}" DIRECTORY)
+          INSTALL(FILES ${_qt_bin_dir}/../plugins/multimedia/windowsmediaplugin.dll DESTINATION ${CMAKE_INSTALL_PREFIX}/qtstuff/multimedia)
      ENDIF()
 ENDIF()
 
@@ -568,236 +778,246 @@ SET_TARGET_PROPERTIES(stellarium PROPERTIES FOLDER "src")
 #############################################################################################
 
 IF(ENABLE_TESTING)
+     SET(TESTS_LIBRARIES ${ZLIB_LIBRARIES} Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Test stelMain)
 
-    SET(TESTS_LIBRARIES ${ZLIB_LIBRARIES} Qt5::Core Qt5::Gui Qt5::Test stelMain)
+     # Custom target used to build all tests at once
+     ADD_CUSTOM_TARGET(buildTests)
+     SET_TARGET_PROPERTIES(buildTests PROPERTIES FOLDER "src/tests")
 
-    # Custom target used to build all tests at once
-    ADD_CUSTOM_TARGET(buildTests)
-    SET_TARGET_PROPERTIES(buildTests PROPERTIES FOLDER "src/tests")
+     SET(tests_testDates_SRCS
+          tests/testDates.hpp
+          tests/testDates.cpp
+     )
+     ADD_EXECUTABLE(testDates ${tests_testDates_SRCS})
+     TARGET_LINK_LIBRARIES(testDates ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testDates)
+     ADD_TEST(testDates testDates)
+     SET_TARGET_PROPERTIES(testDates PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testDates_SRCS
-        tests/testDates.hpp
-        tests/testDates.cpp
-    )
-    ADD_EXECUTABLE(testDates ${tests_testDates_SRCS})
-    TARGET_LINK_LIBRARIES(testDates ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testDates)
-    ADD_TEST(testDates testDates)
-    SET_TARGET_PROPERTIES(testDates PROPERTIES FOLDER "src/tests")
+     SET(tests_testStelFileMgr_SRCS
+          tests/testStelFileMgr.hpp
+          tests/testStelFileMgr.cpp
+     )
+     ADD_EXECUTABLE(testStelFileMgr ${tests_testStelFileMgr_SRCS})
+     TARGET_LINK_LIBRARIES(testStelFileMgr ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testStelFileMgr)
+     ADD_TEST(testStelFileMgr testStelFileMgr)
+     SET_TARGET_PROPERTIES(testStelFileMgr PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testStelFileMgr_SRCS
-        tests/testStelFileMgr.hpp
-        tests/testStelFileMgr.cpp
-    )
-    ADD_EXECUTABLE(testStelFileMgr ${tests_testStelFileMgr_SRCS})
-    TARGET_LINK_LIBRARIES(testStelFileMgr ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testStelFileMgr)
-    ADD_TEST(testStelFileMgr testStelFileMgr)
-    SET_TARGET_PROPERTIES(testStelFileMgr PROPERTIES FOLDER "src/tests")
+     SET(tests_testStelSphereGeometry_SRCS
+          tests/testStelSphereGeometry.hpp
+          tests/testStelSphereGeometry.cpp
+     )
+     ADD_EXECUTABLE(testStelSphereGeometry ${tests_testStelSphereGeometry_SRCS})
+     TARGET_LINK_LIBRARIES(testStelSphereGeometry ${TESTS_LIBRARIES} glues_stel)
+     ADD_DEPENDENCIES(buildTests testStelSphereGeometry)
+     ADD_TEST(testStelSphereGeometry testStelSphereGeometry)
+     SET_TARGET_PROPERTIES(testStelSphereGeometry PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testStelSphereGeometry_SRCS
-        tests/testStelSphereGeometry.hpp
-        tests/testStelSphereGeometry.cpp
-    )
-    ADD_EXECUTABLE(testStelSphereGeometry ${tests_testStelSphereGeometry_SRCS})
-    TARGET_LINK_LIBRARIES(testStelSphereGeometry ${TESTS_LIBRARIES} glues_stel)
-    ADD_DEPENDENCIES(buildTests testStelSphereGeometry)
-    ADD_TEST(testStelSphereGeometry testStelSphereGeometry)
-    SET_TARGET_PROPERTIES(testStelSphereGeometry PROPERTIES FOLDER "src/tests")
+     SET(tests_testStelSphericalIndex_SRCS
+          tests/testStelSphericalIndex.hpp
+          tests/testStelSphericalIndex.cpp
+     )
+     ADD_EXECUTABLE(testStelSphericalIndex ${tests_testStelSphericalIndex_SRCS})
+     TARGET_LINK_LIBRARIES(testStelSphericalIndex ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testStelSphericalIndex)
+     ADD_TEST(testStelSphericalIndex testStelSphericalIndex)
+     SET_TARGET_PROPERTIES(testStelSphericalIndex PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testStelSphericalIndex_SRCS
-        tests/testStelSphericalIndex.hpp
-        tests/testStelSphericalIndex.cpp
-    )
-    ADD_EXECUTABLE(testStelSphericalIndex ${tests_testStelSphericalIndex_SRCS})
-    TARGET_LINK_LIBRARIES(testStelSphericalIndex ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testStelSphericalIndex)
-    ADD_TEST(testStelSphericalIndex testStelSphericalIndex)
-    SET_TARGET_PROPERTIES(testStelSphericalIndex PROPERTIES FOLDER "src/tests")
+     SET(tests_testStelJsonParser_SRCS
+          tests/testStelJsonParser.hpp
+          tests/testStelJsonParser.cpp
+     )
+     ADD_EXECUTABLE(testStelJsonParser ${tests_testStelJsonParser_SRCS})
+     TARGET_LINK_LIBRARIES(testStelJsonParser ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testStelJsonParser)
+     ADD_TEST(testStelJsonParser testStelJsonParser)
+     SET_TARGET_PROPERTIES(testStelJsonParser PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testStelJsonParser_SRCS
-        tests/testStelJsonParser.hpp
-        tests/testStelJsonParser.cpp
-    )
-    ADD_EXECUTABLE(testStelJsonParser ${tests_testStelJsonParser_SRCS})
-    TARGET_LINK_LIBRARIES(testStelJsonParser ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testStelJsonParser)
-    ADD_TEST(testStelJsonParser testStelJsonParser)
-    SET_TARGET_PROPERTIES(testStelJsonParser PROPERTIES FOLDER "src/tests")
+     SET(tests_testStelIniParser_SRCS
+          tests/testStelIniParser.hpp
+          tests/testStelIniParser.cpp
+     )
+     ADD_EXECUTABLE(testStelIniParser ${tests_testStelIniParser_SRCS})
+     TARGET_LINK_LIBRARIES(testStelIniParser ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testStelIniParser)
+     ADD_TEST(testStelIniParser testStelIniParser)
+     SET_TARGET_PROPERTIES(testStelIniParser PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testStelIniParser_SRCS
-        tests/testStelIniParser.hpp
-        tests/testStelIniParser.cpp
-    )
-    ADD_EXECUTABLE(testStelIniParser ${tests_testStelIniParser_SRCS})
-    TARGET_LINK_LIBRARIES(testStelIniParser ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testStelIniParser)
-    ADD_TEST(testStelIniParser testStelIniParser)
-    SET_TARGET_PROPERTIES(testStelIniParser PROPERTIES FOLDER "src/tests")
+     SET(tests_testStelVertexArray_SRCS
+          tests/testStelVertexArray.hpp
+          tests/testStelVertexArray.cpp
+     )
+     ADD_EXECUTABLE(testStelVertexArray ${tests_testStelVertexArray_SRCS})
+     TARGET_LINK_LIBRARIES(testStelVertexArray ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testStelVertexArray)
+     ADD_TEST(testStelVertexArray testStelVertexArray)
+     SET_TARGET_PROPERTIES(testStelVertexArray PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testStelVertexArray_SRCS
-        tests/testStelVertexArray.hpp
-        tests/testStelVertexArray.cpp
-    )
-    ADD_EXECUTABLE(testStelVertexArray ${tests_testStelVertexArray_SRCS})
-    TARGET_LINK_LIBRARIES(testStelVertexArray ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testStelVertexArray)
-    ADD_TEST(testStelVertexArray testStelVertexArray)
-    SET_TARGET_PROPERTIES(testStelVertexArray PROPERTIES FOLDER "src/tests")
+     SET(tests_testDeltaT_SRCS
+          tests/testDeltaT.hpp
+          tests/testDeltaT.cpp
+     )
+     ADD_EXECUTABLE(testDeltaT ${tests_testDeltaT_SRCS})
+     TARGET_LINK_LIBRARIES(testDeltaT ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testDeltaT)
+     ADD_TEST(testDeltaT testDeltaT)
+     SET_TARGET_PROPERTIES(testDeltaT PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testDeltaT_SRCS
-        tests/testDeltaT.hpp
-        tests/testDeltaT.cpp
-    )
-    ADD_EXECUTABLE(testDeltaT ${tests_testDeltaT_SRCS})
-    TARGET_LINK_LIBRARIES(testDeltaT ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testDeltaT)
-    ADD_TEST(testDeltaT testDeltaT)
-    SET_TARGET_PROPERTIES(testDeltaT PROPERTIES FOLDER "src/tests")
+     SET(tests_testConversions_SRCS
+          tests/testConversions.hpp
+          tests/testConversions.cpp
+     )
+     ADD_EXECUTABLE(testConversions ${tests_testConversions_SRCS})
+     TARGET_LINK_LIBRARIES(testConversions ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testConversions)
+     ADD_TEST(testConversions testConversions)
+     SET_TARGET_PROPERTIES(testConversions PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testConversions_SRCS
-        tests/testConversions.hpp
-        tests/testConversions.cpp
-    )
-    ADD_EXECUTABLE(testConversions ${tests_testConversions_SRCS})
-    TARGET_LINK_LIBRARIES(testConversions ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testConversions)
-    ADD_TEST(testConversions testConversions)
-    SET_TARGET_PROPERTIES(testConversions PROPERTIES FOLDER "src/tests")
+     SET(tests_testComputations_SRCS
+          tests/testComputations.hpp
+          tests/testComputations.cpp
+     )
+     ADD_EXECUTABLE(testComputations ${tests_testComputations_SRCS})
+     TARGET_LINK_LIBRARIES(testComputations ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testComputations)
+     ADD_TEST(testComputations testComputations)
+     SET_TARGET_PROPERTIES(testComputations PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testComputations_SRCS
-        tests/testComputations.hpp
-        tests/testComputations.cpp
-    )
-    ADD_EXECUTABLE(testComputations ${tests_testComputations_SRCS})
-    TARGET_LINK_LIBRARIES(testComputations ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testComputations)
-    ADD_TEST(testComputations testComputations)
-    SET_TARGET_PROPERTIES(testComputations PROPERTIES FOLDER "src/tests")
+     SET(tests_testComparisons_SRCS
+          tests/testComparisons.hpp
+          tests/testComparisons.cpp
+     )
+     ADD_EXECUTABLE(testComparisons ${tests_testComparisons_SRCS})
+     TARGET_LINK_LIBRARIES(testComparisons ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testComparisons)
+     ADD_TEST(testComparisons testComparisons)
+     SET_TARGET_PROPERTIES(testComparisons PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testComparisons_SRCS
-        tests/testComparisons.hpp
-        tests/testComparisons.cpp
-    )
-    ADD_EXECUTABLE(testComparisons ${tests_testComparisons_SRCS})
-    TARGET_LINK_LIBRARIES(testComparisons ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testComparisons)
-    ADD_TEST(testComparisons testComparisons)
-    SET_TARGET_PROPERTIES(testComparisons PROPERTIES FOLDER "src/tests")
+     SET(tests_testExtinction_SRCS
+          tests/testExtinction.hpp
+          tests/testExtinction.cpp
+     )
+     ADD_EXECUTABLE(testExtinction ${tests_testExtinction_SRCS})
+     TARGET_LINK_LIBRARIES(testExtinction ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testExtinction)
+     ADD_TEST(testExtinction testExtinction)
+     SET_TARGET_PROPERTIES(testExtinction PROPERTIES FOLDER "src/tests")
 
+     SET(tests_testRefraction_SRCS
+          tests/testRefraction.hpp
+          tests/testRefraction.cpp
+     )
+     ADD_EXECUTABLE(testRefraction ${tests_testRefraction_SRCS})
+     TARGET_LINK_LIBRARIES(testRefraction ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testRefraction)
+     ADD_TEST(testRefraction testRefraction)
+     SET_TARGET_PROPERTIES(testRefraction PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testExtinction_SRCS
-        tests/testExtinction.hpp
-        tests/testExtinction.cpp
-    )
-    ADD_EXECUTABLE(testExtinction ${tests_testExtinction_SRCS})
-    TARGET_LINK_LIBRARIES(testExtinction ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testExtinction)
-    ADD_TEST(testExtinction testExtinction)
-    SET_TARGET_PROPERTIES(testExtinction PROPERTIES FOLDER "src/tests")
+     SET(tests_testAirmass_SRCS
+          tests/testAirmass.hpp
+          tests/testAirmass.cpp
+     )
+     ADD_EXECUTABLE(testAirmass ${tests_testAirmass_SRCS})
+     TARGET_LINK_LIBRARIES(testAirmass ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testAirmass)
+     ADD_TEST(testAirmass testAirmass)
+     SET_TARGET_PROPERTIES(testAirmass PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testRefraction_SRCS
-        tests/testRefraction.hpp
-        tests/testRefraction.cpp
-    )
-    ADD_EXECUTABLE(testRefraction ${tests_testRefraction_SRCS})
-    TARGET_LINK_LIBRARIES(testRefraction ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testRefraction)
-    ADD_TEST(testRefraction testRefraction)
-    SET_TARGET_PROPERTIES(testRefraction PROPERTIES FOLDER "src/tests")
+     SET(tests_testAstrometry_SRCS
+          tests/testAstrometry.hpp
+          tests/testAstrometry.cpp
+     )
+     ADD_EXECUTABLE(testAstrometry ${tests_testAstrometry_SRCS})
+     TARGET_LINK_LIBRARIES(testAstrometry ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testAstrometry)
+     ADD_TEST(testAstrometry testAstrometry)
+     SET_TARGET_PROPERTIES(testAstrometry PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testAirmass_SRCS
-        tests/testAirmass.hpp
-        tests/testAirmass.cpp
-    )
-    ADD_EXECUTABLE(testAirmass ${tests_testAirmass_SRCS})
-    TARGET_LINK_LIBRARIES(testAirmass ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testAirmass)
-    ADD_TEST(testAirmass testAirmass)
-    SET_TARGET_PROPERTIES(testAirmass PROPERTIES FOLDER "src/tests")
+     SET(tests_testGeomMath_SRCS
+          tests/testGeomMath.hpp
+          tests/testGeomMath.cpp
+     )
+     ADD_EXECUTABLE(testGeomMath ${tests_testGeomMath_SRCS})
+     TARGET_LINK_LIBRARIES(testGeomMath ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testGeomMath)
+     ADD_TEST(testGeomMath testGeomMath)
+     SET_TARGET_PROPERTIES(testGeomMath PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testGeomMath_SRCS
-        tests/testGeomMath.hpp
-        tests/testGeomMath.cpp
-    )
-    ADD_EXECUTABLE(testGeomMath ${tests_testGeomMath_SRCS})
-    TARGET_LINK_LIBRARIES(testGeomMath ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testGeomMath)
-    ADD_TEST(testGeomMath testGeomMath)
-    SET_TARGET_PROPERTIES(testGeomMath PROPERTIES FOLDER "src/tests")
+     SET(tests_testVecMath_SRCS
+          tests/testVecMath.hpp
+          tests/testVecMath.cpp
+     )
+     ADD_EXECUTABLE(testVecMath ${tests_testVecMath_SRCS})
+     TARGET_LINK_LIBRARIES(testVecMath ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testVecMath)
+     ADD_TEST(testVecMath testVecMath)
+     SET_TARGET_PROPERTIES(testVecMath PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testVecMath_SRCS
-        tests/testVecMath.hpp
-        tests/testVecMath.cpp
-    )
-    ADD_EXECUTABLE(testVecMath ${tests_testVecMath_SRCS})
-    TARGET_LINK_LIBRARIES(testVecMath ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testVecMath)
-    ADD_TEST(testVecMath testVecMath)
-    SET_TARGET_PROPERTIES(testVecMath PROPERTIES FOLDER "src/tests")
+     IF(ENABLE_SCRIPTING)
+          SET(tests_testJavaScripting_SRCS
+               tests/testJavaScripting.hpp
+               tests/testJavaScripting.cpp
+          )
+          ADD_EXECUTABLE(testJavaScripting ${tests_testJavaScripting_SRCS})
+          TARGET_LINK_LIBRARIES(testJavaScripting ${TESTS_LIBRARIES})
+          ADD_DEPENDENCIES(buildTests testJavaScripting)
+          ADD_TEST(testJavaScripting testJavaScripting)
+          SET_TARGET_PROPERTIES(testJavaScripting PROPERTIES FOLDER "src/tests")
+     ENDIF(ENABLE_SCRIPTING)
 
-    SET(tests_testJavaScripting_SRCS
-        tests/testJavaScripting.hpp
-        tests/testJavaScripting.cpp
-    )
-    ADD_EXECUTABLE(testJavaScripting ${tests_testJavaScripting_SRCS})
-    TARGET_LINK_LIBRARIES(testJavaScripting ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testJavaScripting)
-    ADD_TEST(testJavaScripting testJavaScripting)
-    SET_TARGET_PROPERTIES(testJavaScripting PROPERTIES FOLDER "src/tests")
-	
-    SET(tests_testStelProjector_SRCS
-        tests/testStelProjector.hpp
-        tests/testStelProjector.cpp
-    )
-    ADD_EXECUTABLE(testStelProjector ${tests_testStelProjector_SRCS})
-    TARGET_LINK_LIBRARIES(testStelProjector ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testStelProjector)
-    ADD_TEST(testStelProjector testStelProjector)
-    SET_TARGET_PROPERTIES(testStelProjector PROPERTIES FOLDER "src/tests")
+     SET(tests_testStelProjector_SRCS
+          tests/testStelProjector.hpp
+          tests/testStelProjector.cpp
+     )
+     ADD_EXECUTABLE(testStelProjector ${tests_testStelProjector_SRCS})
+     TARGET_LINK_LIBRARIES(testStelProjector ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testStelProjector)
+     ADD_TEST(testStelProjector testStelProjector)
+     SET_TARGET_PROPERTIES(testStelProjector PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testPrecession_SRCS
-        tests/testPrecession.hpp
-        tests/testPrecession.cpp
-    )
-    ADD_EXECUTABLE(testPrecession ${tests_testPrecession_SRCS})
-    TARGET_LINK_LIBRARIES(testPrecession ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testPrecession)
-    ADD_TEST(testPrecession testPrecession)
-    SET_TARGET_PROPERTIES(testPrecession PROPERTIES FOLDER "src/tests")
+     SET(tests_testPrecession_SRCS
+          tests/testPrecession.hpp
+          tests/testPrecession.cpp
+     )
+     ADD_EXECUTABLE(testPrecession ${tests_testPrecession_SRCS})
+     TARGET_LINK_LIBRARIES(testPrecession ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testPrecession)
+     ADD_TEST(testPrecession testPrecession)
+     SET_TARGET_PROPERTIES(testPrecession PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testSiderealTime_SRCS
-        tests/testSiderealTime.hpp
-        tests/testSiderealTime.cpp
-    )
-    ADD_EXECUTABLE(testSiderealTime ${tests_testSiderealTime_SRCS})
-    TARGET_LINK_LIBRARIES(testSiderealTime ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testSiderealTime)
-    ADD_TEST(testSiderealTime testSiderealTime)
-    SET_TARGET_PROPERTIES(testSiderealTime PROPERTIES FOLDER "src/tests")
+     SET(tests_testSiderealTime_SRCS
+          tests/testSiderealTime.hpp
+          tests/testSiderealTime.cpp
+     )
+     ADD_EXECUTABLE(testSiderealTime ${tests_testSiderealTime_SRCS})
+     TARGET_LINK_LIBRARIES(testSiderealTime ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testSiderealTime)
+     ADD_TEST(testSiderealTime testSiderealTime)
+     SET_TARGET_PROPERTIES(testSiderealTime PROPERTIES FOLDER "src/tests")
 
-    SET(tests_testEphemeris_SRCS
-        tests/testEphemeris.hpp
-        tests/testEphemeris.cpp
-    )
-    ADD_EXECUTABLE(testEphemeris ${tests_testEphemeris_SRCS})
-    TARGET_LINK_LIBRARIES(testEphemeris ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testEphemeris)
-    ADD_TEST(testEphemeris testEphemeris)
-    SET_TARGET_PROPERTIES(testEphemeris PROPERTIES FOLDER "src/tests")
-    SET_TESTS_PROPERTIES(testEphemeris PROPERTIES
-        ENVIRONMENT "STELLARIUM_DATA_ROOT=${PROJECT_SOURCE_DIR}")
+     SET(tests_testEphemeris_SRCS
+          tests/testEphemeris.hpp
+          tests/testEphemeris.cpp
+     )
+     ADD_EXECUTABLE(testEphemeris ${tests_testEphemeris_SRCS})
+     TARGET_LINK_LIBRARIES(testEphemeris ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testEphemeris)
+     ADD_TEST(testEphemeris testEphemeris)
+     SET_TARGET_PROPERTIES(testEphemeris PROPERTIES FOLDER "src/tests")
+     SET_TESTS_PROPERTIES(testEphemeris PROPERTIES
+          ENVIRONMENT "STELLARIUM_DATA_ROOT=${PROJECT_SOURCE_DIR}")
 
-    SET(tests_testStelSkyCultureMgr_SRCS
-        tests/testStelSkyCultureMgr.hpp
-        tests/testStelSkyCultureMgr.cpp
-    )
-    ADD_EXECUTABLE(testStelSkyCultureMgr ${tests_testStelSkyCultureMgr_SRCS})
-    TARGET_LINK_LIBRARIES(testStelSkyCultureMgr ${TESTS_LIBRARIES})
-    ADD_DEPENDENCIES(buildTests testStelSkyCultureMgr)
-    ADD_TEST(testStelSkyCultureMgr testStelSkyCultureMgr)
-    SET_TARGET_PROPERTIES(testStelSkyCultureMgr PROPERTIES FOLDER "src/tests")
-    SET_TESTS_PROPERTIES(testStelSkyCultureMgr PROPERTIES
-        ENVIRONMENT "STELLARIUM_DATA_ROOT=${PROJECT_SOURCE_DIR}")
+     SET(tests_testStelSkyCultureMgr_SRCS
+          tests/testStelSkyCultureMgr.hpp
+          tests/testStelSkyCultureMgr.cpp
+     )
+     ADD_EXECUTABLE(testStelSkyCultureMgr ${tests_testStelSkyCultureMgr_SRCS})
+     TARGET_LINK_LIBRARIES(testStelSkyCultureMgr ${TESTS_LIBRARIES})
+     ADD_DEPENDENCIES(buildTests testStelSkyCultureMgr)
+     ADD_TEST(testStelSkyCultureMgr testStelSkyCultureMgr)
+     SET_TARGET_PROPERTIES(testStelSkyCultureMgr PROPERTIES FOLDER "src/tests")
+     SET_TESTS_PROPERTIES(testStelSkyCultureMgr PROPERTIES
+          ENVIRONMENT "STELLARIUM_DATA_ROOT=${PROJECT_SOURCE_DIR}")
 
 ENDIF (ENABLE_TESTING)

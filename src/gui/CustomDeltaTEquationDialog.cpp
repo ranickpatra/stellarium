@@ -64,15 +64,15 @@ void CustomDeltaTEquationDialog::createDialogContent()
 	ui->lineEditNDot->setText(QString("%1").arg(ndot));
 
 	//Signals and slots
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &CustomDeltaTEquationDialog::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo,      this, &CustomDeltaTEquationDialog::handleMovedTo);
 
-	connect(ui->lineEditNDot, SIGNAL(textEdited(const QString&)), this, SLOT(setNDot(const QString&)));
-	connect(ui->lineEditYear, SIGNAL(textEdited(const QString&)), this, SLOT(setYear(const QString&)));
-	connect(ui->lineEditCoefficientA, SIGNAL(textEdited(const QString&)), this, SLOT(setCoeffA(const QString&)));
-	connect(ui->lineEditCoefficientB, SIGNAL(textEdited(const QString&)), this, SLOT(setCoeffB(const QString&)));
-	connect(ui->lineEditCoefficientC, SIGNAL(textEdited(const QString&)), this, SLOT(setCoeffC(const QString&)));
+	connect(ui->lineEditNDot, &QLineEdit::textEdited, this, &CustomDeltaTEquationDialog::setNDot);
+	connect(ui->lineEditYear, &QLineEdit::textEdited, this, &CustomDeltaTEquationDialog::setYear);
+	connect(ui->lineEditCoefficientA, &QLineEdit::textEdited, this, &CustomDeltaTEquationDialog::setCoeffA);
+	connect(ui->lineEditCoefficientB, &QLineEdit::textEdited, this, &CustomDeltaTEquationDialog::setCoeffB);
+	connect(ui->lineEditCoefficientC, &QLineEdit::textEdited, this, &CustomDeltaTEquationDialog::setCoeffC);
 }
 
 void CustomDeltaTEquationDialog::saveSettings(void) const
@@ -123,10 +123,10 @@ void CustomDeltaTEquationDialog::setCoeffC(const QString& v)
 
 void CustomDeltaTEquationDialog::setDescription() const
 {
-	ui->stelWindowTitle->setText(q_("Custom equation for %1T").arg(QChar(0x0394)));
+	ui->titleBar->setTitle(q_("Custom equation for %1T").arg(QChar(0x0394)));
 	ui->labelDescription->setText(q_("A typical equation for calculation of %1T looks like:").arg(QChar(0x0394)));
-	ui->labelEquation->setText(QString("<strong>%1T = a + b%2u + c%3u%4,</strong>").arg(QChar(0x0394)).arg(QChar(0x00B7)).arg(QChar(0x00B7)).arg(QChar(0x00B2)));
-	ui->labelSubEquation->setText(QString("%1 <em>u = (%2 - y)/100</em>").arg(q_("where")).arg(q_("year")));
+	ui->labelEquation->setText(QString("<strong>&Delta;T = a + b&middot;u + c&middot;u<sup>2</sup>,</strong>"));
+	ui->labelSubEquation->setText(QString("%1 <em>u = (%2 - y)/100</em>").arg(q_("where"), q_("year")));
 	QString tooltip = q_("Secular acceleration of the Moon");
 	ui->labelNDot->setToolTip(tooltip);
 	ui->lineEditNDot->setToolTip(tooltip);

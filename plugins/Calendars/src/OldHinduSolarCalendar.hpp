@@ -21,6 +21,10 @@
 
 #include "Calendar.hpp"
 
+//! @class OldHinduSolarCalendar
+//! @brief Functions for the Old Hindu Solar calendar described in CC:UE chapter 10.
+//! @author Georg Zotti
+//! @ingroup calendars
 //! The old hindu Solar calendar as given in CC.UE describes the one given in the (First) Arya Siddhanta of Aryabhata (499 C.E.),
 //! as amended by Lalla (ca. 720-790 C.E.).
 //! There are many variations which are not described in CC.UE and therefore not handled in this implementation.
@@ -33,38 +37,39 @@ class OldHinduSolarCalendar : public Calendar
 public:
 	OldHinduSolarCalendar(double jd);
 
-	virtual ~OldHinduSolarCalendar() Q_DECL_OVERRIDE {}
+	~OldHinduSolarCalendar() override {}
 
 public slots:
-	virtual void retranslate() Q_DECL_OVERRIDE;
+	void retranslate() override;
 
 	//! Set a calendar date from the Julian day number
-	virtual void setJD(double JD) Q_DECL_OVERRIDE;
+	void setJD(double JD) override;
 
 	//! set date from a vector of calendar date elements sorted from the largest to the smallest.
 	//! Year-Month[1...12]-Day[1...30]
-	virtual void setDate(QVector<int> parts) Q_DECL_OVERRIDE;
+	void setDate(const QVector<int> &parts) override;
 
 	//! get a stringlist of calendar date elements sorted from the largest to the smallest.
 	//! {Year, JovianCycleNr, JovianCycleName, Month, MonthName, Day, DayName}
-	virtual QStringList getDateStrings() const Q_DECL_OVERRIDE;
+	QStringList getDateStrings() const override;
 
 	//! get a formatted complete string for a date
-	virtual QString getFormattedDateString() const Q_DECL_OVERRIDE;
+	QString getFormattedDateString() const override;
 
-public:
-	// static public Methods from CC
 	//! Return Hindu day count from RD
 	static int hinduDayCount(int rd) {return rd-hinduEpoch;}
 
 	static int jovianYear(int rd); //! year index in Jovian cycle [1..60]
 
-	static int fixedFromOldHinduSolar(QVector<int> parts);
+	static int fixedFromOldHinduSolar(const QVector<int> &parts);
 	static QVector<int> oldHinduSolarFromFixed(int rd);
 
-	// configure details.
-	void setWeekdayStyle(int style); // valid arguments: 0|1 (real difference not documented in CC.UE!)
-	void setMonthStyle(int style); // valid arguments: 0=Vedic or 1=Sanskrit or 2=Zodiacal
+	//! configure details for future output. This could be used in a startup script.
+	//! valid styles: 0|1 (real difference not documented in CC.UE!)
+	void setWeekdayStyle(int style);
+	//! configure details for future output. This could be used in a startup script.
+	//! valid styles: 0=Vedic or 1=Sanskrit or 2=Zodiacal
+	void setMonthStyle(int style);
 
 protected:
 	static const int hinduEpoch; // RD -1132959.

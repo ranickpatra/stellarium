@@ -23,10 +23,17 @@
 #include <QObject>
 #include <QVariant>
 #include <QStringList>
-#include "StelObject.hpp"
+#include "V3d.hpp"
+#ifdef ENABLE_SCRIPT_QML
+#include <QJSEngine>
+#endif
 #include "StelCore.hpp"
+#include "VecMath.hpp"
 
 class QScriptEngine;
+
+Q_DECLARE_LOGGING_CATEGORY(Scripting)
+
 
 //! Provide script API for Stellarium global functions.  Public slots in this class
 //! may be used in Stellarium scripts, and are accessed as member function to the
@@ -34,6 +41,11 @@ class QScriptEngine;
 //! of display flags (e.g. LandscapeMgr::setFlagAtmosphere) can be accessed directly
 //! via the scripting object with the class name, e.g.  by using the scripting command:
 //!  LandscapeMgr.setFlagAtmosphere(true);
+//!
+//! @note You can finetune the amount of scripting-related messages in the logfile by configuring the logging category stel.Scripting.
+//! For this, e.g. set environment variable QT_LOGGING_RULES="*.debug=false;stel.Scripting.debug=true;".
+//! By default, only Info and more severe messages are displayed.
+
 class StelMainScriptAPI : public QObject
 {
 	Q_OBJECT
@@ -42,10 +54,47 @@ class StelMainScriptAPI : public QObject
 
 public:
 	StelMainScriptAPI(QObject *parent = Q_NULLPTR);
-	~StelMainScriptAPI();
+	~StelMainScriptAPI() override;
+
+#ifdef ENABLE_SCRIPT_QML
+	void setEngine(QJSEngine *eng){m_engine=eng;}
+#endif
 
 // These functions will be available in scripts
 public slots:
+
+	//! Create a Vec3d object. This is very important for many functions, but can only be created indirectly.
+	//! Either use this function or use an intermediary V3d object like
+	//! @code
+	//! var myV3d=new V3d(vec);
+	//! var myVec3d=myV3d.toVec3d();
+	//! @endcode
+	static Vec3d vec3d(const double x, const double y, const double z);
+
+	//! Create a Vec3f object. This is very important for many functions, but can only be created indirectly.
+	//! Either use this function or use an intermediary V3f object like
+	//! @code
+	//! var myV3f=new V3f(vec);
+	//! var myVec3f=myV3f.toVec3f();
+	//! @endcode
+	static Vec3f vec3f(const float x, const float y, const float z);
+
+#ifdef ENABLE_SCRIPT_QML
+	//! @returns Color object from a color hexstring or even color name definition.
+	//! @code
+	//! var crimson=core.color("Crimson");
+	//! var red=core.color("#ff0000");
+	//! @endcode
+	//! almost an alias for vec3f(cstr)
+	static Color color(const QString &cstr);
+#endif
+
+	//! Returns true if the script is running on the older, Qt5-based QtScript JavaScript engine.
+	//! Note that it is possible to build Stellarium on Qt5.14 and later also with the newer scripting engine.
+	//! Use this to make code paths work with all versions of Stellarium.
+	//! @todo Should we rename this method?
+	static bool useQtScript();
+
 	//! Set the current date as Julian Day number
 	//! @param JD the Julian Day number
 	static void setJDay(double JD);
@@ -96,6 +145,11 @@ public slots:
 	//! in HMS format, e.g. "0h1m68.2s"
 	//! @return the DeltaT for current simulation time.
 	static QString getDeltaT();
+
+	//! get the DeltaT for the simulation date and time as a double
+	//! in seconds
+	//! @return the DeltaT for current simulation time.
+	static double getDeltaTsec();
 
 	//! get the DeltaT equation name for the simulation date and time as a string
 	//! @return name of the DeltaT equation
@@ -166,6 +220,37 @@ public slots:
 	//! If the name is "", any currently selected objects will be
 	//! de-selected.
 	//! @param pointer whether or not to have the selection pointer enabled
+	//! @note For select a planetary feature (nomenclature item) by name you need to enable the visibility
+	//! of nomenclature and use target because one name may using on different planets.
+	//! See the examples below.
+	//!
+	//! **Example 1**. Selecting a crater Copernicus on the Moon:
+	//! @code
+	//! NomenclatureMgr.setFlagShowNomenclature(true);
+	//! core.selectObjectByName("Copernicus (crater, Moon)", true);
+	//! @endcode
+	//!
+	//! **Example 2**. Selecting a Mare Crisium on the Moon:
+	//! @code
+	//! NomenclatureMgr.setFlagShowNomenclature(true);
+	//! core.selectObjectByName("Mare Crisium (Moon)", true);
+	//! @endcode
+	//!
+	//! **Example 3**. Selecting an Olympus Mons on the Mars:
+	//! @code
+	//! NomenclatureMgr.setFlagShowNomenclature(true);
+	//! core.selectObjectByName("Olympus Mons (Mars)", true);
+	//! @endcode
+	//!
+	//! **Example 4**. Selecting a star Copernicus:
+	//! @code
+	//! core.selectObjectByName("Copernicus", true);
+	//! @endcode
+	//!
+	//! **Example 5**. Selecting a planet Mars:
+	//! @code
+	//! core.selectObjectByName("Mars", true);
+	//! @endcode
 	static void selectObjectByName(const QString& name, bool pointer=false);
 
 	//! Select a constellation by name
@@ -175,7 +260,9 @@ public slots:
 	//! Fetch a map with data about an object's position, magnitude and so on
 	//! @param name is the English name of the object for which data will be
 	//! returned.
-	//! @return a map of object data.  Keys:
+	//! @return a map of object data.
+	//!
+	//! Keys:
 	//! - above-horizon : true, if celestial body is above horizon
 	//! - altitude : apparent altitude angle in decimal degrees
 	//! - azimuth : apparent azimuth angle in decimal degrees
@@ -206,16 +293,20 @@ public slots:
 	//! - size-deg : angular size in decimal degrees (formatted string)
 	//! - size-dms : angular size in DMS format
 	//! - localized-name : localized name	
+	//!
 	//! The returned map can contain other information. For example, Solar System objects add:
-	//! - distance : distance to object in AU (for Solar system objects only!)
 	//! - phase : phase (illuminated fraction, 0..1) of object (for Solar system objects only!)
 	//! - illumination : phase of object in percent (0..100) (for Solar system objects only!)
 	//! - phase-angle : phase angle of object in radians (for Solar system objects only!)
 	//! - phase-angle-dms : phase angle of object in DMS (for Solar system objects only!)
 	//! - phase-angle-deg : phase angle of object in decimal degrees (for Solar system objects only!)
+	//! - is-waning : whether phase angle is increasing, signifying the waning phase (for Solar system objects only!)
 	//! - elongation : elongation of object in radians (for Solar system objects only!)
 	//! - elongation-dms : elongation of object in DMS (for Solar system objects only!)
 	//! - elongation-deg : elongation of object in decimal degrees (for Solar system objects only!)
+	//! - ecl-elongation : elongation (difference in ecliptical longitude) of object in radians (for Solar system objects and from Earth only!)
+	//! - ecl-elongation-dms : elongation (difference in ecliptical longitude) of object in DMS (for Solar system objects and from Earth only!)
+	//! - ecl-elongation-deg : elongation (difference in ecliptical longitude) of object in decimal degrees (for Solar system objects and from Earth only!)
 	//! - velocity: the planet velocity around the parent planet in ecliptical coordinates in AU/d (for Solar system objects only!)
 	//! - velocity-kms: the planet velocity around the parent planet in km/s (for Solar system objects only!)
 	//! - heliocentric-velocity: the planet's heliocentric velocity in the solar system in ecliptical coordinates in AU/d (for Solar system objects only!)
@@ -223,11 +314,21 @@ public slots:
 	//! - scale: scale factor for Solar system bodies (for Solar system objects only!)
 	//! - eclipse-obscuration: value of obscuration for solar eclipse (for Sun only!)
 	//! - eclipse-magnitude: value of magnitude for solar eclipse (for Sun only!)
+	//! - eclipse-crescent-angle (degrees; for Sun only!)
+	//! - heliocentric-distance: distance to object from the Sun in AU (for Solar system objects, except the Sun)
+	//! - heliocentric-distance-km: distance to object from the Sun in kilometers (for Solar system objects, except the Sun)
+	//! - distance: distance to object in AU (for Solar system objects only!)
+	//! - distance-km: distance to object in kilometers (for Solar system objects only!)
+	//! - phase-name: name of phase (on Earth for Moon only!)
+	//! - age: the age of the Moon in days. This is currently "elongation angle age" only, not time since last conjunction! (on Earth for Moon only!)
+	//! - penumbral-eclipse-magnitude: the magnitude of penumbral lunar eclipse (on Earth for Moon only!)
+	//! - umbral-eclipse-magnitude: the magnitude of umbral lunar eclipse (on Earth for Moon only!)
+	//!
 	//! Other StelObject derivates, also those defined in plugins, may add more,
 	//! these fields are documented in the respective classes, or simply try what you get:
 	//! You can print a complete set of entries into output with the following commands:
 	//! @code
-	//! map=core.getSelectedObjectInfo();
+	//! map=core.getObjectInfo("Name_of_object");
 	//! core.output(core.mapToString(map));
 	//! @endcode
 	static QVariantMap getObjectInfo(const QString& name);
@@ -241,6 +342,45 @@ public slots:
 	//! Note that while most objects keep this information after unselection and reselection,
 	//! stars will start with no extra information when they become selected again.
 	static void addToSelectedObjectInfoString(const QString &str, bool replace=false);
+
+	//! Retrieve information about rise, transit and setting time above a given @param altitude for @param objectName.
+	//! @return a map with various entries in local time.
+	//! The times are on the current calendar day, not the "nearest" events,
+	//! therefore esp. the Moon may return "skipping codes" 20/30/40.
+	//! The map keys are
+	//! - rise-dhr     : rise, decimal hour, zone time
+	//! - transit-dhr  : transit, decimal hour, zone time
+	//! - set-dhr      : set, decimal hour, zone time
+	//! - rise         : string, "HHhMMm" format
+	//! - transit      : string, "HHhMMm" format
+	//! - set          : string, "HHhMMm" format
+	//! - altitude     : decimal degrees, just same as @param altitude, for reference
+	//! - name         : english name of the object, for reference
+	//! - status-code:
+	//!       *     0. normal result, 3 valid times.
+	//! 	  *  +100. for circumpolar objects. Rise and set give lower culmination times.
+	//!       *  -100. for objects never rising. Rise and set give transit times.
+	//!       * -1000. is used as "invalid" value. The result should then not be used. If unexpected, consider reporting a bug.
+	//!       *   +20. (Planet objects only) no transit time on current date.
+	//!       *   +30. (Planet objects only) no rise time on current date.
+	//!       *   +40. (Planet objects only) no set time on current date.
+	//! - status: An english string explaining the status code
+	//! If altitude==0, this is just rise/transit/set also included in getObjectInfo(objectName).
+	//! This function however can be used to retrieve twilight times like
+	//! @code
+	//! civilTwilightMap=core.getRTS("Sun", -6.);
+	//! nautTwilightMap=core.getRTS("Sun", -12.);
+	//! astroTwilightMap=core.getRTS("Sun", -18.);
+	//! core.output("Twilight " + astroTwilightMap["rise"] + "/" + nautTwilightMap["rise"] + "/" + civilTwilightMap["rise"]);
+	//! @endcode
+	static QVariantMap getRTS(const QString &objectName, const double altitude=0.);
+
+	//! Get current Equation of Time
+	//! @return current value of equation of time in seconds.
+	//! Equation of time describes the difference between mean time (described by a fictitious mean sun) and apparent time (described by the observable sun).
+	//! Only the apparent (visible) meridian transit of the real sun describes 12:00 Noon in Local True Solar Time (displayed by ordinary sundials).
+	//! A negative value means the apparent (observable, real) sun crosses the meridian after the mean sun which is modelled by ordinary mechanical clocks.
+	static double getEquationOfTime();
 
 	//! Set value for some StelProperty.
 	//! @note This method may be very helpful for change the values in the plugins to avoid crashes when some plugin is not loaded.
@@ -298,11 +438,13 @@ public slots:
 	//! Move the current viewing direction to some object.
 	//! @param name is the English name of the object
 	//! @param duration the duration of the movement in seconds
-	static void moveToObject(const QString& name, float duration=1.);
+	//! @param shift the shift of object from center of FOV in degrees (for domes)
+	static void moveToObject(const QString& name, float duration=1.f, float shift=0.f);
 
 	//! Move the current viewing direction to selected object.
 	//! @param duration the duration of the movement in seconds
-	static void moveToSelectedObject(float duration=1.);
+	//! @param shift the shift of object from center of FOV in degrees (for domes)
+	static void moveToSelectedObject(float duration=1.f, float shift=0.f);
 
 	//! move the current viewing direction to some specified altitude and azimuth.
 	//! The move will run in AltAz coordinates. This will look different from moveToRaDec() when timelapse is fast.
@@ -332,7 +474,7 @@ public slots:
 	//! @param lon the galactic longitude
 	//! @param dec the galactic latitude
 	//! @param duration the duration of the movement in seconds
-	static void moveToGalLongLat(const QString& lon, const QString& lat, float duration);
+	static void moveToGalLongLat(const QString& lon, const QString& lat, float duration=1.);
 
 	//! Set the observer location
 	//! @param longitude the longitude in degrees. E is +ve.
@@ -347,7 +489,7 @@ public slots:
 	//! @param duration the time for the transition from the
 	//!        old to the new location.
 	//! @param name A name for the location (which will appear
-	//!        in the status bar. Use "<city>, <country>" for
+	//!        in the status bar. Use "<city>, <region>" for
 	//!        moving across a border.
 	//! @param planet the English name of the new planet.
 	//!        If the planet name is not known (e.g. ""), the
@@ -370,7 +512,7 @@ public slots:
 	//! - longitude : longitude in decimal degrees
 	//! - latitude : latitude in decimal degrees
 	//! - planet : name of planet
-	//! - location : city and country
+	//! - location : city and region
 	//! - sidereal-year : duration of the sidereal year on the planet in Earth's days (since 0.12.0)
 	//! - sidereal-day : duration of the sidereal day on the planet in Earth's hours (since 0.12.0)
 	//! - solar-day : duration of the mean solar day on the planet in Earth's hours (since 0.12.0)
@@ -396,6 +538,21 @@ public slots:
 	//! Return an array of all timezone names valid for setTimezone(tzName)
 	static QStringList getAllTimezoneNames();
 
+	//! Coordinate conversion: geographic (WGS84)-->UTM
+	//! @arg longitude geographic longitude from Greenwich, degrees
+	//! @arg latitude geographic latitude from equator, degrees
+	//! @arg zone UTM zone [1...60]. If 0, compute best-fit zone.
+	//! @return {{E[m], N[m], zone, gamma[deg], k}}
+	//! The returned zone contains the input or, if input was 0 (or missing), the most appropriate zone. North or South is not returned but is trivially fround from latitude.
+	static QList<double> geo2utm(const double longitude, const double latitude, const int zone=0);
+	//! Coordinate conversion: UTM->geographic (WGS84)
+	//! @arg easting (metres). False Easting of Zone meridian = 500000
+	//! @arg northing (metres). For southern latitudes, equator = 10000000
+	//! @arg zone UTM zone (longitudinal) [1...60].
+	//! @arg north true for N, false for S latitude zones.
+	//! @return {{longitude[deg], latitude[deg], refLong[deg], gamma[deg], k}}
+	static QList<double> utm2geo(const double easting, const double northing, const int zone, const bool north);
+
 	//! Save a screenshot.
 	//! @param prefix the prefix for the file name to use
 	//! @param dir the path of the directory to save the screenshot in.  If
@@ -403,12 +560,24 @@ public slots:
 	//! @param invert whether colors have to be inverted in the output image
 	//! @param overwrite true to use exactly the prefix as filename (plus .png), and overwrite any existing file.
 	//! @param format File format. One of png|bmp|jpg|jpeg|tif|tiff|webm|pbm|pgm|ppm|xbm|xpm|ico. Use current format if left empty or invalid.
+	//!        Format tiff stores uncompressed, tif uses LZW lossless compression. Format jpeg is less compressed than jpg.
 	static void screenshot(const QString& prefix, bool invert=false, const QString& dir="", const bool overwrite=false, const QString& format="");
 
 	//! Show or hide the GUI (toolbars).  Note this only applies to GUI plugins which
 	//! provide the public slot "setGuiVisible(bool)".
 	//! @param b if true, show the GUI, if false, hide the GUI.
 	static void setGuiVisible(bool b);
+
+	//! Show or hide the selection pointers/markers
+	//! @param b if true, show the pointer/marker around selected objects, if false, hide the pointer/marker.
+	static void setSelectedObjectMarkerVisible(bool b);
+
+	//! Use a custom CSS for the GUI. This is a very advanced feature, designing CSS is an art.
+	//! To use properly, place a private copy of normalStyle.css into your user data directory and edit style, but leave structure as-is.
+	//! @param cssStyle The file name without ".css"
+	//! The special name "default" can be used to reset everything to defaults.
+	//! @attention Stellarium's normalStyle.css evolves. We cannot give any guarantee that a modified CSS will work with another version of Stellarium.
+	static void setGuiStyle(const QString& cssStyle);
 
 	//! Set the minimum frames per second.  Usually this minimum will
 	//! be switched to after there are no user events for some seconds
@@ -458,12 +627,17 @@ public slots:
 	//! - ProjectionStereographic
 	//! - ProjectionFisheye
 	//! - ProjectionHammer
+	//! - ProjectionMollweide
 	//! - ProjectionCylinder
 	//! - ProjectionMercator
 	//! - ProjectionOrthographic
 	//! - ProjectionSinusoidal
 	//! - ProjectionMiller
 	void setProjectionMode(const QString& id);
+
+	//! Set size of current window. This will never exceed the current screen dimensions.
+	//! @return the actually gained size(width, height).
+	static Vec2d setWindowSize(int width, int height);
 
 	//! Get the status of the disk viewport
 	//! @return true if the disk view port is currently enabled
@@ -489,18 +663,18 @@ public slots:
 
 	//! Find out the current sky culture
 	//! @return the ID of the current sky culture (i.e. the name of the directory in
-	//! which the curret sky cultures files are found, e.g. "western")
+	//! which the current sky cultures files are found, e.g. "modern")
 	static QString getSkyCulture();
 
 	//! Set the current sky culture
-	//! @param id the ID of the sky culture to set, e.g. western or inuit etc.
+	//! @param id the ID of the sky culture to set, e.g. "modern" or "inuit" etc.
 	void setSkyCulture(const QString& id);
 
-	//! Find out the current sky culture and get it English name
+	//! Find out the current sky culture and get its English name
 	//! @return the English name of the current sky culture
 	static QString getSkyCultureName();
 
-	//! Find out the current sky culture and get it localized name
+	//! Find out the current sky culture and get its localized name
 	//! @return the translated name of the current sky culture
 	static QString getSkyCultureNameI18n();
 
@@ -533,8 +707,7 @@ public slots:
 	//! @todo allow alpha in images?
 	//! @param id a string ID to be used when referring to this
 	//! image (e.g. when changing the displayed status or deleting it.
-	//! @param filename the file name of the image.  If a relative
-	//! path is specified, "scripts/" will be prefixed before the
+	//! @param filename the file name of the image. "scripts/" will be prefixed before the
 	//! image is searched for using StelFileMgr.
 	//! @param lon0 The right ascension/longitude/azimuth of the first corner of the image in degrees (bottom left)
 	//! @param lat0 The declination/latitude/altitude of the first corner of the image in degrees (bottom left)
@@ -548,14 +721,15 @@ public slots:
 	//! @param maxBright The maximum brightness setting for the image
 	//! @param visible The initial visibility of the image
 	//! @param frame one of EqJ2000|EqDate|EclJ2000|EclDate|Gal(actic)|SuperG(alactic)|AzAlt.
-	//! @note since 2017-03, you can select Frame.
-	//! @note Images in AzAlt frame are not affected by atmosphere effects like refraction or extinction.
+	//! @param withAberration The image, if frame==EqJ2000, undergoes aberration effect. Default: true.
+	//! @note Images in AzAlt frame are not affected by atmosphere effects like refraction or extinction, and also not by aberration.
 	void loadSkyImage(const QString& id, const QString& filename,
 					  double lon0, double lat0,
 					  double lon1, double lat1,
 					  double lon2, double lat2,
 					  double lon3, double lat3,
-					  double minRes=2.5, double maxBright=14, bool visible=true, const QString &frame="EqJ2000");
+					  double minRes=2.5, double maxBright=14, bool visible=true,
+					  const QString &frame="EqJ2000", bool withAberration=true);
 
 
 	//! Convenience function which allows the user to provide longitudinal and latitudinal angles (RA/Dec or Long/Lat or Az/Alt)
@@ -565,7 +739,8 @@ public slots:
 					  const QString& lon1, const QString& lat1,
 					  const QString& lon2, const QString& lat2,
 					  const QString& lon3, const QString& lat3,
-					  double minRes=2.5, double maxBright=14, bool visible=true, const QString& frame="EqJ2000");
+					  double minRes=2.5, double maxBright=14, bool visible=true,
+					  const QString& frame="EqJ2000", bool withAberration=true);
 
 	//! Convenience function which allows loading of a (square) sky image based on a
 	//! central coordinate, angular size and rotation. Note that the edges will not be aligned with edges at center plus/minus size!
@@ -582,11 +757,12 @@ public slots:
 	//! @param maxBright The maximum brightness setting for the image, Vmag/arcmin^2. Use this to blend the brightest possible pixels with DSO. mag 15 or brighter seems ok.
 	//! @param visible The initial visibility of the image
 	//! @param frame one of EqJ2000|EqDate|EclJ2000|EclDate|Gal(actic)|SuperG(alactic)|AzAlt.
-	//! @note since 2017-03, you can select Frame.
+	//! @param withAberration The image, if frame==EqJ2000, undergoes aberration effect. Default: true.
 	//! @note Images in AzAlt frame are not affected by atmosphere effects like refraction or extinction.
 	void loadSkyImage(const QString& id, const QString& filename,
 					  double lon, double lat, double angSize, double rotation,
-					  double minRes=2.5, double maxBright=14, bool visible=true, const QString& frame="EqJ2000");
+					  double minRes=2.5, double maxBright=14, bool visible=true,
+					  const QString& frame="EqJ2000", bool withAberration=true);
 
 	//! Convenience function which allows loading of a (square) sky image based on a
 	//! central coordinate, angular size and rotation.  Parameters are the same
@@ -594,7 +770,8 @@ public slots:
 	//! lon and lat, except here text expressions of angles may be used.
 	void loadSkyImage(const QString& id, const QString& filename,
 					  const QString& lon, const QString& lat, double angSize, double rotation,
-					  double minRes=2.5, double maxBright=14, bool visible=true, const QString& frame="EqJ2000");
+					  double minRes=2.5, double maxBright=14, bool visible=true,
+					  const QString& frame="EqJ2000", bool withAberration=true);
 
 	//! Remove a SkyImage.
 	//! @param id the ID of the image to remove.
@@ -608,6 +785,9 @@ public slots:
 	//! - x : x coordinate on the screen
 	//! - y : y coordinate on the screen
 	static QVariantMap getScreenXYFromAltAzi(const QString& alt, const QString& azi);
+
+	//! Narrate a text with speech engine. (Requires Qt6.6 or later.)
+	void say(const QString &text);
 
 	//! Load a sound from a file.
 	//! @param filename the name of the file to load.
@@ -710,7 +890,7 @@ public slots:
 	//! Set the alpha value of a video when visible.
 	//! @param id the identifier used when loadVideo() was called
 	//! @param alpha the new alpha value to set.
-	//! @bug With Qt5/V0.13+, @param alpha does not work properly, only @param alpha=0 makes it invisible.
+	//! @bug With Qt5, @param alpha does not work properly, only @param alpha=0 makes it invisible.
 	void setVideoAlpha(const QString& id, float alpha);
 
 	//! Resize the video widget to the specified width, height.
@@ -754,7 +934,7 @@ public slots:
 	static void pauseScript();
 
 	//! Set the amount of selected object information to display
-	//! @param level can be "AllInfo", "ShortInfo", "None"
+	//! @param level can be "AllInfo", "DefaultInfo", "ShortInfo", "None", "Custom"
 	static void setSelectedObjectInfo(const QString& level);
 
 	//! Stop the script
@@ -794,14 +974,6 @@ public slots:
 	//! Set the current application language.
 	//! @param langCode two letter language code, e.g. "en", or "de".
 	static void setAppLanguage(QString langCode);
-
-	//! Get the current sky language.
-	//! @return two letter language code, e.g. "en", or "de" and so on.
-	static QString getSkyLanguage();
-
-	//! Set the current sky language.
-	//! @param langCode two letter language code, e.g. "en", or "de".
-	static void setSkyLanguage(QString langCode);
 
 	//! Translate the string.
 	static QString translate(QString englishText);
@@ -849,6 +1021,10 @@ public slots:
 	//! @param spec "local" or "utc"
 	void waitFor(const QString& dt, const QString& spec="utc");
 
+	//! Pauses script until key is pressed
+	//! enables interactive control of scripts in planetarium presentations.
+	void waitForKeypress(const QString message=q_("Press key to continue..."));
+
 	//! Retrieve value of environment variable @param name.
 	//! On desktop Windows and Qt before 5.10, this call may result in data loss if the original
 	//! string contains Unicode characters not representable in the ANSI encoding.
@@ -866,6 +1042,8 @@ public slots:
 	//! - Linux
 	//! - Windows
 	//! - macOS
+	//! - Haiku
+	//! - Solaris
 	//! - Unknown
 	static QString getPlatformName(void);
 
@@ -873,13 +1051,48 @@ public slots:
 	//! @return The current status of media playback support.
 	static bool isMediaPlaybackSupported(void);
 
+	//! Experimental. Allow setting physical display properties for tonemapping.
+	//! The standard value is 100cd/m^2, appropriate for CRTs. More modern screens often have more.
+	//! Increasing the value makes most of the sky darker, to allow saving the highest tones for the brightest lights (esp. the Sun).
+	//! @note This is experimental and may not be available in later versions.
+	static void setDisplayMaxLuminance(double cdPerSqM);
+	//! Experimental.
+	//! @return configured physical display luminance for tonemapping.
+	//! The standard value is 100cd/m^2, appropriate for CRTs. More modern screens often have more.
+	//! @note This is experimental and may not be available in later versions.
+	static double getDisplayMaxLuminance();
+	//! Experimental. Allow setting physical display adaptation luminance for tonemapping.
+	//! The standard value is 50cd/m^2, appropriate for CRTs in dimly lit office environments.
+	//! TBD true?: Increasing the value makes most of the sky darker, to allow saving the highest tones for the brightest lights (esp. the Sun).
+	//! @note This is experimental and may not be available in later versions.
+	static void setDisplayAdaptationLuminance(double cdPerSqM);
+	//! Experimental.
+	//! @return configured physical display adaptation luminance for tonemapping.
+	//! The standard value is 50cd/m^2, appropriate for CRTs in dimly lit office environments.
+	//! @note This is experimental and may not be available in later versions.
+	static double getDisplayAdaptationLuminance();
+	//! Experimental: Set the display gamma
+	//! @param gamma the gamma. Initial default value is 2.2222 (for a CRT), and
+	//! sRGB LCD (and similar modern) panels try to reproduce that. This method allows overriding for other sky tones.
+	//! Higher gamma makes the sky brighter.
+	//! @note It may be technically an error to deviate from the defaults!
+	//! @note Only the blue-sky (atmosphere) model is influenced, not the foreground (landscape)
+	//! @note This is experimental and may not be available in later versions.
+	static void setDisplayGamma(double gamma);
+	//! Experimental: Get the display gamma. Initial default value is 2.2222 (for a CRT), and
+	//! sRGB LCD (and similar modern) panels try to reproduce that.
+	//! Higher gamma makes the sky brighter.
+	//! @note This is experimental and may not be available in later versions.
+	static double getDisplayGamma();
+
 signals:
 	void requestLoadSkyImage(const QString& id, const QString& filename,
-							 double c1, double c2,
-							 double c3, double c4,
-							 double c5, double c6,
-							 double c7, double c8,
-							 double minRes, double maxBright, bool visible, const StelCore::FrameType frameType);
+							 double lon0, double lat0,
+							 double lon1, double lat1,
+							 double lon2, double lat2,
+							 double lon3, double lat3,
+							 double minRes, double maxBright, bool visible,
+							 const StelCore::FrameType frameType, bool withAberration);
 
 	void requestRemoveSkyImage(const QString& id);
 
@@ -905,6 +1118,11 @@ signals:
 	void requestSetDiskViewport(bool b);
 	void requestExit();
 	void requestSetHomePosition();
+
+private:
+#ifdef ENABLE_SCRIPT_QML
+	QJSEngine *m_engine;
+#endif
 };
 
 #endif // STELMAINSCRIPTAPI_HPP

@@ -19,54 +19,45 @@
 
 #include "ObjectService.hpp"
 
+#include "LandscapeMgr.hpp"
 #include "SearchDialog.hpp"
 #include "StelApp.hpp"
-#include "StelCore.hpp"
-#include "StelObjectMgr.hpp"
-#include "StelTranslator.hpp"
 #include "StelModuleMgr.hpp"
 #include "StelObjectMgr.hpp"
-#include "LandscapeMgr.hpp"
+#include "StelTranslator.hpp"
 
-#include <QEventLoop>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QJsonObject>
-#include <QSettings>
-#include <QMutex>
-#include <QThreadPool>
-#include <QRunnable>
-#include <QWaitCondition>
 
-ObjectService::ObjectService(QObject *parent) : AbstractAPIService(parent)
+ObjectService::ObjectService(QObject *parent) : AbstractAPIService(parent),
+      core(StelApp::getInstance().getCore()),
+      objMgr(&StelApp::getInstance().getStelObjectMgr()),
+      useStartOfWords(StelApp::getInstance().getSettings()->value("search/flag_start_words", false).toBool())
 {
 	//this is run in the main thread
-	core = StelApp::getInstance().getCore();
-	objMgr = &StelApp::getInstance().getStelObjectMgr();
-	useStartOfWords = StelApp::getInstance().getSettings()->value("search/flag_start_words", false).toBool();
 }
 
 QStringList ObjectService::performSearch(const QString &text)
 {
 	//perform substitution greek text --> symbol
-	QString greekText = substituteGreek(text);
+	QString greekText = StelUtils::substituteGreek(text);
 
 	QStringList matches;
 	if(greekText != text)
 	{
-		matches = objMgr->listMatchingObjects(text, 3, useStartOfWords);
-		matches += objMgr->listMatchingObjects(greekText, (8 - matches.size()), useStartOfWords);
+		for(const auto& [name,obj] : objMgr->listMatchingObjects(text, 3, useStartOfWords))
+			matches += name;
+		for(const auto& [name,obj] : objMgr->listMatchingObjects(greekText, (8 - matches.size()), useStartOfWords))
+			matches += name;
 	}
-	else //no greek replaced, saves 1 call
-		matches = objMgr->listMatchingObjects(text, 5, useStartOfWords);
+	else
+	{
+		// no greek replaced, saves 1 call
+		for(const auto& [name,obj] : objMgr->listMatchingObjects(text, 5, useStartOfWords))
+			matches += name;
+	}
 
 	return matches;
-}
-
-QString ObjectService::substituteGreek(const QString &text)
-{
-	//use the searchdialog static method for that
-	return SearchDialog::substituteGreek(text);
 }
 
 void ObjectService::get(const QByteArray& operation, const APIParameters &parameters, APIServiceResponse &response)
@@ -100,8 +91,7 @@ void ObjectService::get(const QByteArray& operation, const APIParameters &parame
 		results.sort(Qt::CaseInsensitive);
 		// objects with short names should be searched first
 		// examples: Moon, Hydra (moon); Jupiter, Ghost of Jupiter
-		stringLengthCompare comparator;
-		std::sort(results.begin(), results.end(), comparator);
+		std::sort(results.begin(), results.end(), [](auto& a, auto& b){ return a.length() < b.length(); });
 
 		//return as json
 		response.writeJSON(QJsonDocument(QJsonArray::fromStringList(results)));
@@ -203,7 +193,9 @@ void ObjectService::get(const QByteArray& operation, const APIParameters &parame
 
 		if(!type.isEmpty())
 		{
-			QStringList list = objMgr->listAllModuleObjects(type,eng);
+			QStringList list;
+			for (const auto& [name,obj] : objMgr->listAllModuleObjects(type,eng))
+				list << name;
 
 			//sort
 			list.sort();

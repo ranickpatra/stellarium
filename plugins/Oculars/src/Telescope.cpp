@@ -22,11 +22,11 @@
 #include <QSettings>
 
 Telescope::Telescope()
-	: m_diameter(0.)
-	, m_focalLength(0.)
-	, m_hFlipped(false)
-	, m_vFlipped(false)
-	, m_equatorial(false)
+	: m_diameter(80.)
+	, m_focalLength(500.)
+	, m_hFlipped(true)
+	, m_vFlipped(true)
+	, m_equatorial(true)
 {
 }
 
@@ -44,33 +44,25 @@ Telescope::~Telescope()
 {
 }
 
-static QMap<int, QString> mapping;
+const QMap<int, QString> Telescope::mapping = {
+	{0, "name"},
+	{1, "diameter"},
+	{2, "focalLength"},
+	{3, "hFlipped"},
+	{4, "vFlipped"},
+	{5, "equatorial"}};
+
 QMap<int, QString> Telescope::propertyMap()
 {
-	if(mapping.isEmpty()) {
-		mapping = QMap<int, QString>();
-		mapping[0] = "name";
-		mapping[1] = "diameter";
-		mapping[2] = "focalLength";
-		mapping[3] = "hFlipped";
-		mapping[4] = "vFlipped";
-		mapping[5] = "equatorial";
-	}
 	return mapping;
 }
 
-/* ********************************************************************* */
-#if 0
-#pragma mark -
-#pragma mark Accessors & Mutators
-#endif
-/* ********************************************************************* */
 const QString Telescope::name() const
 {
 	return m_name;
 }
 
-void Telescope::setName(QString theValue)
+void Telescope::setName(const QString &theValue)
 {
 	m_name = theValue;
 }
@@ -136,34 +128,23 @@ void Telescope::writeToSettings(QSettings * settings, const int index)
 	settings->setValue(prefix + "equatorial", this->isEquatorial());
 }
 
-/* ********************************************************************* */
-#if 0
-#pragma mark -
-#pragma mark Static Methods
-#endif
-/* ********************************************************************* */
-
 Telescope* Telescope::telescopeFromSettings(QSettings* theSettings, int telescopeIndex)
 {
 	Telescope* telescope = new Telescope();
 	QString prefix = "telescope/" + QVariant(telescopeIndex).toString() + "/";
 	
 	telescope->setName(theSettings->value(prefix + "name", "").toString());
-	telescope->setFocalLength(theSettings->value(prefix + "focalLength", "0").toDouble());
-	telescope->setDiameter(theSettings->value(prefix + "diameter", "0").toDouble());
-	telescope->setHFlipped(theSettings->value(prefix + "hFlip").toBool());
-	telescope->setVFlipped(theSettings->value(prefix + "vFlip").toBool());
-	telescope->setEquatorial(theSettings->value(prefix + "equatorial").toBool());
+	telescope->setFocalLength(theSettings->value(prefix + "focalLength", 500.0).toDouble());
+	telescope->setDiameter(theSettings->value(prefix + "diameter", 80.0).toDouble());
+	telescope->setHFlipped(theSettings->value(prefix + "hFlip", true).toBool());
+	telescope->setVFlipped(theSettings->value(prefix + "vFlip", true).toBool());
+	telescope->setEquatorial(theSettings->value(prefix + "equatorial", true).toBool());
 	return telescope;
 }
+
 Telescope* Telescope::telescopeModel()
 {
 	Telescope* model = new Telescope();
 	model->setName("My Telescope");
-	model->setDiameter(80);
-	model->setFocalLength(500);
-	model->setHFlipped(true);
-	model->setVFlipped(true);
-	model->setEquatorial(true);
 	return model;
 }

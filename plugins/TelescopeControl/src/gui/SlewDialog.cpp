@@ -21,34 +21,36 @@
 #include <QDebug>
 
 #include "Dialog.hpp"
+#include "StelFileMgr.hpp"
 #include "AngleSpinBox.hpp"
 #include "StelApp.hpp"
-#include "StelLocaleMgr.hpp"
-#include "StelStyle.hpp"
 #include "VecMath.hpp"
+#include "StelJsonParser.hpp"
+#include "StelUtils.hpp"
+#include "StelCore.hpp"
+#include "StelObjectMgr.hpp"
+#include "StelModuleMgr.hpp"
+
 #include "TelescopeControl.hpp"
 #include "SlewDialog.hpp"
 #include "ui_slewDialog.h"
 #include "TelescopeClient.hpp"
-#include "INDI/TelescopeClientINDI.hpp"
 
-using namespace TelescopeControlGlobals;
-
-
-SlewDialog::SlewDialog()
-	: StelDialog("TelescopeControlSlew")
-	, storedPointsDialog(Q_NULLPTR)
+SlewDialog::SlewDialog(const QString &dialogName, QObject *parent)
+	: StelDialog(dialogName, parent)
+	, storedPointsDialog(nullptr)
 {
 	ui = new Ui_slewDialog();
 	
-    //TODO: Fix this - it's in the same plugin
-    telescopeManager = GETSTELMODULE(TelescopeControl);
+	//TODO: Fix this - it's in the same plugin
+	telescopeManager = GETSTELMODULE(TelescopeControl);
 }
 
 SlewDialog::~SlewDialog()
 {	
 	delete ui;
-	storedPointsDialog = Q_NULLPTR;
+	delete storedPointsDialog;
+	storedPointsDialog = nullptr;
 }
 
 void SlewDialog::retranslate()
@@ -62,39 +64,40 @@ void SlewDialog::createDialogContent()
 	ui->setupUi(dialog);
 	
 	//Inherited connect
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &SlewDialog::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
-	connect(ui->radioButtonHMS, SIGNAL(toggled(bool)), this, SLOT(setFormatHMS(bool)));
-	connect(ui->radioButtonDMS, SIGNAL(toggled(bool)), this, SLOT(setFormatDMS(bool)));
-	connect(ui->radioButtonDecimal, SIGNAL(toggled(bool)), this, SLOT(setFormatDecimal(bool)));
+	connect(ui->radioButtonHMS, &QRadioButton::toggled, this, &SlewDialog::setFormatHMS);
+	connect(ui->radioButtonDMS, &QRadioButton::toggled, this, &SlewDialog::setFormatDMS);
+	connect(ui->radioButtonDecimal, &QRadioButton::toggled, this, &SlewDialog::setFormatDecimal);
 
-	connect(ui->pushButtonSlew, SIGNAL(clicked()), this, SLOT(slew()));
-	connect(ui->pushButtonSync, SIGNAL(clicked()), this, SLOT(sync()));
-	connect(ui->pushButtonConfigure, SIGNAL(clicked()), this, SLOT(showConfiguration()));
+	connect(ui->pushButtonSlew,      &QPushButton::clicked, this, &SlewDialog::slew);
+	connect(ui->pushButtonSync,      &QPushButton::clicked, this, &SlewDialog::sync);
+	connect(ui->pushButtonAbort,     &QPushButton::clicked, this, &SlewDialog::abort);
+	connect(ui->pushButtonConfigure, &QPushButton::clicked, this, &SlewDialog::showConfiguration);
 
-	connect(telescopeManager, SIGNAL(clientConnected(int, QString)), this, SLOT(addTelescope(int, QString)));
-	connect(telescopeManager, SIGNAL(clientDisconnected(int)), this, SLOT(removeTelescope(int)));
+	connect(telescopeManager, &TelescopeControl::clientConnected, this, &SlewDialog::addTelescope);
+	connect(telescopeManager, &TelescopeControl::clientDisconnected, this, &SlewDialog::removeTelescope);
 
-	connect(ui->comboBoxStoredPoints, SIGNAL(currentIndexChanged(int)), this, SLOT(getStoredPointInfo()));
-	connect(ui->toolButtonStoredPoints, SIGNAL(clicked()), this, SLOT(editStoredPoints()));
+	connect(ui->comboBoxStoredPoints, qOverload<int>(&QComboBox::currentIndexChanged), this, &SlewDialog::getStoredPointInfo);
+	connect(ui->toolButtonStoredPoints, &QToolButton::clicked, this, &SlewDialog::editStoredPoints);
 
-	connect(ui->pushButtonCurrent, SIGNAL(clicked()), this, SLOT(getCurrentObjectInfo()));
-	connect(ui->pushButtonCenter, SIGNAL(clicked()), this, SLOT(getCenterInfo()));
+	connect(ui->pushButtonCurrent, &QPushButton::clicked, this, &SlewDialog::getCurrentObjectInfo);
+	connect(ui->pushButtonCenter,  &QPushButton::clicked, this, &SlewDialog::getCenterInfo);
 
 	QObject::connect(ui->comboBoxTelescope, static_cast<void(QComboBox::*)(int)>(&QComboBox::currentIndexChanged), this, &SlewDialog::onCurrentTelescopeChanged);
 
 	//Coordinates are in HMS by default:
 	ui->radioButtonHMS->setChecked(true);
 
-	storedPointsDialog = new StoredPointsDialog;
+	storedPointsDialog = new StoredPointsDialog();
 	// add point and remove
-	connect(storedPointsDialog, SIGNAL(addStoredPoint(int, QString, double, double)), this, SLOT(addStoredPointToComboBox(int, QString, double, double)));
+	connect(storedPointsDialog, &StoredPointsDialog::addStoredPoint, this, &SlewDialog::addStoredPointToComboBox);
 	// remove point
-	connect(storedPointsDialog, SIGNAL(removeStoredPoint(int)), this, SLOT(removeStoredPointFromComboBox(int)));
+	connect(storedPointsDialog, &StoredPointsDialog::removeStoredPoint, this, &SlewDialog::removeStoredPointFromComboBox);
 	// clean points
-	connect(storedPointsDialog, SIGNAL(clearStoredPoints()), this, SLOT(clearStoredPointsFromComboBox()));
+	connect(storedPointsDialog, &StoredPointsDialog::clearStoredPoints, this, &SlewDialog::clearStoredPointsFromComboBox);
 
 
 	updateTelescopeList();
@@ -146,11 +149,13 @@ void SlewDialog::updateTelescopeList()
 	ui->comboBoxTelescope->clear();
 
 	QHash<int, QString> connectedSlotsByNumber = telescopeManager->getConnectedClientsNames();
-	for (const auto slot : connectedSlotsByNumber.keys())
+	QHash<int, QString> ::const_iterator it=connectedSlotsByNumber.constBegin();
+	while (it!=connectedSlotsByNumber.constEnd())
 	{
-		QString telescopeName = connectedSlotsByNumber.value(slot);
-		connectedSlotsByName.insert(telescopeName, slot);
+		QString telescopeName = connectedSlotsByNumber.value(it.key());
+		connectedSlotsByName.insert(telescopeName, it.key());
 		ui->comboBoxTelescope->addItem(telescopeName);
+		++it;
 	}
 	
 	updateTelescopeControls();
@@ -220,7 +225,7 @@ void SlewDialog::slew()
 	if (!telescope)
 		return;
 
-	StelObjectP selectObject = Q_NULLPTR;
+	StelObjectP selectObject = nullptr;
 	telescope->telescopeGoto(targetPosition, selectObject);
 }
 
@@ -236,8 +241,17 @@ void SlewDialog::sync()
 	if (!telescope)
 		return;
 
-	StelObjectP selectObject = Q_NULLPTR;
+	StelObjectP selectObject = nullptr;
 	telescope->telescopeSync(targetPosition, selectObject);
+}
+
+void SlewDialog::abort()
+{
+	auto telescope = currentTelescope();
+	if (!telescope)
+		return;
+
+	telescope->telescopeAbortSlew();
 }
 
 void SlewDialog::getCurrentObjectInfo()
@@ -247,7 +261,7 @@ void SlewDialog::getCurrentObjectInfo()
 		double dec_j2000 = 0;
 		double ra_j2000 = 0;
 		StelUtils::rectToSphe(&ra_j2000,&dec_j2000,selected[0]->getJ2000EquatorialPos(StelApp::getInstance().getCore()));
-		ui->spinBoxRA->setRadians(ra_j2000);
+		ui->spinBoxRA->setRadians(StelUtils::fmodpos(ra_j2000, 2*M_PI));
 		ui->spinBoxDec->setRadians(dec_j2000);
 	}
 }
@@ -262,7 +276,7 @@ void SlewDialog::getCenterInfo()
 	double dec_j2000 = 0;
 	double ra_j2000 = 0;
 	StelUtils::rectToSphe(&ra_j2000,&dec_j2000,core->equinoxEquToJ2000(centerPosition, StelCore::RefractionOff));
-	ui->spinBoxRA->setRadians(ra_j2000);
+	ui->spinBoxRA->setRadians(StelUtils::fmodpos(ra_j2000, 2*M_PI));
 	ui->spinBoxDec->setRadians(dec_j2000);
 }
 
@@ -342,21 +356,23 @@ void SlewDialog::onCurrentTelescopeChanged()
 {
 	// remove previous controlWidget
 	QLayoutItem* child;
-	while ((child = ui->controlWidgetLayout->takeAt(0)) != Q_NULLPTR)
+	while ((child = ui->controlWidgetLayout->takeAt(0)) != nullptr)
 	{
 		delete child->widget();
 		delete child;
 	}
 
-    auto telescope = currentTelescope();
-    if (!telescope)
-        return;
+	auto telescope = currentTelescope();
+	if (!telescope)
+		return;
 
-    auto controlWidget = telescope->createControlWidget(telescope);
-    if (!controlWidget)
-        return;
+	ui->pushButtonSync->setEnabled(telescope->isTelescopeSyncSupported());
+	ui->pushButtonAbort->setEnabled(telescope->isAbortSlewSupported());
+	auto controlWidget = telescope->createControlWidget(telescope);
+	if (!controlWidget)
+		return;
 
-    ui->controlWidgetLayout->addWidget(controlWidget);
+	ui->controlWidgetLayout->addWidget(controlWidget);
 }
 
 void SlewDialog::savePointsToFile()
@@ -365,13 +381,13 @@ void SlewDialog::savePointsToFile()
 	QString pointsJsonPath = StelFileMgr::findFile("modules/TelescopeControl", static_cast<StelFileMgr::Flags>(StelFileMgr::Directory|StelFileMgr::Writable)) + "/points.json";
 	if (pointsJsonPath.isEmpty())
 	{
-		qWarning() << "SlewDialog: Error saving points";
+		qCWarning(Telescopes) << "SlewDialog: Error saving points";
 		return;
 	}
 	QFile pointsJsonFile(pointsJsonPath);
 	if(!pointsJsonFile.open(QFile::WriteOnly|QFile::Text))
 	{
-		qWarning() << "SlewDialog: Points can not be saved. A file can not be open for writing:"
+		qCWarning(Telescopes) << "SlewDialog: Points can not be saved. A file can not be open for writing:"
 				   << QDir::toNativeSeparators(pointsJsonPath);
 		return;
 	}
@@ -382,11 +398,11 @@ void SlewDialog::savePointsToFile()
 	{
 		QVariant var = ui->comboBoxStoredPoints->itemData(i);
 		storedPoint sp = var.value<storedPoint>();
-		QVariantMap point;
-		point.insert("number",        sp.number);
-		point.insert("name",          sp.name);
-		point.insert("radiansRA",     sp.radiansRA);
-		point.insert("radiansDec",    sp.radiansDec);
+		QVariantMap point = {
+			{"number",        sp.number},
+			{"name",          sp.name},
+			{"radiansRA",     sp.radiansRA},
+			{"radiansDec",    sp.radiansDec}};
 
 		storedPointsDescriptions.insert(QString::number(sp.number),point);
 	}
@@ -405,12 +421,12 @@ void SlewDialog::loadPointsFromFile()
 
 	if (pointsJsonPath.isEmpty())
 	{
-		qWarning() << "SlewDialog: Error loading points";
+		qCWarning(Telescopes) << "SlewDialog: Error loading points";
 		return;
 	}
-	if(!QFileInfo(pointsJsonPath).exists())
+	if(!QFileInfo::exists(pointsJsonPath))
 	{
-		qWarning() << "SlewDialog::loadPointsFromFile(): No points loaded. File is missing:"
+		qCWarning(Telescopes) << "SlewDialog::loadPointsFromFile(): No points loaded. File is missing:"
 				   << QDir::toNativeSeparators(pointsJsonPath);
 		storedPointsDescriptions = result;
 		return;
@@ -422,7 +438,7 @@ void SlewDialog::loadPointsFromFile()
 
 	if(!pointsJsonFile.open(QFile::ReadOnly))
 	{
-		qWarning() << "SlewDialog: No points loaded. Can't open for reading"
+		qCWarning(Telescopes) << "SlewDialog: No points loaded. Can't open for reading"
 				   << QDir::toNativeSeparators(pointsJsonPath);
 		storedPointsDescriptions = result;
 		return;
@@ -446,15 +462,15 @@ void SlewDialog::loadPointsFromFile()
 		QString newName = pointsJsonPath + ".backup." + QDateTime::currentDateTime().toString("yyyy-MM-dd-hh-mm-ss");
 		if(pointsJsonFile.rename(newName))
 		{
-			qWarning() << "SlewDialog: The existing version of points.json is obsolete. Backing it up as "
+			qCWarning(Telescopes) << "SlewDialog: The existing version of points.json is obsolete. Backing it up as "
 					   << QDir::toNativeSeparators(newName);
-			qWarning() << "SlewDialog: A blank points.json file will have to be created.";
+			qCWarning(Telescopes) << "SlewDialog: A blank points.json file will have to be created.";
 			storedPointsDescriptions = result;
 			return;
 		}
 		else
 		{
-			qWarning() << "SlewDialog: The existing version of points.json is obsolete. Unable to rename.";
+			qCWarning(Telescopes) << "SlewDialog: The existing version of points.json is obsolete. Unable to rename.";
 			storedPointsDescriptions = result;
 			return;
 		}

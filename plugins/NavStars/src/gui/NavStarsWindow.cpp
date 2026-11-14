@@ -27,6 +27,8 @@
 #include "StelModule.hpp"
 #include "StelModuleMgr.hpp"
 #include "StelGui.hpp"
+#include "SolarSystem.hpp"
+#include "StelUtils.hpp"
 
 #include <QComboBox>
 
@@ -48,6 +50,7 @@ void NavStarsWindow::retranslate()
 		setAboutHtml();
 		populateNavigationalStarsSets();
 		populateNavigationalStarsSetDescription();
+		populateToday();
 	}
 }
 
@@ -56,9 +59,9 @@ void NavStarsWindow::createDialogContent()
 	ns = GETSTELMODULE(NavStars);
 	ui->setupUi(dialog);
 
-	connect(&StelApp::getInstance(), SIGNAL(languageChanged()), this, SLOT(retranslate()));
-	connect(ui->closeStelWindow, SIGNAL(clicked()), this, SLOT(close()));
-	connect(ui->TitleBar, SIGNAL(movedTo(QPoint)), this, SLOT(handleMovedTo(QPoint)));
+	connect(&StelApp::getInstance(), &StelApp::languageChanged, this, &NavStarsWindow::retranslate);
+	connect(ui->titleBar, &TitleBar::closeClicked, this, &StelDialog::close);
+	connect(ui->titleBar, &TitleBar::movedTo, this, &StelDialog::handleMovedTo);
 
 	populateNavigationalStarsSets();
 	populateNavigationalStarsSetDescription();
@@ -70,7 +73,7 @@ void NavStarsWindow::createDialogContent()
 		idx = ui->nsSetComboBox->findData(QVariant("AngloAmerican"), Qt::UserRole, Qt::MatchCaseSensitive);
 	}
 	ui->nsSetComboBox->setCurrentIndex(idx);
-	connect(ui->nsSetComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(setNavigationalStarsSet(int)));
+	connect(ui->nsSetComboBox, qOverload<int>(&QComboBox::currentIndexChanged), this, &NavStarsWindow::setNavigationalStarsSet);
 
 	connectBoolProperty(ui->displayAtStartupCheckBox,	"NavStars.displayAtStartup");
 	connectBoolProperty(ui->highlightWhenVisible,		"NavStars.highlightWhenVisible");
@@ -80,8 +83,14 @@ void NavStarsWindow::createDialogContent()
 	connectBoolProperty(ui->showExtraDecimals,		"NavStars.showExtraDecimals");
 	connectBoolProperty(ui->useUTCCheckBox,			"NavStars.useUTCTime");
 
-	connect(ui->pushButtonSave, SIGNAL(clicked()), this, SLOT(saveSettings()));	
-	connect(ui->pushButtonReset, SIGNAL(clicked()), this, SLOT(resetSettings()));
+	connect(ui->pushButtonSave, &QPushButton::clicked, this, &NavStarsWindow::saveSettings);
+	connect(ui->pushButtonReset, &QPushButton::clicked, this, &NavStarsWindow::resetSettings);
+
+	populateToday();
+	connect(ui->refreshData, &QPushButton::clicked, this, &NavStarsWindow::populateToday);
+	StelCore* core = StelApp::getInstance().getCore();
+	connect(core, &StelCore::dateChanged, this, &NavStarsWindow::populateToday);
+	connect(core, &StelCore::locationChanged, this, &NavStarsWindow::populateToday);
 
 	// About tab
 	setAboutHtml();
@@ -106,6 +115,119 @@ void NavStarsWindow::resetSettings()
 		qDebug() << "[NavStars] restore defaults is canceled...";
 }
 
+void NavStarsWindow::populateToday()
+{
+	StelCore* core = StelApp::getInstance().getCore();
+	const double utcShift = core->getUTCOffset(core->getJD()) / 24.; // Fix DST shift...
+	StelLocaleMgr* localeMgr = &StelApp::getInstance().getLocaleMgr();
+	PlanetP sun = GETSTELMODULE(SolarSystem)->getSun();
+	double duration;
+	QString moonrise, moonset, dayBegin, dayEnd, civilTwilightBegin, civilTwilightEnd, nauticalTwilightBegin,
+		nauticalTwilightEnd, astronomicalTwilightBegin, astronomicalTwilightEnd, dayDuration,
+		civilTwilightDuration, nauticalTwilightDuration, astronomicalTwilightDuration, dash = QChar(0x2014);
+
+	// Moon
+	Vec4d moon = GETSTELMODULE(SolarSystem)->getMoon()->getRTSTime(core, 0.);
+	if (moon[3]==30 || moon[3]<0 || moon[3]>50) // no moonrise on current date
+		moonrise = dash;
+	else
+		moonrise = StelUtils::hoursToHmsStr(StelUtils::getHoursFromJulianDay(moon[0]+utcShift), true);
+
+	if (moon[3]==40 || moon[3]<0 || moon[3]>50) // no moonset on current date
+		moonset = dash;
+	else
+		moonset = StelUtils::hoursToHmsStr(StelUtils::getHoursFromJulianDay(moon[2]+utcShift), true);
+
+	// day
+	Vec4d day = sun->getRTSTime(core, 0.);
+	if (day[3]==0.)
+	{
+		dayBegin = StelUtils::hoursToHmsStr(StelUtils::getHoursFromJulianDay(day[0]+utcShift), true);
+		dayEnd = StelUtils::hoursToHmsStr(StelUtils::getHoursFromJulianDay(day[2]+utcShift), true);
+		duration = qAbs(day[2]-day[0])*24.;
+	}
+	else
+	{
+		dayBegin = dayEnd = dash;
+		duration = (day[3]>99.) ? 24. : 0.;
+	}
+	dayDuration = StelUtils::hoursToHmsStr(duration, true);
+
+	// civil twilight
+	Vec4d civilTwilight = sun->getRTSTime(core, -6.);
+	if (civilTwilight[3]==0.)
+	{
+		civilTwilightBegin = StelUtils::hoursToHmsStr(StelUtils::getHoursFromJulianDay(civilTwilight[0]+utcShift), true);
+		civilTwilightEnd = StelUtils::hoursToHmsStr(StelUtils::getHoursFromJulianDay(civilTwilight[2]+utcShift), true);
+		duration = qAbs(civilTwilight[2]-civilTwilight[0])*24.;
+	}
+	else
+	{
+		civilTwilightBegin = civilTwilightEnd = dash;
+		duration = (civilTwilight[3]>99.) ? 24. : 0.;
+	}
+	civilTwilightDuration = StelUtils::hoursToHmsStr(duration, true);
+
+	// nautical twilight
+	Vec4d nauticalTwilight = sun->getRTSTime(core, -12.);
+	if (nauticalTwilight[3]==0.)
+	{
+		nauticalTwilightBegin = StelUtils::hoursToHmsStr(StelUtils::getHoursFromJulianDay(nauticalTwilight[0]+utcShift), true);
+		nauticalTwilightEnd = StelUtils::hoursToHmsStr(StelUtils::getHoursFromJulianDay(nauticalTwilight[2]+utcShift), true);
+		duration = qAbs(nauticalTwilight[2]-nauticalTwilight[0])*24.;
+	}
+	else
+	{
+		nauticalTwilightBegin = nauticalTwilightEnd = dash;
+		duration = (nauticalTwilight[3]>99.) ? 24. : 0.;
+	}
+	nauticalTwilightDuration = StelUtils::hoursToHmsStr(duration, true);
+
+	// astronomical twilight
+	Vec4d astronomicalTwilight = sun->getRTSTime(core, -18.);
+	if (astronomicalTwilight[3]==0.)
+	{
+		astronomicalTwilightBegin = StelUtils::hoursToHmsStr(StelUtils::getHoursFromJulianDay(astronomicalTwilight[0]+utcShift), true);
+		astronomicalTwilightEnd = StelUtils::hoursToHmsStr(StelUtils::getHoursFromJulianDay(astronomicalTwilight[2]+utcShift), true);
+		duration = qAbs(astronomicalTwilight[2]-astronomicalTwilight[0])*24.;
+	}
+	else
+	{
+		astronomicalTwilightBegin = astronomicalTwilightEnd = dash;
+		duration = (astronomicalTwilight[3]>99.) ? 24. : 0.;
+	}
+	astronomicalTwilightDuration = StelUtils::hoursToHmsStr(duration, true);
+
+	// fill the data
+	const double JD=core->getJD();
+	ui->labelToday->setText(localeMgr->getPrintableDateLocal(JD, core->getUTCOffset(JD)));
+	ui->labelDayBegin->setText(dayBegin);
+	ui->labelDayEnd->setText(dayEnd);
+	ui->labelDayDuration->setText(dayDuration);
+	ui->labelCivilTwilightBegin->setText(civilTwilightBegin);
+	ui->labelCivilTwilightEnd->setText(civilTwilightEnd);
+	ui->labelCivilTwilightDuration->setText(civilTwilightDuration);
+	ui->labelNauticalTwilightBegin->setText(nauticalTwilightBegin);
+	ui->labelNauticalTwilightEnd->setText(nauticalTwilightEnd);
+	ui->labelNauticalTwilightDuration->setText(nauticalTwilightDuration);
+	ui->labelAstronomicalTwilightBegin->setText(astronomicalTwilightBegin);
+	ui->labelAstronomicalTwilightEnd->setText(astronomicalTwilightEnd);
+	ui->labelAstronomicalTwilightDuration->setText(astronomicalTwilightDuration);
+	ui->labelMoonRise->setText(moonrise);
+	ui->labelMoonSet->setText(moonset);
+
+	// tooltips
+	// TRANSLATORS: full phrase is "XX° below the horizon"
+	QString belowHorizon = q_("below the horizon");
+	ui->labelCivilTwilight->setToolTip(QString("6° %1").arg(belowHorizon));
+	ui->labelNauticalTwilight->setToolTip(QString("12° %1").arg(belowHorizon));
+	ui->labelAstronomicalTwilight->setToolTip(QString("18° %1").arg(belowHorizon));
+	QString twilights = q_("The sum of the daytime duration and duration of morning and evening twilights");
+	ui->labelCivilTwilightDuration->setToolTip(twilights);
+	ui->labelNauticalTwilightDuration->setToolTip(twilights);
+	ui->labelAstronomicalTwilightDuration->setToolTip(twilights);
+}
+
 void NavStarsWindow::populateNavigationalStarsSets()
 {
 	Q_ASSERT(ui->nsSetComboBox);
@@ -122,10 +244,33 @@ void NavStarsWindow::populateNavigationalStarsSets()
 	nsSets->addItem(q_("Anglo-American"), "AngloAmerican");
 	// TRANSLATORS: Part of full phrase: French set of navigational stars
 	nsSets->addItem(q_("French"), "French");
+	// TRANSLATORS: Part of full phrase: British (XVIII century) set of navigational stars
+	nsSets->addItem(q_("British (XVIII century)"), "British");
+	// TRANSLATORS: Part of full phrase: British (XIX century) set of navigational stars
+	nsSets->addItem(q_("British (XIX century)"), "Wrinkles");
 	// TRANSLATORS: Part of full phrase: Russian set of navigational stars
 	nsSets->addItem(q_("Russian"), "Russian");
+	// TRANSLATORS: Part of full phrase: Soviet aviation set of navigational stars
+	nsSets->addItem(q_("Soviet aviation"), "USSRAvia");	
 	// TRANSLATORS: Part of full phrase: German set of navigational stars
 	nsSets->addItem(q_("German"), "German");
+
+	// TRANSLATORS: Part of full phrase: Voskhod and Soyuz manned space programs set of navigational stars
+	nsSets->addItem(q_("Voskhod and Soyuz manned space programs"), "USSRSpace");
+	// TRANSLATORS: Part of full phrase: Apollo space program set of navigational stars
+	nsSets->addItem(q_("Apollo space program"), "Apollo");
+	
+	// Telescope alignment stars
+	nsSets->addItem("Gemini APS", "GeminiAPS");
+	nsSets->addItem("Meade LX200", "MeadeLX200");
+	nsSets->addItem("Meade ETX", "MeadeETX");
+	nsSets->addItem("Meade Autostar #494", "MeadeAS494");
+	nsSets->addItem("Meade Autostar #497", "MeadeAS497");
+	nsSets->addItem("Celestron NexStar", "CelestronNS");
+	nsSets->addItem("Skywatcher SynScan", "SkywatcherSS");
+	nsSets->addItem("Vixen Starbook", "VixenSB");
+	nsSets->addItem("Argo Navis", "ArgoNavis");
+	nsSets->addItem("Sky Commander DSC", "SkyCommander");
 
 	//Restore the selection
 	index = nsSets->findData(selectedNsSetId, Qt::UserRole, Qt::MatchCaseSensitive);
@@ -147,14 +292,11 @@ void NavStarsWindow::populateNavigationalStarsSetDescription(void)
 
 void NavStarsWindow::setAboutHtml(void)
 {
-	// Regexp to replace {text} with an HTML link.
-	QRegExp a_rx = QRegExp("[{]([^{]*)[}]");
-
 	QString html = "<html><head></head><body>";
-	html += "<h2>" + q_("Navigational Stars Plug-in") + "</h2><table width=\"90%\">";
+	html += "<h2>" + q_("Navigational Stars Plug-in") + "</h2><table class='layout' width=\"90%\">";
 	html += "<tr width=\"30%\"><td><strong>" + q_("Version") + ":</strong></td><td>" + NAVSTARS_PLUGIN_VERSION + "</td></tr>";
 	html += "<tr><td><strong>" + q_("License") + ":</strong></td><td>" + NAVSTARS_PLUGIN_LICENSE + "</td></tr>";
-	html += "<tr><td rowspan='2'><strong>" + q_("Authors") + ":</strong></td><td>Alexander Wolf &lt;alex.v.wolf@gmail.com&gt;</td></tr>";
+	html += "<tr><td rowspan='2'><strong>" + q_("Authors") + ":</strong></td><td>Alexander Wolf</td></tr>";
 	html += "<tr><td>Andy Kirkham &lt;kirkham.andy@gmail.com&gt;</td></tr>";
 	html += "</table>";
 

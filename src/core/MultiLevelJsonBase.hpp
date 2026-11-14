@@ -50,24 +50,28 @@ public:
 	void initFromQVariantMap(const QVariantMap& map);
 
 	//! Destructor.
-	~MultiLevelJsonBase();
+	~MultiLevelJsonBase() override;
 
 	//! Return the short name for this image to be used in the loading bar.
-	QString getShortName() const {return shortName;}
+	//! Note: ShortName should be used in the same form by NebulaTexturesDialog::get_aTile (NebulaTextures Plugin).
+	QString getShortName() const override {return shortName;}
 
-	//! Return true if an error occured while loading the data.
+	//! Return true if an error occurred while loading the data.
 	bool hasErrorOccured() const {return errorOccured;}
 
 	//! Get the depth level in the tree.
 	int getLevel() const {return parent()==Q_NULLPTR ? 0 : (qobject_cast<MultiLevelJsonBase*>(parent()))->getLevel()+1;}
 
-	//! Convert the image informations to a map following the JSON structure.
+	//! Convert the image information to a map following the JSON structure.
 	//! It can be saved as JSON using the StelJsonParser methods.
 	QVariantMap toQVariantMap() const;
 
-	//! Schedule a deletion for all the childs.
-	//! It will practically occur after the delay passed as argument to deleteUnusedTiles() has expired.
+	//! Schedule a deletion for all the children.
+	//! It will practically occur after the deletionDelay has expired.
 	void scheduleChildsDeletion();
+
+	//! Return the list of all the created subtiles for this tile
+	QList<MultiLevelJsonBase*> getSubTiles(){return subTiles;}
 
 private slots:
 	//! Called when the download for the JSON file terminated.
@@ -90,12 +94,12 @@ protected:
 	QString baseUrl;
 
 	//! The relative URL passed to the constructor
-	QString contructorUrl;
+	QString constructorUrl;
 
 	//! The list of all the created subtiles for this tile
 	QList<MultiLevelJsonBase*> subTiles;
 
-	//! Set to true if an error occured with this tile and it should not be displayed
+	//! Set to true if an error occurred with this tile and it should not be displayed
 	bool errorOccured;
 
 	void updatePercent(int tot, int numToBeLoaded);
@@ -120,7 +124,7 @@ private:
 	class QNetworkReply* httpReply;
 
 	// The delay after which a scheduled deletion will occur
-	float deletionDelay;
+	double deletionDelay;
 
 	class JsonLoadThread* loadThread;
 

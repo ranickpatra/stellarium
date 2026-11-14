@@ -22,14 +22,23 @@
 #include <QObject>
 #include <QSet>
 #include <QMetaProperty>
+#include "StelApp.hpp"
+#include <QLoggingCategory>
+
+Q_DECLARE_LOGGING_CATEGORY(Property)
 
 class StelProperty;
 
 //! Abstract base class for a StelProperty proxy implementation, which allow reacting to the
 //! StelProperty::changed event using a specific type instead of reacting to the QVariant version.
 //! This is required for some connections such as in the UI.
-//! The intented use is to subclass this class and implement the onPropertyChanged() slot,
+//! The intended use is to subclass this class and implement the onPropertyChanged() slot,
 //! re-emitting the "changed" event with a type-converted value.
+//!
+//! @note You can finetune the amount of Property-related messages in the logfile by configuring the logging category stel.Properties.
+//! For this, e.g. set environment variable QT_LOGGING_RULES="*.debug=false;stel.Properties.debug=true;".
+//! By default, only Info and more severe messages are displayed.
+
 class StelPropertyProxy : public QObject
 {
 	Q_OBJECT
@@ -53,7 +62,7 @@ class StelPropertyIntProxy : public StelPropertyProxy
 public:
 	StelPropertyIntProxy(StelProperty* prop,QObject* parent);
 protected slots:
-	void onPropertyChanged(const QVariant &value) Q_DECL_OVERRIDE;
+	void onPropertyChanged(const QVariant &value) override;
 signals:
 	//! Emitted when the property value changes
 	void propertyChanged(int value);
@@ -66,7 +75,7 @@ class StelPropertyBoolProxy : public StelPropertyProxy
 public:
 	StelPropertyBoolProxy(StelProperty* prop,QObject* parent);
 protected slots:
-	void onPropertyChanged(const QVariant &value) Q_DECL_OVERRIDE;
+	void onPropertyChanged(const QVariant &value) override;
 signals:
 	//! Emitted when the property value changes
 	void propertyChanged(bool value);
@@ -79,7 +88,7 @@ class StelPropertyDoubleProxy : public StelPropertyProxy
 public:
 	StelPropertyDoubleProxy(StelProperty* prop,QObject* parent);
 protected slots:
-	void onPropertyChanged(const QVariant &value) Q_DECL_OVERRIDE;
+	void onPropertyChanged(const QVariant &value) override;
 signals:
 	//! Emitted when the property value changes
 	void propertyChanged(double value);
@@ -92,7 +101,7 @@ class StelPropertyStringProxy : public StelPropertyProxy
 public:
 	StelPropertyStringProxy(StelProperty* prop,QObject* parent);
 protected slots:
-	void onPropertyChanged(const QVariant &value) Q_DECL_OVERRIDE;
+	void onPropertyChanged(const QVariant &value) override;
 signals:
 	//! Emitted when the property value changes
 	void propertyChanged(QString value);
@@ -160,7 +169,7 @@ signals:
 //!			setObjectName("MyCustomModule");
 //!		}
 //!		...
-//!		void init() Q_DECL_OVERRIDE
+//!		void init() override
 //!		{
 //!			...
 //!			// to manually register the property as a StelProperty, this could be used,
@@ -194,6 +203,8 @@ signals:
 //!
 //!	//alternatively, use this to skip having to get the StelProperty instance:
 //!	//StelApp::getInstance().getStelPropertyManager()->setStelPropertyValue("MyCustomModule.awesomeProperty", 123);
+//!     // or even, much shorter, assuming awesomeProperty is an int,
+//!     // GETSTELPROPERTYVALUE("MyCustomModule.awesomeProperty").toInt();
 //!
 //!	//to see the effect
 //!	MyCustomModule *module = GETSTELMODULE(MyCustomModule);
@@ -214,6 +225,11 @@ signals:
 //! @note Good candidates for a StelProperty are properties that do not change too often. This includes most settings
 //! configurable through the GUI. Bad examples are properties which potentially change very often (e.g. each frame), such as the
 //! current view vector, field of view etc. They may cause considerable overhead if used, and therefore should be avoided.
+//!
+//! @note You can finetune the amount of Property-related messages in the logfile by configuring the logging category stel.Properties.
+//! For this, e.g. set environment variable QT_LOGGING_RULES="*.debug=false;stel.Properties.debug=true;".
+//! By default, only Info and more severe messages are displayed.
+//!
 //! @sa StelPropertyMgr, StelDialog, StelAction
 class StelProperty : public QObject
 {
@@ -320,7 +336,10 @@ public:
 	//! @returns \c true when the value of the StelProperty with the ID \p id
 	//! has been successfully changed, and \c false if the value change failed
 	//! or when no property with the given ID is found.
-	bool setStelPropertyValue(const QString& id, const QVariant &value) const;
+	//! If not found, a warning is written to logfile unless noWarning is true.
+	//! This may be useful to suppress warnings about plugin module properties
+	//! when these are not loaded, but should else be left true.
+	bool setStelPropertyValue(const QString& id, const QVariant &value, const bool noWarning=false) const;
 	//! Returns the QMetaProperty information for the given \p id.
 	QMetaProperty getMetaProperty(const QString& id) const;
 signals:
@@ -336,5 +355,7 @@ private:
 	QMap<QString,QObject*> registeredObjects;
 	StelPropertyMap propMap;
 };
+
+#define GETSTELPROPERTYVALUE(pName) StelApp::getInstance().getStelPropertyManager()->getStelPropertyValue(pName, false)
 
 #endif

@@ -22,11 +22,12 @@
 
 #include "VecMath.hpp"
 #include "StelModule.hpp"
+#include "StelProjectorType.hpp"
 
 class SpecialSkyMarker;
 
 //! @class SpecialMarkersMgr
-//! The SpecialMarkersMgr controls the drawing of the special markers, such a rectangular FOV marker
+//! The SpecialMarkersMgr controls the drawing of the special markers, such a rectangular and circular FOV marker and the compass marks
 class SpecialMarkersMgr : public StelModule
 {
 	Q_OBJECT
@@ -60,27 +61,27 @@ class SpecialMarkersMgr : public StelModule
 
 public:
 	SpecialMarkersMgr();
-	virtual ~SpecialMarkersMgr();
+	~SpecialMarkersMgr() override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in the StelModule class
 	//! Initialize the SpecialMarkersMgr. This process checks the values in the
 	//! application settings, and according to the settings there
 	//! sets the visibility of type of the special markers.
-	virtual void init();
+	void init() override;
 
 	//! Get the module ID, returns "SpecialMarkersMgr".
 	virtual QString getModuleID() const {return "SpecialMarkersMgr";}
 
 	//! Draw the special markers.
-	virtual void draw(StelCore* core);
+	void draw(StelCore* core) override;
 
 	//! Update time-dependent features.
 	//! Used to control fading when turning on and off the special markers.
-	virtual void update(double deltaTime);
+	void update(double deltaTime) override;
 
 	//! Used to determine the order in which the various modules are drawn.
-	virtual double getCallOrder(StelModuleActionName actionName) const;
+	double getCallOrder(StelModuleActionName actionName) const override;
 
 	///////////////////////////////////////////////////////////////////////////////////////
 	// Setter and getters
@@ -94,8 +95,9 @@ public slots:
 	//! Set the color of the FOV center marker.
 	//! @param newColor The color of FOV center marker.
 	//! @code
-	//! // example of usage in scripts
-	//! SpecialMarkersMgr.setColorFOVCenterMarker(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! SpecialMarkersMgr.setColorFOVCenterMarker(c.toVec3f());
 	//! @endcode
 	void setColorFOVCenterMarker(const Vec3f& newColor);
 
@@ -112,8 +114,9 @@ public slots:
 	//! Set the color of the circular FOV marker.
 	//! @param newColor The color of circular FOV marker.
 	//! @code
-	//! // example of usage in scripts
-	//! SpecialMarkersMgr.setColorFOVCircularMarker(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! SpecialMarkersMgr.setColorFOVCircularMarker(c.toVec3f());
 	//! @endcode
 	void setColorFOVCircularMarker(const Vec3f& newColor);
 
@@ -138,8 +141,9 @@ public slots:
 	//! Set the color of the rectangular FOV marker.
 	//! @param newColor The color of rectangular FOV marker.
 	//! @code
-	//! // example of usage in scripts
-	//! SpecialMarkersMgr.setColorFOVRectangularMarker(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! SpecialMarkersMgr.setColorFOVRectangularMarker(c.toVec3f());
 	//! @endcode
 	void setColorFOVRectangularMarker(const Vec3f& newColor);
 
@@ -152,24 +156,25 @@ public slots:
 	//! Set the color of the compass marks.
 	//! @param newColor The color of compass marks.
 	//! @code
-	//! // example of usage in scripts
-	//! SpecialMarkersMgr.setColorCompassMarks(Vec3f(1.0,0.0,0.0));
+	//! // example of usage in scripts (Qt6-based Stellarium)
+	//! var c = new Color(1.0, 0.0, 0.0);
+	//! SpecialMarkersMgr.setColorCompassMarks(c.toVec3f());
 	//! @endcode
 	void setColorCompassMarks(const Vec3f& newColor);
 
 signals:
-	void fovCenterMarkerDisplayedChanged(const bool displayed) const;
-	void fovCenterMarkerColorChanged(const Vec3f & newColor) const;
-	void fovCircularMarkerDisplayedChanged(const bool displayed) const;
-	void fovCircularMarkerSizeChanged(const double size) const;
-	void fovCircularMarkerColorChanged(const Vec3f & newColor) const;
-	void fovRectangularMarkerDisplayedChanged(const bool displayed) const;
-	void fovRectangularMarkerWidthChanged(const double size) const;
-	void fovRectangularMarkerHeightChanged(const double size) const;
-	void fovRectangularMarkerRotationAngleChanged(const double size) const;
-	void fovRectangularMarkerColorChanged(const Vec3f & newColor) const;
-	void compassMarksDisplayedChanged(const bool displayed) const;
-	void compassMarksColorChanged(const Vec3f & newColor) const;
+	void fovCenterMarkerDisplayedChanged(const bool displayed);
+	void fovCenterMarkerColorChanged(const Vec3f & newColor);
+	void fovCircularMarkerDisplayedChanged(const bool displayed);
+	void fovCircularMarkerSizeChanged(const double size);
+	void fovCircularMarkerColorChanged(const Vec3f & newColor);
+	void fovRectangularMarkerDisplayedChanged(const bool displayed);
+	void fovRectangularMarkerWidthChanged(const double size);
+	void fovRectangularMarkerHeightChanged(const double size);
+	void fovRectangularMarkerRotationAngleChanged(const double size);
+	void fovRectangularMarkerColorChanged(const Vec3f & newColor);
+	void compassMarksDisplayedChanged(const bool displayed);
+	void compassMarksColorChanged(const Vec3f & newColor);
 
 private:
 	SpecialSkyMarker * fovCenterMarker;

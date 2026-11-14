@@ -36,24 +36,27 @@ class TelescopeClientJsonRts2 : public TelescopeClient
 {
 	Q_OBJECT
 public:
-	TelescopeClientJsonRts2(const QString &name, const QString &params, Equinox eq = EquinoxJ2000);
-	~TelescopeClientJsonRts2(void);
-	virtual bool isConnected(void) const;
+	TelescopeClientJsonRts2(const QString &name, const QString &params,
+	                        TelescopeControl::Equinox eq = TelescopeControl::EquinoxJ2000, int slot = 0);
+	~TelescopeClientJsonRts2(void) override;
+	bool isConnected(void) const override;
 
-	Vec3d getJ2000EquatorialPos(const StelCore* core=Q_NULLPTR) const;
+	Vec3d getJ2000EquatorialPos(const StelCore* core=nullptr) const override;
 
-	void telescopeGoto(const Vec3d &j2000Pos, StelObjectP selectObject);
-	void telescopeSync(const Vec3d &j2000Pos, StelObjectP selectObject);
-	bool hasKnownPosition(void) const;
+	void telescopeGoto(const Vec3d &j2000Pos, StelObjectP selectObject) override;
+	// TODO: Fix the meaningless implementation
+	//void telescopeSync(const Vec3d &j2000Pos, StelObjectP selectObject) override;
+	//bool isTelescopeSyncSupported() const override {return true;}
+	bool hasKnownPosition(void) const override;
 
 protected:
-	void timerEvent(QTimerEvent *event);
-	virtual QString getTelescopeInfoString(const StelCore* core, const InfoStringGroup& flags) const;
+	void timerEvent(QTimerEvent *event) override;
+	QString getTelescopeInfoString(const StelCore* core, const InfoStringGroup& flags) const override;
 
 private:
 	QNetworkAccessManager networkManager;
 	QNetworkRequest cfgRequest;
-	Equinox equinox;
+	TelescopeControl::Equinox equinox;
 	QUrl baseurl;
 	QString telName;
 	bool telReadonly;

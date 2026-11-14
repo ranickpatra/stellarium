@@ -19,30 +19,34 @@
 #include "TelescopeClientINDI.hpp"
 
 #include <QDebug>
+#include <QRegularExpression>
 #include <cmath>
 #include <limits>
 
 #include "StelCore.hpp"
 #include "StelUtils.hpp"
-#include "indibase/inditelescope.h"
+#include "TelescopeControl.hpp"
+#include <libindi/inditelescope.h>
 #include "INDIControlWidget.hpp"
 
-TelescopeClientINDI::TelescopeClientINDI(const QString &name, const QString &params):
-	TelescopeClient(name)
+TelescopeClientINDI::TelescopeClientINDI(const QString &name, const QString &params, int slot)
+	: TelescopeClient(name, slot)
+	, mConnection(nullptr, slot)
 {
-	qDebug() << "TelescopeClientINDI::TelescopeClientINDI";
+	qCDebug(Telescopes) << getLogPrefix() << "TelescopeClientINDI::TelescopeClientINDI";
 
-	QRegExp paramRx("^([^:]*):(\\d+):([^:]*)$");
+	static const QRegularExpression paramRx("^([^:]*):(\\d+):([^:]*)$");
+	QRegularExpressionMatch paramMatch=paramRx.match(params);
 	QString host;
 	int port = 0;
-	if (paramRx.exactMatch(params))
+	if (paramMatch.hasMatch())
 	{
-		host = paramRx.cap(1).trimmed();
-		port = paramRx.cap(2).toInt();
-		mDevice = paramRx.cap(3).trimmed();
+		host = paramMatch.captured(1).trimmed();
+		port = paramMatch.captured(2).toInt();
+		mDevice = paramMatch.captured(3).trimmed();
 	}
 
-	mConnection.setServer(host.toStdString().c_str(), port);
+	mConnection.setServer(host.toStdString().c_str(), static_cast<unsigned int>(port));
 	mConnection.watchDevice(mDevice.toStdString().c_str());
 	mConnection.connectServer();
 }
@@ -52,7 +56,7 @@ TelescopeClientINDI::~TelescopeClientINDI()
 	mConnection.disconnectServer();
 }
 
-Vec3d TelescopeClientINDI::getJ2000EquatorialPos(const StelCore*) const
+Vec3d TelescopeClientINDI::getJ2000EquatorialPos(const StelCore* core) const
 {
 	INDIConnection::Coordinates positionJNow = mConnection.position();
 
@@ -61,9 +65,7 @@ Vec3d TelescopeClientINDI::getJ2000EquatorialPos(const StelCore*) const
 
 	Vec3d posJNow;
 	StelUtils::spheToRect(longitudeRad, latitudeRad, posJNow);
-	const StelCore* core = StelApp::getInstance().getCore();
-	Vec3d posJ2000 = core->equinoxEquToJ2000(posJNow, StelCore::RefractionOff);
-	return posJ2000;
+	return core->equinoxEquToJ2000(posJNow, StelCore::RefractionOff);
 }
 
 void TelescopeClientINDI::telescopeGoto(const Vec3d &positionJ2000, StelObjectP selectObject)
@@ -79,7 +81,6 @@ void TelescopeClientINDI::telescopeGoto(const Vec3d &positionJ2000, StelObjectP 
 
 	double longitudeRad = posJ2000[0] * 12.0 / M_PI;
 	double latitudeRad = posJ2000[1] * 180.0 / M_PI;
-
 
 	INDIConnection::Coordinates positionJNow = mConnection.position();
 	positionJNow.RA = longitudeRad;
@@ -104,7 +105,6 @@ void TelescopeClientINDI::telescopeSync(const Vec3d &positionJ2000, StelObjectP 
 
 	double longitudeRad = posJ2000[0] * 12.0 / M_PI;
 	double latitudeRad = posJ2000[1] * 180.0 / M_PI;
-
 
 	INDIConnection::Coordinates positionJNow = mConnection.position();
 	positionJNow.RA = longitudeRad;
@@ -146,13 +146,15 @@ void TelescopeClientINDI::move(double angle, double speed)
 {
 	if (angle < 0.0 || angle >= 360.0)
 	{
-		qWarning() << "TelescopeClientINDI::move angle " << angle << " out of range [0,360)";
+		qCWarning(Telescopes) << getLogPrefix() << "TelescopeClientINDI::move angle" << angle
+		                      << "out of range [0,360)";
 		return;
 	}
 
 	if (speed < 0.0 || speed > 1.0)
 	{
-		qWarning() << "TelescopeClientINDI::move speed " << speed << "out of range [0,1]";
+		qCWarning(Telescopes) << getLogPrefix() << "TelescopeClientINDI::move speed" << speed
+		                      << "out of range [0,1]";
 		return;
 	}
 

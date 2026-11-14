@@ -25,7 +25,6 @@
 
 #include <QObject>
 #include <QString>
-#include <QFont>
 
 class TuiNode;
 
@@ -34,17 +33,19 @@ class TuiNode;
 class TextUserInterface : public StelModule
 {
 	Q_OBJECT
+
+	Q_PROPERTY(bool tuiDateTime READ getTuiDateTime WRITE setTuiDateTime NOTIFY flagShowDateTimeChanged)
+	Q_PROPERTY(bool tuiObjInfo  READ getTuiObjInfo  WRITE setTuiObjInfo  NOTIFY flagShowObjInfoChanged)
 public:
 	TextUserInterface();
-	virtual ~TextUserInterface();
+	~TextUserInterface() override;
 	
 	///////////////////////////////////////////////////////////////////////////
 	// Methods defined in the StelModule class
-	virtual void init();
-	virtual void update(double) {;}
-	virtual void draw(StelCore* core);
-	virtual double getCallOrder(StelModuleActionName actionName) const;
-	virtual void handleKeys(class QKeyEvent* event);
+	void init() override;
+	void draw(StelCore* core) override;
+	double getCallOrder(StelModuleActionName actionName) const override;
+	void handleKeys(class QKeyEvent* event) override;
 
 	///////////////////////////////////////////////////////////////////////////
 	// Methods specific to TextUserInterface
@@ -55,32 +56,39 @@ public slots:
 	//! Show/hide the TUI menu
 	void setTuiMenuActive(bool tActive) { tuiActive = tActive;}
 	//! Show/hide the TUI date time display
-	void setTuiDateTime(bool tDateTime) { tuiDateTime = tDateTime; }
+	void setTuiDateTime(bool tDateTime) { tuiDateTime = tDateTime; emit flagShowDateTimeChanged(tDateTime);}
+	bool getTuiDateTime(){return tuiDateTime;}
 	//! Show/hide the selected object's short object information 
-	void setTuiObjInfo(bool tObjInfo) { tuiObjInfo = tObjInfo; }
+	void setTuiObjInfo(bool tObjInfo) { tuiObjInfo = tObjInfo; emit flagShowObjInfoChanged(tObjInfo);}
+	bool getTuiObjInfo(){return tuiObjInfo;}
 	//! Set Gravity text for the TUI text
 	void setTuiGravityUi(bool tGravityUi) { tuiGravityUi = tGravityUi; }
+	//! Set light pollution level
+	void setLightPollutionLevel(int level);
 
 private slots:
-	void setHomePlanet(QString planetName);
+	void setHomePlanet(const QString &planetName);
 	void setAltitude(int altitude);
 	void setLatitude(double latitude);
 	void setLongitude(double longitude);
-	void setStartupDateMode(QString mode);
-	void setDateFormat(QString format);
-	void setTimeFormat(QString format);
-	void setSkyCulture(QString i18);
-	void setAppLanguage(QString lang);
-	void setSkyLanguage(QString lang);
+	void setStartupDateMode(const QString &mode);
+	void setDateFormat(const QString &format);
+	void setTimeFormat(const QString &format);
+	void setSkyCulture(const QString &i18);
+	void setAppLanguage(const QString &lang);
 	void saveDefaultSettings(void);
 	void shutDown(void);
 
+signals:
+	void flagShowDateTimeChanged(bool);
+	void flagShowObjInfoChanged(bool);
+
 private:
 	DummyDialog dummyDialog;
-	QFont font;
+	int fontSize;
 	bool tuiActive;
-	bool tuiDateTime;
-	bool tuiObjInfo;
+	bool tuiDateTime; // property
+	bool tuiObjInfo;  // property
 	bool tuiGravityUi;
 	TuiNode* currentNode;
 	Vec3f color;
@@ -101,9 +109,9 @@ class TextUserInterfaceStelPluginInterface : public QObject, public StelPluginIn
 	Q_PLUGIN_METADATA(IID StelPluginInterface_iid)
 	Q_INTERFACES(StelPluginInterface)
 public:
-	virtual StelModule* getStelModule() const;
-	virtual StelPluginInfo getPluginInfo() const;
-	virtual QObjectList getExtensionList() const { return QObjectList(); }
+	StelModule* getStelModule() const override;
+	StelPluginInfo getPluginInfo() const override;
+	//QObjectList getExtensionList() const override { return QObjectList(); }
 };
 
 #endif /* TEXTUSERINTERFACE_HPP*/

@@ -42,7 +42,7 @@ void SPolygon::intersect(const Plane &p, QVector<Vec3f> &intersectionPoints)
 
 	for(int i=0; i<vertices.size(); i++)
 	{
-		unsigned int next = (i+1) % vertices.size();
+		int next = (i+1) % vertices.size();
 
 		bool curOut = !p.isBehind(vertices[i]);
 		bool nextOut = !p.isBehind(vertices[next]);
@@ -118,7 +118,7 @@ void SPolygon::addUniqueVert(const Vec3f &v)
 
 void SPolygon::render()
 {
-#if !defined(QT_OPENGL_ES_2)
+#if !QT_CONFIG(opengles2)
 	//render each polygon
 	glExtFuncs->glColor3f(0.4f,0.4f,0.4f);
 

@@ -19,7 +19,7 @@
 #include "StelTranslator.hpp"
 #include "PersianArithmeticCalendar.hpp"
 #include "JulianCalendar.hpp"
-#include "RomanCalendar.hpp"
+#include "GregorianCalendar.hpp"
 #include "StelUtils.hpp"
 #include "StelApp.hpp"
 #include "StelCore.hpp"
@@ -100,9 +100,9 @@ QString PersianArithmeticCalendar::getFormattedDateString() const
 // set date from a vector of calendar date elements sorted from the largest to the smallest.
 // Year-Month[1...13]-Day[1...30]
 // Time is not changed!
-void PersianArithmeticCalendar::setDate(QVector<int> parts)
+void PersianArithmeticCalendar::setDate(const QVector<int> &parts)
 {
-	//qDebug() << "FrenchArithmeticCalendar::setDate:" << parts;
+	//qDebug() << "PersianArithmeticCalendar::setDate:" << parts;
 	this->parts=parts;
 
 	double rd=fixedFromPersianArithmetic(parts);
@@ -122,11 +122,11 @@ bool PersianArithmeticCalendar::isLeap(int pYear)
 	return StelUtils::imod((year+38)*31, 128) < 31;
 }
 
-int PersianArithmeticCalendar::fixedFromPersianArithmetic(QVector<int> persian)
+int PersianArithmeticCalendar::fixedFromPersianArithmetic(const QVector<int> &persian)
 {
-	const int pYear=persian.at(0);
-	const int month=persian.at(1);
-	const int day=persian.at(2);
+	const int pYear=persian.value(0);
+	const int month=persian.value(1);
+	const int day  =persian.value(2);
 
 	int y = pYear - (0<pYear ? 474 : 473);
 	int year = StelUtils::imod(y, 2820) + 474;
@@ -157,4 +157,12 @@ QVector<int> PersianArithmeticCalendar::persianArithmeticFromFixed(int rd)
 	int day=rd - fixedFromPersianArithmetic({year, month, 1}) + 1;
 
 	return {year, month, day};
+}
+
+// find RD number of Persian New Year (Nowruz)
+int PersianArithmeticCalendar::nowruz(const int gYear)
+{
+	const int pYear=gYear-GregorianCalendar::gregorianYearFromFixed(persianEpoch)+1;
+	const int y = pYear<=0 ? pYear-1 : pYear;
+	return fixedFromPersianArithmetic({y, 1, 1});
 }
